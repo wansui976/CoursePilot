@@ -251,6 +251,7 @@ export function RemoteSyncSection() {
           label={t("settings.remoteSync.enable")}
           htmlFor="remote-sync-enabled"
           status={!configured ? t("settings.remoteSync.needConfig") : undefined}
+          layout="inline"
         >
           <Switch
             id="remote-sync-enabled"
@@ -265,6 +266,7 @@ export function RemoteSyncSection() {
         {status.enabled && (
           <Row
             label={t("settings.remoteSync.lastSync")}
+            layout="inline"
             status={
               run.running || busy === "sync"
                 ? t("settings.remoteSync.syncing")
@@ -294,6 +296,7 @@ export function RemoteSyncSection() {
             label={t("settings.remoteSync.uploadMedia")}
             hint={t("settings.remoteSync.uploadMediaHint")}
             htmlFor="remote-sync-upload-media"
+            layout="inline"
             status={
               status.uploadMedia ? (
                 status.media.uploading ? (

@@ -18,7 +18,7 @@ export function VideoAiUsage({ videoId }: { videoId: string }) {
   const tokens = formatTokens(data.promptTokens + data.completionTokens, i18n.language);
   const priced = data.unpricedCalls < data.calls;
   return (
-    <p className="shrink-0 border-t border-[var(--border-faint)] px-3 py-1.5 text-[11px] tabular-nums text-[var(--text-faint)]">
+    <p className="ca-video-ai-usage shrink-0 border-t border-[var(--border-faint)] px-3 pt-1.5 text-[11px] tabular-nums text-[var(--text-faint)]">
       {priced
         ? t("aiUsage.videoLine", { cost: formatUsd(data.costUsd), tokens })
         : t("aiUsage.videoLineUnpriced", { tokens })}

@@ -978,14 +978,14 @@ export function ConceptsPanel({
                   {dueCountsPending ? (
                     <p className="mt-1 text-sm text-[var(--text-faint)]">{t("concepts.loadingReviewPlan")}</p>
                   ) : nextReview ? (
-                    <p className="mt-1 truncate text-sm text-[var(--text-strong)]">
+                    <p className="mt-1 text-sm text-[var(--text-strong)] sm:truncate">
                       {t("concepts.reviewFirst", { name: nextReview.concept.name })}
                       <span className="ml-2 text-xs text-[var(--text-muted)]">
                         {t("concepts.courseDueCards", { count: totalDue })}
                       </span>
                     </p>
                   ) : nextLearnConcept && nextOccurrence ? (
-                    <p className="mt-1 truncate text-sm text-[var(--text-strong)]">
+                    <p className="mt-1 text-sm text-[var(--text-strong)] sm:truncate">
                       {t("concepts.reviewConcept", { name: nextLearnConcept.name })}
                       <span className="ml-2 text-xs text-[var(--text-muted)]">
                         {dueCountsError ? t("concepts.reviewUnavailable") : t("concepts.noDueCards")}

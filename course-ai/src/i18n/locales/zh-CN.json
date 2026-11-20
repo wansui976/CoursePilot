@@ -1805,6 +1805,8 @@
       "ollama": "Ollama（本地）",
       "azure_openai": "Azure OpenAI"
     },
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
     "fetchModels": "获取模型",
     "fetchingModels": "获取中…",
     "refreshModels": "刷新模型",

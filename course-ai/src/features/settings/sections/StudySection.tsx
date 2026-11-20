@@ -76,7 +76,7 @@ export function StudySection() {
   return (
     <>
       <Group header={t("settings.studyReminder.title")} hint={t("settings.studyReminder.footnote")}>
-        <Row label={t("settings.studyReminder.label")} hint={t("settings.studyReminder.hint")} htmlFor="study-reminder">
+        <Row label={t("settings.studyReminder.label")} hint={t("settings.studyReminder.hint")} htmlFor="study-reminder" layout="inline">
           <Switch
             id="study-reminder"
             aria-label={t("settings.studyReminder.label")}
@@ -90,6 +90,7 @@ export function StudySection() {
           label={t("settings.search.transcripts")}
           hint={t("settings.search.transcriptsHint")}
           htmlFor="search-transcripts"
+          layout="inline"
         >
           <Switch
             id="search-transcripts"

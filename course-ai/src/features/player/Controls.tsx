@@ -9,7 +9,7 @@ import type { Insets } from "@/lib/blackBars";
 import type { Chapter } from "@/lib/types";
 import { formatInsetsText } from "./useVideoCrop";
 import { usePlayer } from "@/stores/player";
-import { useContainerWidth } from "@/lib/useContainerWidth";
+import { useContainerPixelWidth, useContainerWidth } from "@/lib/useContainerWidth";
 import {
   CAPTION_BACKGROUNDS,
   CAPTION_SIZES,
@@ -347,6 +347,10 @@ export function Controls({
   // 只有真正窄（compact <600px，手机分栏/极窄）才把倍速、弹幕也收进设置菜单；
   // medium（600–899）在工作台分栏下完全放得下整排按钮，应继续平铺。
   const compactControls = useContainerWidth(controlsRootRef) === "compact";
+  // 横屏手机分栏后控制栏只剩 ~310px：整段「11:04 / 26:23」放不下，末尾会截成「11:04 / …」。
+  // 这种情况下只留当前时间（YouTube / B 站手机端同样处理），别把总时长切一半。
+  const controlsPx = useContainerPixelWidth(controlsRootRef);
+  const showTotalTime = controlsPx >= 360;
   // 首次开启要扫一遍音轨，几秒内还跳不了；直说，别让人以为已经在跳了。
   const skipSilenceStatus = skipSilence
     ? skipSilenceLoading
@@ -687,7 +691,7 @@ export function Controls({
 
       <span className="ca-player-controls-time ml-1.5 whitespace-nowrap text-[13px] font-medium tabular-nums text-white/90">
         {formatMs(currentMs)}
-        <span className="text-white/55"> / {formatMs(durationMs)}</span>
+        {showTotalTime && <span className="text-white/55"> / {formatMs(durationMs)}</span>}
       </span>
       {currentChapter && !compactControls && (
         <span

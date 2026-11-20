@@ -122,6 +122,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
           label={t("settings.asr.importCorrection")}
           htmlFor="subtitle-autocorrect"
           hint={t("settings.asr.importCorrectionHint")}
+          layout="inline"
         >
           <Switch
             id="subtitle-autocorrect"
@@ -162,6 +163,7 @@ export function AsrSection({ form }: { form: SettingsForm }) {
               label={t("settings.asr.gpu")}
               htmlFor="asr-gpu"
               hint={t("settings.asr.gpuHint")}
+              layout="inline"
             >
               <Switch
                 id="asr-gpu"

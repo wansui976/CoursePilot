@@ -73,11 +73,13 @@
   padding: 12px 16px;
 }
 
-/* 窄屏：大标题降回 20px，与课程库顶栏在窄屏的处理一致。 */
+/* 窄屏一级入口也保留 28px 大标题：这三个页面和手机课程库首页（同为底部 Tab 的根）
+   并排切换，标题忽然缩到 20px 会像进了下一级。次级视图（带返回箭头的内容页）仍是 20px，
+   两者靠字号就能分出层级。 */
 .ca-app[data-bucket="compact"] .ca-view-header[data-level="root"] .ca-view-title,
 .ca-app[data-bucket="medium"] .ca-view-header[data-level="root"] .ca-view-title {
-  font-size: var(--fs-xl);
-  line-height: var(--lh-xl);
+  font-size: var(--fs-2xl);
+  line-height: 1.15;
 }
 
 /* 内容限宽居中的一级页（学习面板、处理队列，内容区 max-w-3xl = 768px）：标题和右侧操作

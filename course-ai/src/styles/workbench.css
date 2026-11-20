@@ -500,6 +500,17 @@ li[data-active] > .ca-chapter .ca-chapter-time {
   background: #0b0d12;
 }
 
+/* 「视频文件不在本机」的说明（标题 + 下载按钮 + 局域网重试）比手机 16:9 舞台高：
+   仍按 16:9 算高度时，底部那条「在局域网里再找一次」会被舞台边界切成两半。
+   只给手机（compact）这层最小高度，平板 / 桌面的 16:9 本来放得下；内容本身仍可滚动兜底。
+   宽也显式铺满：只加 min-height 时 aspect-ratio 会反过来由最小高度推宽度
+   （16:9 × 320 = 569px），整块横着顶出屏幕。 */
+.ca-app[data-bucket="compact"] .ca-stage:has(> .ca-remote-stage) {
+  width: 100%;
+  aspect-ratio: auto;
+  min-height: 320px;
+}
+
 .ca-audio-stage {
   position: absolute;
   inset: 0;
@@ -651,6 +662,16 @@ li[data-active] > .ca-chapter .ca-chapter-time {
 
 .ca-app[data-shell="stacked"] .ca-panel-scroll-end {
   padding-bottom: calc(1rem + var(--safe-bottom));
+}
+
+/* 概览页最底下「AI 处理：约 …」那行小字：叠放外壳里面板铺到屏幕底边，
+   文字要让开底部指示条 / 手势条；左右分栏的外壳自己已经让过了。 */
+.ca-video-ai-usage {
+  padding-bottom: 0.375rem;
+}
+
+.ca-app[data-shell="stacked"] .ca-video-ai-usage {
+  padding-bottom: calc(0.375rem + var(--safe-bottom));
 }
 
 /* 正文上面压着右下角悬浮操作条的面板（笔记）：底部留出操作条的高度，滚到底时最后一行

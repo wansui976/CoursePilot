@@ -196,6 +196,9 @@ function auditLayout() {
   };
   for (const el of document.querySelectorAll("[class]")) {
     if (typeof el.className !== "string") continue;
+    // 标签页、对话框里暂时收起的面板本来就会 display:none（hidden 属性 / Radix 的
+    // data-state="inactive"），不算「显示类被压掉」。
+    if (el.closest("[hidden], [inert], [data-state='inactive']")) continue;
     const classes = el.className.split(/\s+/);
     if (classes.some((c) => /:(flex|inline-flex|grid|inline-grid|block|inline-block|inline|hidden|contents|table)$/.test(c))) continue;
     const wanted = classes.filter((c) => c in DISPLAY);
@@ -331,6 +334,9 @@ function auditLayout() {
       if (rect.width <= 1 || rect.height <= 1) return null;
       if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) return null;
       if (el.closest("[data-allow-accent], [disabled], [aria-hidden='true']")) return null;
+      // 开关的「开」态和角标本来就用强调色：它们是状态/计数，不是一屏里的主操作按钮，
+      // 计进来只会让每个带开关的设置页都误报。
+      if (el.closest(".ca-switch, .ca-bottom-tab-badge")) return null;
       let opacity = 1;
       for (let node = el; node && opacity >= 0.9; node = node.parentElement) {
         opacity *= Number(getComputedStyle(node).opacity);

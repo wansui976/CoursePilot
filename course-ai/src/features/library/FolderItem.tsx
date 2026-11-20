@@ -92,7 +92,7 @@ export function FolderItem({
   ) : layout === "grid" ? (
     <button
       type="button"
-      className="block w-full text-left"
+      className="w-full text-left"
       aria-label={selecting ? t("library.selectItem", { name: folder.name }) : t("folders.open", { name: folder.name })}
       aria-pressed={selecting ? selected : undefined}
       onClick={actions.onOpen}

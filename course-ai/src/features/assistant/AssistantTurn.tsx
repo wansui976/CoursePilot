@@ -176,8 +176,8 @@ export function AssistantEmptyState({
     // 上半截原本整片空白：放一句「现在对着什么问」，打开就知道问的是哪个视频的哪一刻。
     // 下面贴着输入框是能问什么的说明和几个示例问题；示例做成胶囊按钮，一眼看得出能点。
     // 仍然不是「大标题 + 带边框的建议列表 + 每行一个 ↗」那套 AI 产品空状态标准件。
-    <div className="flex min-h-full flex-col gap-4 px-1 pb-1">
-      <div className="flex flex-1 flex-col items-center justify-center gap-1.5 py-6 text-center">
+    <div className="ca-assistant-empty flex min-h-full flex-col gap-4 px-1 pb-1">
+      <div className="ca-assistant-empty-hero flex flex-1 flex-col items-center justify-center gap-1.5 py-6 text-center">
         <ScopeIcon className="mb-1 h-6 w-6 text-[var(--text-faint)]" aria-hidden="true" />
         <p className="ca-t-2xs font-medium uppercase tracking-wide text-[var(--text-faint)]">{scope.eyebrow}</p>
         <p className="max-w-[18rem] text-sm font-medium leading-snug text-[var(--text-strong)] [overflow-wrap:anywhere]">

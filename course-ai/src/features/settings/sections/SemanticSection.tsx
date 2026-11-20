@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Download, Loader2, RefreshCw, Trash2, Zap } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
+import { TextSkeleton } from "@/ui/skeleton";
 import {
   ipc,
   type SemanticBackend,
@@ -218,7 +219,16 @@ export function SemanticSection() {
   }
 
   if (!status) {
-    return loadError ? <ErrorNote error={loadError} onRetry={() => void refresh()} /> : null;
+    // 状态可能要查本机模型目录，慢的时候别让整页空着（只剩外面的分类标题）。
+    return loadError ? (
+      <ErrorNote error={loadError} onRetry={() => void refresh()} />
+    ) : (
+      <Group header={t("settings.semantic.sourceGroup")}>
+        <StackRow>
+          <TextSkeleton lines={2} className="p-0" label={t("common.loading")} />
+        </StackRow>
+      </Group>
+    );
   }
 
   const backend = status.backend;
@@ -275,6 +285,7 @@ export function SemanticSection() {
             {selectedModel && (
               <Row
                 label={t("settings.semantic.modelFile")}
+                layout="inline"
                 status={selectedModel.description}
                 tag={
                   selectedModel.installed
@@ -408,6 +419,8 @@ export function SemanticSection() {
         <Group header={t("settings.semantic.indexGroup")} hint={t("settings.semantic.indexHint")}>
           <Row
             label={t("settings.semantic.indexed")}
+            // 进度文案（“正在建：某视频（还剩 N 个）”）比控件宽得多，窄屏留在标签下方占满整行，
+            // 挤到右边会把状态压成三行小字。
             status={
               !status.active
                 ? t("settings.semantic.inactive")

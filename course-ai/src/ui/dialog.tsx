@@ -142,6 +142,10 @@ export function Modal({
                 ? {
                     // 底部留出 Home 指示条；键盘弹起时整块抬到键盘上沿。
                     paddingBottom: "calc(var(--safe-bottom) + 1rem)",
+                    // 横屏时刘海 / 灵动岛 / 挖孔在左右两侧：弹层照旧铺满整宽，内容让进安全区。
+                    // 竖屏这两边是 0，取 max 后仍是原来的 p-4。
+                    paddingLeft: "max(1rem, var(--safe-left))",
+                    paddingRight: "max(1rem, var(--safe-right))",
                     marginBottom: keyboard || undefined,
                     maxHeight: `calc(100dvh - var(--safe-top) - 1rem - ${keyboard}px)`,
                   }

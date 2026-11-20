@@ -794,9 +794,14 @@ export function Dashboard({
                       }}
                     >
                       <span
-                        // 最后一段常只有一两列宽：居中标签会伸出容器被裁掉，改为贴右。
+                        // 首尾两段常只有一两列宽：居中标签会伸出容器被裁掉（热力图滚到最右后
+                        // 第一段只剩半截「12月」），改为首段贴左、末段贴右，与边界对齐。
                         className={`absolute top-0 whitespace-nowrap ca-t-2xs leading-4 text-[var(--text-faint)] ${
-                          index === heatMonths.length - 1 ? "right-0" : "left-1/2 -translate-x-1/2"
+                          index === 0
+                            ? "left-0"
+                            : index === heatMonths.length - 1
+                              ? "right-0"
+                              : "left-1/2 -translate-x-1/2"
                         }`}
                       >
                         {segment.label}

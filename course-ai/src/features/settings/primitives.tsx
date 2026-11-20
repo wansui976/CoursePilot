@@ -1,5 +1,5 @@
 /** 设置页通用的行、分组与字段组件（仿系统设置的分组卡片风格）。 */
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Check, Info, X } from "lucide-react";
@@ -53,11 +53,31 @@ export function Group({
 export function HintButton({ label, hint }: { label: string; hint: ReactNode }) {
   const { t } = useTranslation();
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  // 按钮靠近屏幕底部时（手机上「识别模型」这类长说明），往下展开会伸出屏幕。
+  // 先按默认位置渲染，再在绘制前量高度，放不下就翻到按钮上方；两边都放不下就贴顶并限高滚动。
+  const [placement, setPlacement] = useState<{ top: number; maxHeight?: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const id = useId();
   const open = anchor !== null;
-  const close = useCallback(() => setAnchor(null), []);
+  const close = useCallback(() => {
+    setAnchor(null);
+    setPlacement(null);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!anchor || !popRef.current) return;
+    const height = popRef.current.offsetHeight;
+    const viewport = window.innerHeight;
+    const below = anchor.bottom + 6;
+    if (below + height <= viewport - 8) {
+      setPlacement({ top: below });
+      return;
+    }
+    const above = anchor.top - height - 6;
+    if (above >= 8) setPlacement({ top: above });
+    else setPlacement({ top: 8, maxHeight: viewport - 16 });
+  }, [anchor]);
 
   useEffect(() => {
     if (!open) return;
@@ -101,9 +121,14 @@ export function HintButton({ label, hint }: { label: string; hint: ReactNode }) 
         aria-label={t("settings.hintFor", { label })}
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        onClick={(event) =>
-          setAnchor(open ? null : event.currentTarget.getBoundingClientRect())
-        }
+        onClick={(event) => {
+          if (open) {
+            close();
+          } else {
+            setPlacement(null);
+            setAnchor(event.currentTarget.getBoundingClientRect());
+          }
+        }}
       >
         <Info aria-hidden="true" className="h-3.5 w-3.5" />
       </button>
@@ -115,7 +140,12 @@ export function HintButton({ label, hint }: { label: string; hint: ReactNode }) 
             role="note"
             aria-label={t("settings.hintFor", { label })}
             className="ca-hint-pop"
-            style={{ top: anchor.bottom + 6, left, width }}
+            style={{
+              top: placement?.top ?? anchor.bottom + 6,
+              left,
+              width,
+              maxHeight: placement?.maxHeight,
+            }}
           >
             {hint}
           </div>,
@@ -168,13 +198,20 @@ function RowLabel({
   );
 }
 
-/** 一行设置：标签在左、控件在右（紧凑）。hint 收在标签旁的 ⓘ 里，点开看；status 常显在标签下。 */
+/**
+ * 一行设置：标签在左、控件在右（紧凑）。hint 收在标签旁的 ⓘ 里，点开看；status 常显在标签下。
+ *
+ * 窄屏默认把控件换到下一行、占满整行——下拉框和输入框需要这个宽度。开关、按钮、
+ * 一小段数值这类窄控件不该跟着换行（否则标签一行、控件孤零零一行，整页高度翻倍，
+ * 也不像系统设置的列表），用 layout="inline" 保持左右排列。
+ */
 export function Row({
   label,
   hint,
   status,
   tag,
   htmlFor,
+  layout = "stack",
   children,
 }: {
   label: string;
@@ -182,14 +219,22 @@ export function Row({
   status?: ReactNode;
   tag?: RowTag;
   htmlFor?: string;
+  layout?: "stack" | "inline";
   children: ReactNode;
 }) {
+  const inline = layout === "inline";
   return (
-    <div className="flex min-h-[44px] flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    <div
+      className={
+        inline
+          ? "flex min-h-[44px] items-center justify-between gap-4 px-4 py-3"
+          : "flex min-h-[44px] flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+      }
+    >
       <div className="min-w-0">
         <RowLabel label={label} hint={hint} status={status} tag={tag} htmlFor={htmlFor} />
       </div>
-      <div className="w-full sm:w-auto sm:flex-none">{children}</div>
+      <div className={inline ? "flex-none" : "w-full sm:w-auto sm:flex-none"}>{children}</div>
     </div>
   );
 }

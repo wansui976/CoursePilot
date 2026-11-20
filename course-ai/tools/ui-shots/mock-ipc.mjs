@@ -498,6 +498,22 @@ export function installMockIpc({ theme, safeArea }) {
       uploadMedia: true,
       media: { uploading: { videoId: "v5", title: "05 过拟合、正则化与偏差方差.mp4", sent: 180 * 1024 * 1024, total: 420 * 1024 * 1024 }, lastError: null },
     }),
+    cmd_semantic_status: () => ({
+      backend: "local",
+      localSupported: true,
+      localModel: "bge-m3",
+      cloudProfile: null,
+      cloudModel: null,
+      models: [
+        { id: "bge-small-zh", name: "BGE Small 中文", description: "轻量、速度快，适合旧电脑", size: 24 * 1024 * 1024, installed: true, sizeOnDisk: 23 * 1024 * 1024 },
+        { id: "bge-m3", name: "BGE-M3（多语言）", description: "中英混排和长句的效果更好", size: 570 * 1024 * 1024, installed: true, sizeOnDisk: 562 * 1024 * 1024 },
+        { id: "qwen3-embedding-0.6b", name: "Qwen3 Embedding 0.6B", description: "中文语义更准，占用也更大", size: 1200 * 1024 * 1024, installed: false, sizeOnDisk: 0 },
+      ],
+      active: true,
+      indexed: 63,
+      total: 78,
+      progress: { running: true, pending: 15, done: 4, currentTitle: "04 逻辑回归与分类.mp4", lastError: null },
+    }),
     cmd_lan_share_status: () => ({ supported: true, enabled: true, running: true, port: 47321, addresses: ["192.168.1.5"], error: null }),
     cmd_lan_stream_url: () => null,
     cmd_remote_sync_media_size: () => 734 * 1024 * 1024,
@@ -717,6 +733,7 @@ export function installMockIpc({ theme, safeArea }) {
         return args.handler;
       }
       if (cmd === "plugin:dialog|open") return localStorage.getItem("__shot-folder");
+      if (cmd === "plugin:app|version") return "0.4.1";
       if (cmd.startsWith("plugin:")) return null;
       const handler = handlers[cmd];
       if (handler) return handler(args ?? {});

@@ -56,7 +56,12 @@ export function ShortcutsSection() {
       header={t("settings.shortcuts.title")}
     >
       {SHORTCUT_ACTIONS.map(({ action, i18nKey, i18nHint }) => (
-        <Row key={action} label={t(i18nKey)} hint={i18nHint ? t(i18nHint) : undefined}>
+        <Row
+          key={action}
+          label={t(i18nKey)}
+          hint={i18nHint ? t(i18nHint) : undefined}
+          layout="inline"
+        >
           <button
             type="button"
             onClick={() => setCapturing(action)}

@@ -129,23 +129,24 @@ function MobileStorage() {
       header={t("settings.storage.mobileTitle")}
       footnote={t("settings.storage.mobileHint")}
     >
-      <Row label={t("settings.storage.total")}>
+      <Row label={t("settings.storage.total")} layout="inline">
         <span className="tabular-nums ca-t-sm text-[var(--text-normal)]">
           {size(usage?.total_bytes)}
         </span>
       </Row>
-      <Row label={t("settings.storage.videoFiles")}>
+      <Row label={t("settings.storage.videoFiles")} layout="inline">
         <span className="tabular-nums ca-t-sm text-[var(--text-normal)]">
           {size(usage?.video_bytes)}
         </span>
       </Row>
-      <Row label={t("settings.storage.derivedFiles")}>
+      <Row label={t("settings.storage.derivedFiles")} layout="inline">
         <span className="tabular-nums ca-t-sm text-[var(--text-normal)]">
           {size(usage?.derived_bytes)}
         </span>
       </Row>
       <Row
         label={t("settings.storage.trash")}
+        layout="inline"
         status={
           usage
             ? t("settings.storage.trashCount", { count: usage.trashed_count })
@@ -170,7 +171,7 @@ function MobileStorage() {
           </Button>
         </div>
       </Row>
-      <Row label={t("settings.storage.other")}>
+      <Row label={t("settings.storage.other")} layout="inline">
         <span className="tabular-nums ca-t-sm text-[var(--text-normal)]">
           {size(usage?.other_bytes)}
         </span>
@@ -178,6 +179,7 @@ function MobileStorage() {
       <Row
         label={t("settings.storage.orphanTitle")}
         hint={t("settings.storage.orphanHint")}
+        layout="inline"
       >
         <Button
           size="sm"

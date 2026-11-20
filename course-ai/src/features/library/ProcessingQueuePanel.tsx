@@ -123,7 +123,9 @@ export function ProcessingQueuePanel({
                 {t("home.retryAll")}
               </Button>
             )}
-            <span className="text-xs tabular-nums text-[var(--text-muted)]">
+            {/* 手机宽度下标题、全部取消已经占满一行；任务数在底部 Tab 徽标和列表里都能看到，
+                这里只留给读屏，不再把按钮挤窄。 */}
+            <span className="max-sm:sr-only text-xs tabular-nums text-[var(--text-muted)]">
               {t("home.queueCount", { count: totalCount })}
             </span>
           </>
@@ -242,9 +244,11 @@ export function ProcessingQueuePanel({
                         )}
                       </div>
                       {canCancel && (
+                        // 触屏上 ca-touch-44 把按钮撑到 44px 高，若仍距顶 12px，文字会掉到标题下面一行；
+                        // 窄屏和触屏贴顶放，44px 的中心正好落在标题/百分比的基线上。
                         <button
                           onClick={() => onCancelDownload(job.id)}
-                          className="ca-touch-44 absolute right-3 top-3 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
+                          className="ca-touch-44 absolute right-3 top-3 flex items-center justify-center rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition max-md:top-0 pointer-coarse:top-0 hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
                         >
                           {t("downloads.cancel")}
                         </button>
@@ -325,13 +329,13 @@ export function ProcessingQueuePanel({
                   {canCancel && (
                     <button
                       onClick={() => onCancelVideo(video.id)}
-                      className="ca-touch-44 absolute right-3 top-3 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
+                      className="ca-touch-44 absolute right-3 top-3 flex items-center justify-center rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition max-md:top-0 pointer-coarse:top-0 hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
                     >
                       {t("home.cancel")}
                     </button>
                   )}
                   {failed && (
-                    <div className="absolute right-3 top-3 flex items-center gap-1">
+                    <div className="absolute right-3 top-3 flex items-center gap-1 max-md:top-0 pointer-coarse:top-0">
                       <button
                         type="button"
                         onClick={() => onRetryProcessing(video)}

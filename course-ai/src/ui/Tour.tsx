@@ -86,14 +86,60 @@ function otherDialogOpen() {
 
 type Position = { left: number; top: number; placement: Placement; arrow: number };
 
+/**
+ * 气泡离「能用的屏幕」边缘的最小距离。横屏时刘海 / 灵动岛 / 挖孔占掉左右两侧，
+ * 竖屏顶部是状态栏：只按 MARGIN 收 12px 会把关闭、下一步按钮送进挖孔底下。
+ */
+let cachedInsets: { top: number; right: number; bottom: number; left: number } | null = null;
+
+function screenInsets() {
+  if (cachedInsets) return cachedInsets;
+  const zero = { top: 0, right: 0, bottom: 0, left: 0 };
+  if (typeof document === "undefined" || !document.body) return zero;
+  // --safe-* 是 max(env(...), var(...))，custom property 的 computed value 还是没算过的
+  // token 串（parseFloat 只会得到 NaN）。借一个带内边距的临时元素让浏览器算成像素。
+  const probe = document.createElement("div");
+  probe.style.cssText =
+    "position:fixed;left:-9999px;top:-9999px;width:0;height:0;visibility:hidden;pointer-events:none;" +
+    "padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left)";
+  document.body.appendChild(probe);
+  const style = getComputedStyle(probe);
+  cachedInsets = {
+    top: Number.parseFloat(style.paddingTop) || 0,
+    right: Number.parseFloat(style.paddingRight) || 0,
+    bottom: Number.parseFloat(style.paddingBottom) || 0,
+    left: Number.parseFloat(style.paddingLeft) || 0,
+  };
+  probe.remove();
+  return cachedInsets;
+}
+
+if (typeof window !== "undefined") {
+  // 转屏 / 横竖屏切换会改变刘海在哪一侧。
+  window.addEventListener("resize", () => {
+    cachedInsets = null;
+  });
+}
+
+function safeMargins() {
+  const insets = screenInsets();
+  return {
+    top: MARGIN + insets.top,
+    right: MARGIN + insets.right,
+    bottom: MARGIN + insets.bottom,
+    left: MARGIN + insets.left,
+  };
+}
+
 function place(anchor: DOMRect, size: { w: number; h: number }, preferred: Placement): Position {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const safe = safeMargins();
   const fits: Record<Placement, boolean> = {
-    bottom: vh - anchor.bottom >= size.h + GAP + MARGIN,
-    top: anchor.top >= size.h + GAP + MARGIN,
-    right: vw - anchor.right >= size.w + GAP + MARGIN,
-    left: anchor.left >= size.w + GAP + MARGIN,
+    bottom: vh - safe.bottom - anchor.bottom >= size.h + GAP,
+    top: anchor.top - safe.top >= size.h + GAP,
+    right: vw - safe.right - anchor.right >= size.w + GAP,
+    left: anchor.left - safe.left >= size.w + GAP,
   };
   const opposite: Record<Placement, Placement> = { top: "bottom", bottom: "top", left: "right", right: "left" };
   const order: Placement[] = [preferred, opposite[preferred], "bottom", "top", "right", "left"];
@@ -101,12 +147,17 @@ function place(anchor: DOMRect, size: { w: number; h: number }, preferred: Place
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   if (placement === "top" || placement === "bottom") {
     const center = anchor.left + anchor.width / 2;
-    const left = clamp(center - size.w / 2, MARGIN, vw - size.w - MARGIN);
+    const left = clamp(center - size.w / 2, safe.left, vw - size.w - safe.right);
     const top = placement === "bottom" ? anchor.bottom + GAP : anchor.top - GAP - size.h;
-    return { left, top: clamp(top, MARGIN, vh - size.h - MARGIN), placement, arrow: clamp(center - left, 18, size.w - 18) };
+    return {
+      left,
+      top: clamp(top, safe.top, vh - size.h - safe.bottom),
+      placement,
+      arrow: clamp(center - left, 18, size.w - 18),
+    };
   }
   const middle = anchor.top + anchor.height / 2;
-  const top = clamp(middle - size.h / 2, MARGIN, vh - size.h - MARGIN);
+  const top = clamp(middle - size.h / 2, safe.top, vh - size.h - safe.bottom);
   const left = placement === "right" ? anchor.right + GAP : anchor.left - GAP - size.w;
   return { left, top, placement, arrow: clamp(middle - top, 18, size.h - 18) };
 }

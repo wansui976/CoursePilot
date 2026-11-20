@@ -60,6 +60,7 @@ export function LanShareGroup() {
       <Row
         label={t("settings.lanShare.toggle")}
         htmlFor="lan-share-enabled"
+        layout="inline"
         status={
           busy
             ? undefined

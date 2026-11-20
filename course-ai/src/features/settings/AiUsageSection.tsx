@@ -121,7 +121,7 @@ export function AiUsageSection() {
           <ErrorNote error={error} onRetry={() => void refetch()} />
         </div>
       )}
-      <Row label={t("aiUsage.month")}>
+      <Row label={t("aiUsage.month")} layout="inline">
         <div className="flex min-w-[10rem] flex-col items-end gap-1">
           <span className="text-sm font-semibold tabular-nums text-[var(--text-strong)]">
             {budgetValue
@@ -152,6 +152,7 @@ export function AiUsageSection() {
         <Row
           label={t("aiUsage.deepseekBalance")}
           hint={t("aiUsage.deepseekBalanceHint")}
+          layout="inline"
           status={
             balanceError ? (
               <span className="text-[var(--status-err)]">{balanceError}</span>
@@ -174,7 +175,7 @@ export function AiUsageSection() {
           )}
         </Row>
       )}
-      <Row label={t("aiUsage.budget")} hint={t("aiUsage.budgetHint")} htmlFor="ai-monthly-budget">
+      <Row label={t("aiUsage.budget")} hint={t("aiUsage.budgetHint")} htmlFor="ai-monthly-budget" layout="inline">
         <input
           id="ai-monthly-budget"
           type="number"

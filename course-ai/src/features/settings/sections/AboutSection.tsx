@@ -61,10 +61,10 @@ export function AboutSection() {
 
   return (
     <Group header={t("settings.about.title")}>
-      <Row label={t("settings.about.version")}>
+      <Row label={t("settings.about.version")} layout="inline">
         <span className="ca-t-sm tabular-nums text-[var(--text-muted)]">{running ?? "…"}</span>
       </Row>
-      <Row label={t("settings.about.update")} status={status}>
+      <Row label={t("settings.about.update")} status={status} layout="inline">
         <Button
           variant="outline"
           size="sm"
@@ -78,6 +78,7 @@ export function AboutSection() {
         label={t("settings.about.autoCheck")}
         hint={t("settings.about.autoCheckHint")}
         htmlFor="update-auto-check"
+        layout="inline"
       >
         <Switch
           id="update-auto-check"
@@ -93,6 +94,7 @@ export function AboutSection() {
         label={t("settings.about.tour")}
         hint={t("settings.about.tourHint")}
         status={toursReset ? t("settings.about.tourResetDone") : undefined}
+        layout="inline"
       >
         <Button
           variant="outline"

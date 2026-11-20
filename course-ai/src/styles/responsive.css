@@ -400,3 +400,18 @@
 [data-hide-timestamps] .tiptap-notes p:has(> .ca-ts-source-chip) {
   display: none;
 }
+
+/* 横屏手机（高 390–430）里助手抽屉的可视高度只剩一百多像素：空状态原先上下居中，
+   标题会被输入框拦腰截断、示例问题整段滚出视野。矮视口改成从顶部顺排，并收掉大图标，
+   让「正在看哪个视频」和下面几个示例问题都露得出来。 */
+@media (max-height: 520px) {
+  .ca-assistant-empty .ca-assistant-empty-hero {
+    flex: none;
+    padding-top: 0.25rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .ca-assistant-empty .ca-assistant-empty-hero > svg {
+    display: none;
+  }
+}

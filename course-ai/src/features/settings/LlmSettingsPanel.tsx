@@ -744,13 +744,22 @@ export function LlmSettingsPanel({
               </Select>
             </label>
 
-            <input
-              aria-label="Base URL"
-              className={FIELD}
-              value={p.base_url}
-              placeholder="Base URL"
-              onChange={(e) => update(p.id, { base_url: e.target.value })}
-            />
+            <div>
+              <label
+                htmlFor={`llm-base-url-${p.id}`}
+                className="mb-1 block text-xs text-[var(--text-muted)]"
+              >
+                {t("llmSettings.baseUrl")}
+              </label>
+              <input
+                id={`llm-base-url-${p.id}`}
+                aria-label={t("llmSettings.baseUrl")}
+                className={FIELD}
+                value={p.base_url}
+                placeholder="Base URL"
+                onChange={(e) => update(p.id, { base_url: e.target.value })}
+              />
+            </div>
             {p.kind === "azure_openai" && (
               <p className="text-xs leading-relaxed text-[var(--text-muted)]">
                 {t("llmSettings.baseUrlHintAzure")}
@@ -763,9 +772,16 @@ export function LlmSettingsPanel({
             )}
 
             <div>
+              <label
+                htmlFor={`llm-model-${p.id}`}
+                className="mb-1 block text-xs text-[var(--text-muted)]"
+              >
+                {t("llmSettings.modelName")}
+              </label>
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <input
+                    id={`llm-model-${p.id}`}
                     aria-label={t("llmSettings.modelName")}
                     className={FIELD}
                     value={p.model}
@@ -808,51 +824,60 @@ export function LlmSettingsPanel({
             {/* 「深度思考」只在能生效的地方出现：目前只有 DeepSeek 官方认关思考的参数，
                 别家端点不认它，发过去会整个请求报错，所以后端也只对 DeepSeek 官方发。 */}
             {p.kind === "openai" && isDeepSeekOfficial(p.base_url) && (
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs text-[var(--text-normal)]">{t("llmSettings.thinking")}</p>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--text-faint)]">
-                    {t("llmSettings.thinkingHint")}
-                  </p>
-                </div>
+              // 窄屏上说明文字别被开关挤成三行小字：开关占右上，说明横跨整行落在下面。
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1">
+                <p className="text-xs text-[var(--text-normal)]">{t("llmSettings.thinking")}</p>
                 <Switch
                   aria-label={t("llmSettings.thinking")}
                   checked={Boolean(p.thinking)}
                   onCheckedChange={(next) => update(p.id, { thinking: next ? true : null })}
+                  className="col-start-2 row-start-1 justify-self-end sm:justify-self-auto"
                 />
+                <p className="col-span-2 mt-0.5 text-[11px] leading-relaxed text-[var(--text-faint)] sm:col-span-1 sm:mt-0">
+                  {t("llmSettings.thinkingHint")}
+                </p>
               </div>
             )}
 
             {needsKey ? (
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <input
-                    aria-label="API Key"
-                    type={showKey[p.id] ? "text" : "password"}
-                    className={`${FIELD} pr-10`}
-                    value={keys[p.id] ?? ""}
-                    placeholder={hasKey[p.id] ? "••••••" : "API Key"}
-                    onChange={(e) => {
-                      clearSaveFeedback();
-                      setKeys((k) => ({ ...k, [p.id]: e.target.value }));
-                    }}
-                  />
-                  <button
-                    type="button"
-                    aria-label={showKey[p.id] ? t("llmSettings.hideKey") : t("llmSettings.showKey")}
-                    title={showKey[p.id] ? t("llmSettings.hideLabel") : t("llmSettings.showLabel")}
-                    onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
-                    className="ca-touch-44 ca-workbench-touch absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
-                  >
-                    {showKey[p.id] ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
+              <div>
+                <label
+                  htmlFor={`llm-key-${p.id}`}
+                  className="mb-1 block text-xs text-[var(--text-muted)]"
+                >
+                  {t("llmSettings.apiKey")}
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      id={`llm-key-${p.id}`}
+                      aria-label={t("llmSettings.apiKey")}
+                      type={showKey[p.id] ? "text" : "password"}
+                      className={`${FIELD} pr-10`}
+                      value={keys[p.id] ?? ""}
+                      placeholder={hasKey[p.id] ? "••••••" : "API Key"}
+                      onChange={(e) => {
+                        clearSaveFeedback();
+                        setKeys((k) => ({ ...k, [p.id]: e.target.value }));
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label={showKey[p.id] ? t("llmSettings.hideKey") : t("llmSettings.showKey")}
+                      title={showKey[p.id] ? t("llmSettings.hideLabel") : t("llmSettings.showLabel")}
+                      onClick={() => setShowKey((s) => ({ ...s, [p.id]: !s[p.id] }))}
+                      className="ca-touch-44 ca-workbench-touch absolute right-2 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded text-[var(--text-muted)] transition hover:text-[var(--text-strong)]"
+                    >
+                      {showKey[p.id] ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                  {hasKey[p.id] && !keys[p.id] && (
+                    <span className="inline-flex flex-none items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-1 text-xs font-medium text-[var(--status-ok)]">
+                      <Check className="h-3 w-3" />
+                      {t("llmSettings.configured")}
+                    </span>
+                  )}
                 </div>
-                {hasKey[p.id] && !keys[p.id] && (
-                  <span className="inline-flex flex-none items-center gap-1 rounded-full bg-[var(--status-ok-bg)] px-2 py-1 text-xs font-medium text-[var(--status-ok)]">
-                    <Check className="h-3 w-3" />
-                    {t("llmSettings.configured")}
-                  </span>
-                )}
               </div>
             ) : null}
 

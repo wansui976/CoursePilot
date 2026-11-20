@@ -143,6 +143,33 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+/* 同一行卡片等高：拖拽包裹层被网格拉满行高，卡片本身却还是内容高度——
+   标题一行的卡比标题两行的卡矮一截，两列的「信息行 + 底边」参差不齐。
+   让卡片吃满包裹层，标题最多两行、信息行沉底，同一行的基线也就对齐了。 */
+.ca-grid .ca-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-grid .ca-card > button {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ca-grid .ca-card .ca-thumb {
+  flex: none;
+}
+
+.ca-grid .ca-card .ca-card-body {
+  flex: 1 1 auto;
+}
+
+.ca-grid .ca-card .ca-card-meta:last-child {
+  margin-top: auto;
+}
+
 .ca-grid[data-density="compact"] {
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));

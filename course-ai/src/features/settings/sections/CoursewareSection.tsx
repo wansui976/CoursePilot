@@ -202,6 +202,7 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
         <Row
           label={t("settings.courseware.autoExtract")}
           htmlFor="slides-auto-extract"
+          layout="inline"
         >
           <Switch
             id="slides-auto-extract"
@@ -213,6 +214,7 @@ export function CoursewareSection({ form }: { form: SettingsForm }) {
         <Row
           label={t("settings.courseware.autoSensitivity")}
           htmlFor="slides-auto"
+          layout="inline"
         >
           <Switch
             id="slides-auto"

@@ -245,6 +245,16 @@ describe("Controls narrow-screen menu", () => {
     expect(time).toHaveTextContent("00:12 / 01:00");
   });
 
+  it("shows only the current time when the row is too narrow for the total", () => {
+    // 横屏手机分栏后控制栏约 310px：整段带总时长会被截成「00:12 / …」。
+    controlsWidth = 310;
+    const { container } = renderControls();
+    const time = container.querySelector<HTMLElement>(".ca-player-controls-time");
+
+    expect(time).toHaveTextContent("00:12");
+    expect(time).not.toHaveTextContent("/");
+  });
+
   it("restores the full row when the same controls container becomes wide", () => {
     const { container } = renderControls({ danmakuAvailable: true });
     resizeControls(1_000);

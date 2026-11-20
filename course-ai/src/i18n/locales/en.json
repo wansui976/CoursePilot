@@ -1808,6 +1808,8 @@
       "ollama": "Ollama (local)",
       "azure_openai": "Azure OpenAI"
     },
+    "baseUrl": "Base URL",
+    "apiKey": "API Key",
     "fetchModels": "Fetch models",
     "fetchingModels": "Fetching…",
     "refreshModels": "Refresh models",

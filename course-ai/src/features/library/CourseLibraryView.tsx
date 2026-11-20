@@ -1000,7 +1000,7 @@ export function CourseLibraryView({
         data-selected={selectedKeys.has(videoKey(video.id)) || undefined}
       >
         <button
-          className="block w-full text-left"
+          className="w-full text-left"
           aria-label={
             selecting
               ? t("library.selectItem", { name: displayTitle(video.title) })
