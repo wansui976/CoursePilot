@@ -1058,6 +1058,8 @@ mod tests {
     /// 真模型、真讲稿（手动跑）：本机 llama-server + BGE Small，给开发库副本里的几个视频建索引再按意思搜。
     /// `SEMANTIC_DB=/tmp/x.db SEMANTIC_MODELS=/dir/with/embed cargo test --lib real_local_embedding -- --ignored --nocapture`
     /// 模型放在 `$SEMANTIC_MODELS/embed/bge-small-zh-v1.5/bge-small-zh-v1.5-q8_0.gguf`。
+    // 用 Unix 的符号链接把 llama-server 摆到 PATH 上：Windows 上不编这个手动测试。
+    #[cfg(unix)]
     #[tokio::test]
     #[ignore = "需要真模型、llama-server 和一份开发库副本"]
     async fn real_local_embedding() {

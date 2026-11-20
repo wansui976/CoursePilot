@@ -298,7 +298,12 @@ fn forward(
                     continue;
                 }
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return,
+                // 发送端都没了（应用在退出）：别把原生层留在「忙」的状态，照常把空闲发出去再收工。
+                // 测试里也靠这一条：机器忙时线程排到这里时发送端可能已经放掉了。
+                Err(RecvTimeoutError::Disconnected) => {
+                    sink(&status);
+                    return;
+                }
             }
         }
         if status != last {
