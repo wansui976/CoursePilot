@@ -500,3 +500,537 @@ button.ca-time:hover {
   letter-spacing: -0.006em;
   font-optical-sizing: auto;
 }
+
+/* ===================== 黑板封面 ===================== */
+
+.ca-board-cover {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--board);
+  color: var(--chalk);
+  container-type: size;
+}
+
+.ca-board-cover > .art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--chalk-dim);
+}
+
+.ca-board-cover > .art text {
+  fill: currentColor;
+  font-family: var(--font-display);
+  font-style: italic;
+}
+
+.ca-board-cover > .art text.upright {
+  font-style: normal;
+}
+
+.ca-board-cover > .art text.mono {
+  font-family: var(--font-mono);
+  font-style: normal;
+}
+
+.ca-board-cover > .art .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ca-board-cover > .cap {
+  position: absolute;
+  left: 7cqw;
+  right: 7cqw;
+  top: 9cqh;
+  padding-bottom: 6cqh;
+  border-bottom: 1px solid rgb(238 242 236 / 0.14);
+  font-family: var(--font-display);
+  font-size: clamp(10px, 5.4cqw, 15px);
+  line-height: 1.3;
+  color: rgb(238 242 236 / 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ca-board-cover > .no {
+  position: absolute;
+  left: 6cqw;
+  bottom: 6cqh;
+  font-family: var(--font-display);
+  font-size: clamp(16px, 42cqh, 120px);
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  font-feature-settings: "lnum";
+}
+
+.ca-board-cover > .no small {
+  font-size: 0.28em;
+  margin-left: 0.15em;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+/* 小缩略图（列表行）里只留数字。 */
+@container (max-width: 150px) {
+  .ca-board-cover > .cap,
+  .ca-board-cover > .art {
+    display: none;
+  }
+}
+
+/* ===================== 课程牌堆 ===================== */
+
+.ca-deck {
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  gap: 40px;
+  align-items: center;
+}
+
+.ca-deck-stack {
+  position: relative;
+  height: 266px;
+  outline: none;
+  border-radius: var(--r-lg);
+}
+
+.ca-deck-stack:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 6px;
+}
+
+.ca-deck-card {
+  --i: 0;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 300px;
+  margin-top: -122px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface-card);
+  transform-origin: left bottom;
+  transform: translateX(calc(var(--i) * 52px)) scale(calc(1 - var(--i) * 0.05))
+    rotate(calc(var(--i) * 1.5deg));
+  z-index: calc(20 - var(--i));
+  cursor: pointer;
+  transition:
+    transform 0.42s var(--ease-out),
+    opacity 0.3s var(--ease),
+    box-shadow 0.3s var(--ease);
+  box-shadow:
+    inset 0 0 0 1px var(--border-subtle),
+    0 1px 2px rgb(16 24 20 / 0.06),
+    0 10px 24px -14px rgb(16 24 20 / 0.35);
+}
+
+.ca-deck-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--surface-app);
+  opacity: calc(var(--i) * 0.09);
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease);
+}
+
+.ca-deck-card[data-depth="0"] {
+  box-shadow:
+    inset 0 0 0 1px var(--border-strong),
+    0 2px 4px rgb(16 24 20 / 0.06),
+    0 22px 40px -18px rgb(16 24 20 / 0.45);
+}
+
+.ca-deck-card[data-depth="0"]::after {
+  opacity: 0;
+}
+
+.ca-deck-card[data-hidden] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ca-deck-card:not([data-depth="0"]):hover {
+  transform: translateX(calc(var(--i) * 52px + 10px)) translateY(-6px)
+    scale(calc(1 - var(--i) * 0.05)) rotate(calc(var(--i) * 1.5deg + 1deg));
+}
+
+.ca-deck-card.leaving {
+  animation: ca-deck-leave 0.42s var(--ease-out);
+}
+
+@keyframes ca-deck-leave {
+  40% {
+    transform: translateX(-56px) translateY(-10px) rotate(-6deg);
+  }
+}
+
+.ca-deck-card > .spine {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 5px;
+  z-index: 2;
+  opacity: 0.9;
+}
+
+.ca-deck-card[data-depth="0"] > .spine {
+  opacity: 0;
+}
+
+.ca-deck-cover {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+}
+
+.ca-deck-count {
+  position: absolute;
+  right: 8px;
+  bottom: 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #ffffff;
+  background: var(--surface-stage-overlay);
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+}
+
+.ca-deck-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.ca-deck-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--marker-strong);
+}
+
+.ca-deck-meta {
+  display: block;
+  padding: 12px 16px 14px;
+}
+
+.ca-deck-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ca-deck-info {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ca-deck-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+
+.ca-deck-next {
+  margin: 0;
+  font-family: var(--font-reading);
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--text-normal);
+}
+
+.ca-deck-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ca-deck-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-faint);
+  overflow: hidden;
+}
+
+.ca-deck-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--text-strong);
+  transition: width 0.42s var(--ease-out);
+}
+
+.ca-deck-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ca-deck-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* 窄屏：牌堆在上、详情在下。 */
+.ca-app[data-bucket="compact"] .ca-deck,
+.ca-app[data-bucket="medium"] .ca-deck {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+
+.ca-app[data-bucket="compact"] .ca-deck-card {
+  width: min(300px, 70vw);
+}
+
+/* 课程卡（不叠时的网格）里的黑板封面。 */
+.ca-course-cover > .ca-board-cover {
+  position: absolute;
+  inset: 0;
+}
+
+/* 总览页的小节标题用衬线。 */
+.ca-overview-heading {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* ===================== 课桌主页 ===================== */
+
+.ca-desk {
+  overflow-y: auto;
+  background-color: color-mix(in srgb, var(--surface-sidebar) 70%, var(--border-faint));
+}
+
+.ca-desk-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 32px 40px 8px;
+}
+
+.ca-desk-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 42px;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  color: var(--text-strong);
+}
+
+.ca-desk-surface {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 230px;
+  grid-template-areas:
+    "note notebook pile"
+    "deck deck pile";
+  gap: 36px 40px;
+  padding: 24px 40px 48px;
+  align-items: start;
+}
+
+.ca-desk-error {
+  grid-column: 1 / -1;
+}
+
+.ca-desk-label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.ca-desk-obj {
+  border-radius: var(--r-lg);
+  background: var(--surface-panel);
+  box-shadow:
+    0 0 0 1px rgb(16 24 20 / 0.05),
+    0 2px 4px rgb(16 24 20 / 0.05),
+    0 22px 40px -22px rgb(16 24 20 / 0.45);
+}
+
+/* 便利贴：一张胶带粘着的黄纸。 */
+.ca-sticky {
+  grid-area: note;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 18px 20px;
+  background: var(--marker-weak);
+  color: var(--marker-ink);
+  border-radius: 2px;
+  transform: rotate(-2.5deg);
+  box-shadow:
+    0 1px 2px rgb(16 24 20 / 0.08),
+    0 14px 22px -16px rgb(16 24 20 / 0.45);
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 27px;
+}
+
+.ca-sticky::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  width: 64px;
+  height: 18px;
+  margin-left: -32px;
+  background: rgb(238 242 236 / 0.55);
+  transform: rotate(-3deg);
+  box-shadow: 0 0 0 1px rgb(16 24 20 / 0.04);
+}
+
+.ca-sticky-title {
+  font-weight: 600;
+}
+
+/* 摊开的笔记本：左页黑板封面，右页这一讲。 */
+.ca-notebook {
+  grid-area: notebook;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 260px;
+  overflow: hidden;
+  transform: rotate(0.5deg);
+}
+
+.ca-notebook-cover {
+  min-height: 260px;
+}
+
+.ca-notebook-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px;
+  min-width: 0;
+  background: linear-gradient(90deg, rgb(16 24 20 / 0.07), transparent 22px), var(--surface-panel);
+}
+
+.ca-notebook-empty {
+  grid-column: 1 / -1;
+  justify-content: center;
+}
+
+.ca-notebook-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.ca-notebook-line {
+  margin: 0 0 auto;
+  font-family: var(--font-reading);
+  font-size: 15px;
+  line-height: 25px;
+  color: var(--text-normal);
+}
+
+/* 待复习的一摞卡。 */
+.ca-desk-pile {
+  grid-area: pile;
+  position: relative;
+  height: 160px;
+  margin-top: 8px;
+}
+
+.ca-pile-sheet,
+.ca-pile-top {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 210px;
+  height: 140px;
+}
+
+.ca-pile-top {
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  text-align: left;
+  transition: transform 0.18s var(--ease-out);
+}
+
+.ca-pile-top:hover {
+  transform: translateY(-3px);
+}
+
+.ca-pile-count {
+  font-family: var(--font-display);
+  font-size: 40px;
+  line-height: 44px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.ca-pile-count small {
+  font-size: 16px;
+  color: var(--text-faint);
+  margin-left: 4px;
+}
+
+.ca-pile-go {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ca-desk-deck {
+  grid-area: deck;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ca-app[data-bucket="compact"] .ca-desk-surface,
+.ca-app[data-bucket="medium"] .ca-desk-surface {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "note" "notebook" "pile" "deck";
+  padding-inline: 20px;
+}
+
+.ca-app[data-bucket="compact"] .ca-notebook {
+  grid-template-columns: minmax(0, 1fr);
+}

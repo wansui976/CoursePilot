@@ -62,6 +62,34 @@ const ALL = ["desktop", "phone", "tablet"];
 export const scenes = [
   { name: "home", devices: ALL, run: async ({ shot }) => shot() },
   {
+    // 课程多于 4 门：主页课程叠成牌堆；再翻一张看「甩回牌底」后的样子。
+    name: "home-deck",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-many-courses", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator(".ca-deck-stack").first().waitFor();
+      await shot();
+      await page.getByRole("button", { name: "下一门" }).first().click();
+      await page.waitForTimeout(600);
+      await shot("next");
+    },
+  },
+  {
+    // 主页样式选「课桌」。
+    name: "home-desk",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-many-courses", "1");
+        localStorage.setItem("course-ai-home-layout", "desk");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator(".ca-desk-surface").first().waitFor();
+      await shot();
+    },
+  },
+  {
     name: "course",
     devices: ALL,
     run: async ({ page, shot }) => {

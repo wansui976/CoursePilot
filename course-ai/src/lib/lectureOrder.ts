@@ -70,6 +70,16 @@ const SCHEMES: Scheme[] = [
   },
 ];
 
+/** 单个标题里的讲次（第 3 讲、Lecture 3、03 绪论……），认不出返回 null。封面上的大数字用它。 */
+export function lectureNumberOf(title: string): number | null {
+  const normalized = title.normalize("NFKC");
+  for (const scheme of SCHEMES) {
+    const n = scheme(normalized);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
 const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
 
 /**

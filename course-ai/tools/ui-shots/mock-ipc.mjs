@@ -38,6 +38,11 @@ export function installMockIpc({ theme, safeArea }) {
     { id: "c2", name: "线性代数的本质", root_path: "/Courses/LA", cover_image: null, created_at: now, updated_at: now, video_count: 6, sort_order: 1, color: "teal" },
     { id: "c3", name: "操作系统：三个简单部分", root_path: "/Courses/OS", cover_image: null, created_at: now, updated_at: now, video_count: 12, sort_order: 2, color: "orange" },
   ];
+  const extraCourses = [
+    { id: "c4", name: "宏观经济学", root_path: "/Courses/Macro", cover_image: null, created_at: now, updated_at: now, video_count: 12, sort_order: 3, color: "purple" },
+    { id: "c5", name: "日语 N3 语法", root_path: "/Courses/JP", cover_image: null, created_at: now, updated_at: now, video_count: 48, sort_order: 4, color: "pink" },
+    { id: "c6", name: "数据结构与算法", root_path: "/Courses/DSA", cover_image: null, created_at: now, updated_at: now, video_count: 40, sort_order: 5, color: "blue" },
+  ];
   const titles = [
     "01 什么是机器学习", "02 线性回归与最小二乘", "03 梯度下降的直觉", "04 逻辑回归与分类",
     "05 过拟合、正则化与偏差方差", "06 神经网络入门", "07 反向传播推导", "08 卷积神经网络", "09 注意力机制与 Transformer",
@@ -387,7 +392,14 @@ export function installMockIpc({ theme, safeArea }) {
       } catch {
         // 存储不可用：按有课处理
       }
-      return courses.map((course) => ({
+      // __shot-many-courses：再加几门空课，课程多于 4 门时主页叠成牌堆。
+      let list = courses;
+      try {
+        if (localStorage.getItem("__shot-many-courses") === "1") list = courses.concat(extraCourses);
+      } catch {
+        // 存储不可用：按三门课处理
+      }
+      return list.map((course) => ({
         ...course,
         folder_count: course.id === "c1" && withFolders() ? folders.length : 0,
       }));

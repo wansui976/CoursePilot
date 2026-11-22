@@ -881,7 +881,11 @@
       "interface": "界面",
       "densityComfortable": "舒适",
       "densityCompact": "紧凑",
-      "densityFootnote": "紧凑会收窄侧栏、列表、卡片与文稿的留白，一屏多放几行；只在用鼠标或触控板时生效。"
+      "densityFootnote": "紧凑会收窄侧栏、列表、卡片与文稿的留白，一屏多放几行；只在用鼠标或触控板时生效。",
+      "homeLayout": "主页样式",
+      "homeLayoutHint": "两种主页显示同样的内容，只是摆法不同。",
+      "homeLayoutDashboard": "仪表盘",
+      "homeLayoutDesk": "课桌"
     },
     "studyReminder": {
       "title": "学习提醒",
@@ -2107,7 +2111,23 @@
     "deleteSelected": "删除所选",
     "processSelected": "开始处理 {{count}} 个",
     "processSelectedNone": "所选的视频都已处理或正在处理",
-    "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。"
+    "deleteSelectedConfirm": "删除所选的 {{count}} 项？\n共 {{videos}} 个视频会移入回收站，可在 30 天内恢复；选中的文件夹连同子文件夹一并删除。彻底删除后会释放处理产物（桌面端不会删除你导入的原视频文件）。",
+    "deckShowAll": "全部展开",
+    "deckStack": "叠成一摞",
+    "deckPrev": "上一门",
+    "deckNext": "下一门",
+    "deckLabel": "我的课程，按左右方向键翻牌",
+    "deckNextLecture": "下一讲：",
+    "deckWatched": "已看 {{watched}} / {{total}} 讲",
+    "deckLeft": "还剩 {{count}} 讲",
+    "deckDone": "已看完",
+    "deckContinue": "继续学习",
+    "deckOpen": "打开课程",
+    "lectureUnit": "讲",
+    "statCourses": "门课程",
+    "statVideos": "讲",
+    "statWatched": "已看完",
+    "statDue": "待复习"
   },
   "search": {
     "results": "搜索结果",
@@ -2475,5 +2495,22 @@
     "lanChecking": "正在局域网里找有这个视频的电脑…",
     "lanHint": "电脑上打开了「局域网直连播放」、和这台设备连着同一个 Wi‑Fi 时，可以直接播放，不用下载。",
     "lanRetry": "在局域网里再找一次"
+  },
+  "desk": {
+    "title": "你的课桌",
+    "newCourse": "放一门新课上来",
+    "noteTitle": "今天",
+    "noteResume": "看完「{{title}}」",
+    "noteReview": "复习 {{count}} 张卡",
+    "noteNoReview": "今天没有要复习的卡",
+    "openNotebook": "摊开的这一讲",
+    "lastStop": "上次停在 {{time}}",
+    "continueAt": "从 {{time}} 继续",
+    "reviewPile": "待复习",
+    "reviewCards": "张",
+    "reviewStart": "开始复习",
+    "reviewNone": "今天都复习完了",
+    "deckCaption": "我的课程 · {{count}} 门",
+    "nothingOpen": "挑一门课开始吧"
   }
 }

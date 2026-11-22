@@ -285,7 +285,9 @@ describe("Home", () => {
     await renderHome();
 
     const courses = await screen.findByRole("region", { name: "全部课程" });
-    expect(screen.getByText("2 门课程 · 2 个视频")).toBeInTheDocument();
+    // 标题下是统计行：课程数，以及已看完 / 总讲数。
+    expect(screen.getByText("门课程").previousElementSibling).toHaveTextContent("2");
+    expect(screen.getByText("/ 2")).toBeInTheDocument();
     // 有课程时不再显示「还没有课程」这种与侧栏自相矛盾的空态。
     expect(screen.queryByRole("heading", { name: "还没有课程" })).not.toBeInTheDocument();
 

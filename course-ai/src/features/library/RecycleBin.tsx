@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { formatMs } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
-import { VideoCover } from "./VideoCover";
+import { LectureCover } from "./LectureCover";
 import { EmptyState } from "@/ui/empty-state";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -176,7 +176,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           />
         </label>
         <span className="row-thumb">
-          <VideoCover videoId={item.id} className="absolute inset-0 h-full w-full" />
+          <LectureCover title={item.title} className="absolute inset-0 h-full w-full" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-[550] text-[var(--text-1)]">

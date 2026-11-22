@@ -33,7 +33,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { useCreateCourse } from "@/features/library/CourseList";
 import { ImportVideoButton } from "@/features/library/ImportVideoDialog";
 import { SortableVideoItem } from "@/features/library/SortableVideos";
-import { VideoCover } from "@/features/library/VideoCover";
+import { LectureCover } from "@/features/library/LectureCover";
 import { Badge, type BadgeTone } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -1010,8 +1010,11 @@ export function CourseLibraryView({
           onClick={(event) => clickItem(event, videoKey(video.id), () => openVideo(video.id))}
         >
           <span className="ca-thumb" data-vt-video={video.id}>
-            <VideoCover
-              videoId={video.id}
+            <LectureCover
+              title={video.title}
+              course={selectedCourse}
+              showCaption={false}
+              index={videos.findIndex((v) => v.id === video.id)}
               className="absolute inset-0 h-full w-full"
             />
             {/* 悬停快捷播放：整卡本就是一个可点按钮，这里只做视觉 affordance（装饰，不嵌套真按钮）。
@@ -1144,10 +1147,13 @@ export function CourseLibraryView({
         >
           <span className="row-main">
             <span className="row-thumb" data-vt-video={video.id}>
-              <VideoCover
-                videoId={video.id}
-                className="absolute inset-0 h-full w-full"
-              />
+              <LectureCover
+              title={video.title}
+              course={selectedCourse}
+              showCaption={false}
+              index={videos.findIndex((v) => v.id === video.id)}
+              className="absolute inset-0 h-full w-full"
+            />
               {progress.ratio >= WATCHED_RATIO && (
                 <span className="done" role="img" aria-label={t("home.watched")}>
                   <Check className="h-3 w-3" />
@@ -1233,10 +1239,13 @@ export function CourseLibraryView({
         onClick={() => openVideo(lastId)}
       >
         <span className="ca-continue-cover">
-          <VideoCover
-            videoId={lastVideo.id}
-            className="absolute inset-0 h-full w-full"
-          />
+          <LectureCover
+              title={lastVideo.title}
+              course={selectedCourse}
+              showCaption={false}
+              index={videos.findIndex((v) => v.id === lastVideo.id)}
+              className="absolute inset-0 h-full w-full"
+            />
           <span className="ov-bar" aria-hidden="true">
             <i style={{ width: `${progress.ratio * 100}%` }} />
           </span>

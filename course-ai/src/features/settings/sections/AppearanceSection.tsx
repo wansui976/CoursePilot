@@ -10,6 +10,7 @@ import {
   useReadingFont,
 } from "@/stores/readingFont";
 import { DENSITIES, useDensity } from "@/stores/density";
+import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
 import { isIOS } from "@/lib/platform";
 
@@ -107,6 +108,8 @@ export function AppearanceSection() {
   const setReadingSize = useReadingFont((s) => s.setSize);
   const density = useDensity((s) => s.density);
   const setDensity = useDensity((s) => s.setDensity);
+  const homeLayout = useHomeLayout((s) => s.layout);
+  const setHomeLayout = useHomeLayout((s) => s.setLayout);
   // 量一次即可：本机字体在应用运行期间不会变。
   const [fontAvailable] = useState(() =>
     Object.fromEntries(READING_FONTS.map((option) => [option.key, isReadingFontAvailable(option.key)])),
@@ -284,6 +287,17 @@ export function AppearanceSection() {
 
       {/* 密度和语言各只有一项：此前各占一个分组，分组标题和行标签写着同一个词。合成一组。 */}
       <Group header={t("settings.appearance.interface")}>
+        <Row label={t("settings.appearance.homeLayout")} hint={t("settings.appearance.homeLayoutHint")} layout="inline">
+          <Segmented
+            label={t("settings.appearance.homeLayout")}
+            options={[
+              { key: "dashboard" as HomeLayout, label: t("settings.appearance.homeLayoutDashboard") },
+              { key: "desk" as HomeLayout, label: t("settings.appearance.homeLayoutDesk") },
+            ]}
+            value={homeLayout}
+            onChange={setHomeLayout}
+          />
+        </Row>
         <Row label={t("settings.appearance.density")} hint={t("settings.appearance.densityFootnote")} layout="inline">
           <Segmented
             label={t("settings.appearance.density")}

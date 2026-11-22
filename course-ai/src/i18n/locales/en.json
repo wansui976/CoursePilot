@@ -882,7 +882,11 @@
       "interface": "Interface",
       "densityComfortable": "Comfortable",
       "densityCompact": "Compact",
-      "densityFootnote": "Compact tightens the sidebar, lists, cards and transcript so more fits on screen. Applies only with a mouse or trackpad."
+      "densityFootnote": "Compact tightens the sidebar, lists, cards and transcript so more fits on screen. Applies only with a mouse or trackpad.",
+      "homeLayout": "Home layout",
+      "homeLayoutHint": "Both show the same things, laid out differently.",
+      "homeLayoutDashboard": "Dashboard",
+      "homeLayoutDesk": "Desk"
     },
     "studyReminder": {
       "title": "Study Reminder",
@@ -2121,7 +2125,23 @@
     "deleteSelected": "Delete selected",
     "processSelected": "Process {{count}}",
     "processSelectedNone": "The selected videos are already processed or in progress",
-    "deleteSelectedConfirm": "Delete the {{count}} selected items?\n{{videos}} videos will move to the recycle bin and can be restored within 30 days; selected folders are deleted together with their subfolders. Derived files are freed after permanent deletion (on desktop, the original video files you imported are kept)."
+    "deleteSelectedConfirm": "Delete the {{count}} selected items?\n{{videos}} videos will move to the recycle bin and can be restored within 30 days; selected folders are deleted together with their subfolders. Derived files are freed after permanent deletion (on desktop, the original video files you imported are kept).",
+    "deckShowAll": "Show all",
+    "deckStack": "Stack",
+    "deckPrev": "Previous course",
+    "deckNext": "Next course",
+    "deckLabel": "My courses. Use the left and right arrow keys to flip through",
+    "deckNextLecture": "Next: ",
+    "deckWatched": "{{watched}} of {{total}} lectures watched",
+    "deckLeft": "{{count}} to go",
+    "deckDone": "Finished",
+    "deckContinue": "Continue",
+    "deckOpen": "Open course",
+    "lectureUnit": "",
+    "statCourses": "courses",
+    "statVideos": "lectures",
+    "statWatched": "watched",
+    "statDue": "due"
   },
   "search": {
     "results": "Search results",
@@ -2489,5 +2509,22 @@
     "lanChecking": "Looking for a computer on your network that has this video…",
     "lanHint": "If a computer has \"Play over local network\" turned on and is on the same Wi‑Fi as this device, you can play directly without downloading.",
     "lanRetry": "Search the local network again"
+  },
+  "desk": {
+    "title": "Your desk",
+    "newCourse": "Add a course",
+    "noteTitle": "Today",
+    "noteResume": "Finish “{{title}}”",
+    "noteReview": "Review {{count}} cards",
+    "noteNoReview": "No cards due today",
+    "openNotebook": "Open on the desk",
+    "lastStop": "Stopped at {{time}}",
+    "continueAt": "Continue from {{time}}",
+    "reviewPile": "Due for review",
+    "reviewCards": "cards",
+    "reviewStart": "Start review",
+    "reviewNone": "All reviewed for today",
+    "deckCaption": "My courses · {{count}}",
+    "nothingOpen": "Pick a course to start"
   }
 }
