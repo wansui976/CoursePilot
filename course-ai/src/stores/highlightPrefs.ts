@@ -15,12 +15,13 @@ interface Persisted {
 }
 
 function read(): Persisted {
-  const fallback: Persisted = { mode: "off", strength: 2, kept: {} };
+  // 默认快放（2.5×）：识别错了也只是听得快一点，不会漏内容；跳过要用户自己选。
+  const fallback: Persisted = { mode: "fast", strength: 2, kept: {} };
   try {
     const value = JSON.parse(localStorage.getItem(KEY) ?? "null") as Partial<Persisted> | null;
     if (!value || typeof value !== "object") return fallback;
     return {
-      mode: value.mode === "fast" || value.mode === "skip" ? value.mode : "off",
+      mode: value.mode === "off" || value.mode === "skip" ? value.mode : "fast",
       strength: value.strength === 1 || value.strength === 3 ? value.strength : 2,
       kept: value.kept && typeof value.kept === "object" ? value.kept : {},
     };

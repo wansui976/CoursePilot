@@ -386,6 +386,13 @@ export function installMockIpc({ theme, safeArea }) {
       return null;
     },
     // __shot-empty：模拟第一次打开、一门课都没有（tour 场景用）。
+    // 进度条上的学习痕迹：几张有出处的卡，其中一张答错过。
+    cmd_card_marks: () => [
+      { card_id: "k1", source_ms: 190_000, lapses: 0 },
+      { card_id: "k2", source_ms: 420_000, lapses: 1 },
+      { card_id: "k3", source_ms: 640_000, lapses: 0 },
+      { card_id: "k4", source_ms: 1_120_000, lapses: 2 },
+    ],
     cmd_list_courses: () => {
       try {
         if (localStorage.getItem("__shot-empty") === "1") return [];

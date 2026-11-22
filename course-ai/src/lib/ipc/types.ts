@@ -604,3 +604,40 @@ export type LanDownloadEvent = {
   done: boolean;
   error: string | null;
 };
+
+/** 进度条上的一个标记：这一讲里做成复习卡的时刻；lapses>0 表示答错过。 */
+export interface CardMark {
+  card_id: string;
+  source_ms: number;
+  lapses: number;
+}
+
+/** 一次复习：时间、评分（1..4）与复习后的稳定度（天）。 */
+export interface ReviewPoint {
+  ts: number;
+  rating: number;
+  stability: number;
+}
+
+/** 记忆曲线：R(t) = (1 + factor·t/S)^decay，t、S 以天计。 */
+export interface CardHistory {
+  card_id: string;
+  front: string;
+  created_at: number;
+  reviews: ReviewPoint[];
+  due_at: number | null;
+  factor: number;
+  decay: number;
+}
+
+/** 错题本里的一张卡：答错过、还没连对三次。 */
+export interface MistakeCard {
+  card_id: string;
+  video_id: string | null;
+  course_id: string | null;
+  front: string;
+  back: string;
+  source_ms: number | null;
+  lapses: number;
+  streak: number;
+}

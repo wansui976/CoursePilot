@@ -2526,5 +2526,14 @@
     "reviewNone": "All reviewed for today",
     "deckCaption": "My courses · {{count}}",
     "nothingOpen": "Pick a course to start"
+  },
+  "lectureMap": {
+    "title": "Lecture map",
+    "chapters": "Chapters",
+    "highlights": "Highlights",
+    "notes": "Notes",
+    "mistakes": "Mistakes",
+    "filler": "Small talk",
+    "jump": "Jump to {{time}}"
   }
 }

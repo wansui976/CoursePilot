@@ -23,6 +23,9 @@ import type {
   ReviewEvent,
   ReviewOutcome,
   ReviewProgress,
+  CardMark,
+  CardHistory,
+  MistakeCard,
 } from "./types";
 
 export const srs = {
@@ -58,6 +61,13 @@ export const srs = {
   weakConcepts: (): Promise<WeakConcept[]> => invoke("cmd_weak_concepts"),
   // 每门课的到期待复习卡数 [course_id, due]（供课程卡「待复习」徽章）。
   dueByCourse: (): Promise<[string, number][]> => invoke("cmd_due_by_course"),
+  // 这一讲里有出处时间的卡（进度条上的标记）。
+  cardMarks: (videoId: string): Promise<CardMark[]> => invoke("cmd_card_marks", { videoId }),
+  // 一张卡的复习记录（记忆曲线）。
+  cardHistory: (cardId: string): Promise<CardHistory> => invoke("cmd_card_history", { cardId }),
+  // 错题本：答错过、还没连对三次的卡；不传课程就是全部。
+  mistakes: (courseId: string | null): Promise<MistakeCard[]> =>
+    invoke("cmd_mistake_cards", { courseId }),
 };
 
 export const stats = {

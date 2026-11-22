@@ -240,12 +240,10 @@ describe("TranscriptPanel", () => {
     expect(await screen.findByText("已加入每日复习")).toBeInTheDocument();
   });
 
-  it("uses theme-aware muted text for segment timestamps", async () => {
+  it("puts segment timestamps in their own mono column (styled by tokens in design.css)", async () => {
     renderTranscriptPanel();
 
-    expect(await screen.findByText("00:01")).toHaveClass(
-      "text-[var(--text-muted)]",
-    );
+    expect(await screen.findByText("00:01")).toHaveClass("ca-tr-time");
   });
 
   it("keeps the edit button reachable on touch with a transparent surface", async () => {

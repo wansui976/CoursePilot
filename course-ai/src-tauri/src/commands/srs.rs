@@ -17,8 +17,8 @@ const FSRS_W: [f64; 17] = [
     0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.0310, 1.6474, 0.1367, 1.0461,
     2.1072, 0.0793, 0.3246, 1.5870, 0.2272, 2.8755,
 ];
-const DECAY: f64 = -0.5;
-const FACTOR: f64 = 19.0 / 81.0; // 使幂遗忘曲线在 t=S 时 R=0.9
+pub(crate) const DECAY: f64 = -0.5;
+pub(crate) const FACTOR: f64 = 19.0 / 81.0; // 使幂遗忘曲线在 t=S 时 R=0.9
 const TARGET_RETENTION: f64 = 0.9;
 const S_MIN: f64 = 0.1;
 

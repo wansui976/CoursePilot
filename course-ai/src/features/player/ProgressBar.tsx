@@ -8,6 +8,9 @@ import type { SkipRange } from "@/lib/silenceSkip";
 import type { HighlightSegment } from "@/lib/types";
 import type { DanmakuEntry } from "@/lib/types";
 import { danmakuHeat, heatAreaPath, heatPeaks } from "@/lib/danmakuHeat";
+import { ipc } from "@/lib/ipc";
+import { qk } from "@/lib/queryKeys";
+import { timelineMarks } from "@/lib/studyMarks";
 
 const ARROW_SEEK_STEP_MS = 5_000;
 const MIN_PAGE_SEEK_STEP_MS = 10_000;
@@ -46,6 +49,14 @@ export function ProgressBar({
   const tooltipRef = useRef<HTMLDivElement>(null);
   // 章节数据与章节面板共用同一查询键，缓存命中即零成本。
   const { data: chapters = [] } = useQuery(queries.chapters(videoId));
+  // 学习痕迹：笔记里的时间戳、做成复习卡的时刻、答错过的时刻（进度条即这一讲的学习地图）。
+  const { data: notes } = useQuery(queries.notes(videoId));
+  const { data: cardMarks } = useQuery({
+    queryKey: qk.srs.cardMarks(videoId),
+    queryFn: () => ipc.srs.cardMarks(videoId),
+    retry: false,
+  });
+  const marks = useMemo(() => timelineMarks(notes, cardMarks), [notes, cardMarks]);
   const safeDuration = Math.max(0, durationMs);
   const safeCurrentMs = Math.min(safeDuration, Math.max(0, currentMs));
   const progressPercent =
@@ -219,6 +230,38 @@ export function ProgressBar({
             />
           ))}
         </div>
+        {/* 学习痕迹：重点（做成卡的时刻）是轨道上方的荧光黄短条，笔记是白点，答错过是轨道下方的红刻度。
+            颜色之外还靠位置和形状区分。 */}
+        {safeDuration > 0 &&
+          marks.cards.map((ms) => (
+            <span
+              key={`card-${ms}`}
+              aria-hidden="true"
+              data-testid="mark-card"
+              className="ca-tl-mark card"
+              style={{ left: `${pct(ms)}%` }}
+            />
+          ))}
+        {safeDuration > 0 &&
+          marks.notes.map((ms) => (
+            <span
+              key={`note-${ms}`}
+              aria-hidden="true"
+              data-testid="mark-note"
+              className="ca-tl-mark note"
+              style={{ left: `${pct(ms)}%` }}
+            />
+          ))}
+        {safeDuration > 0 &&
+          marks.mistakes.map((ms) => (
+            <span
+              key={`miss-${ms}`}
+              aria-hidden="true"
+              data-testid="mark-mistake"
+              className="ca-tl-mark mistake"
+              style={{ left: `${pct(ms)}%` }}
+            />
+          ))}
         {/* 拖动圆点：平时收起，悬停 / 键盘聚焦时弹出（触屏常显，见 .ca-progress-thumb）。 */}
         <div
           aria-hidden="true"

@@ -24,6 +24,7 @@ pub mod settings;
 pub mod silence;
 pub mod slides;
 pub mod srs;
+pub mod study_marks;
 pub mod stats;
 pub mod storage;
 pub mod sync;

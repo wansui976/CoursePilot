@@ -69,6 +69,7 @@ use crate::commands::srs::{
     cmd_due_cards_by_concept, cmd_generate_cards, cmd_generate_cards_for_concept, cmd_review_card,
     cmd_weak_concepts,
 };
+use crate::commands::study_marks::{cmd_card_history, cmd_card_marks, cmd_mistake_cards};
 use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
 use crate::commands::remote_sync::{
     cmd_remote_sync_now, cmd_remote_sync_nudge, cmd_remote_sync_save, cmd_remote_sync_set_enabled,
@@ -513,6 +514,9 @@ pub fn run() {
             cmd_concept_due_counts,
             cmd_due_cards_by_concept,
             cmd_weak_concepts,
+            cmd_card_marks,
+            cmd_card_history,
+            cmd_mistake_cards,
             cmd_due_by_course,
             cmd_add_card,
             cmd_notify,

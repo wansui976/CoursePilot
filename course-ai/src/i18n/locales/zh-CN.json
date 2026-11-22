@@ -2512,5 +2512,14 @@
     "reviewNone": "今天都复习完了",
     "deckCaption": "我的课程 · {{count}} 门",
     "nothingOpen": "挑一门课开始吧"
+  },
+  "lectureMap": {
+    "title": "课程地图",
+    "chapters": "章节",
+    "highlights": "重点",
+    "notes": "笔记",
+    "mistakes": "错题",
+    "filler": "闲聊",
+    "jump": "跳到 {{time}}"
   }
 }

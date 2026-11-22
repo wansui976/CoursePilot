@@ -1034,3 +1034,276 @@ button.ca-time:hover {
 .ca-app[data-bucket="compact"] .ca-notebook {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* ===================== 文稿 ===================== */
+
+/* 每句：左边一列等宽时间，右边衬线正文。 */
+.ca-transcript-text {
+  display: grid !important;
+  grid-template-columns: 46px minmax(0, 1fr);
+  column-gap: 10px;
+  font-family: var(--font-reading);
+  font-size: 15.5px;
+  line-height: 1.75;
+  color: var(--text-normal);
+}
+
+.ca-tr-time {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: inherit;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 当前播放的那句：荧光笔划过，时间变成墨黄。 */
+.ca-tr-row[data-active] .ca-transcript-text {
+  color: var(--text-strong);
+}
+
+.ca-tr-row[data-active] .ca-tr-time {
+  color: var(--marker-ink);
+  font-weight: 500;
+}
+
+.ca-tr-row[data-active] .ca-tr-body {
+  background: linear-gradient(transparent 38%, var(--marker) 38%, var(--marker) 92%, transparent 92%);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* 口头禅：变浅，不删除。 */
+.ca-tic {
+  color: var(--text-faint);
+}
+
+/* 折叠起来的闲聊 / 重复讲解：两边斜纹线，中间一枚说明。 */
+.ca-fold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 2px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.ca-fold::before,
+.ca-fold::after {
+  content: "";
+  flex: 1;
+  height: 6px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(135deg, var(--border-subtle) 0 2px, transparent 2px 5px);
+}
+
+.ca-fold::after {
+  order: 3;
+}
+
+.ca-fold-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  white-space: nowrap;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ca-fold > button {
+  order: 4;
+}
+
+.ca-transcript-filler .ca-transcript-text {
+  opacity: 0.6;
+}
+
+/* ===================== 学习时间轴（进度条上的痕迹） ===================== */
+
+.ca-tl-mark {
+  position: absolute;
+  pointer-events: none;
+  translate: -50% 0;
+}
+
+/* 重点：轨道上方的荧光黄短条。 */
+.ca-tl-mark.card {
+  top: calc(50% - 7px);
+  width: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--marker-strong);
+}
+
+/* 笔记：轨道上方更高一点的粉笔白点。 */
+.ca-tl-mark.note {
+  top: calc(50% - 12px);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--chalk);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+}
+
+/* 答错过：轨道下方的红色刻度。 */
+.ca-tl-mark.mistake {
+  top: calc(50% + 5px);
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--stage-err);
+}
+
+/* 所有可点的时间戳（摘要、问答、笔记、出处）统一成荧光笔芯片。 */
+.ca-ts-chip {
+  font-family: var(--font-mono) !important;
+  font-size: 11.5px !important;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--marker-ink) !important;
+  background: var(--marker-weak) !important;
+  border-radius: var(--r-xs) !important;
+  padding: 1px 5px !important;
+}
+
+.ca-ts-chip:hover {
+  background: var(--marker-strong) !important;
+  color: #1b1f1d !important;
+}
+
+/* ===================== AI 板书 ===================== */
+
+/* 独立成行的公式写在一块小黑板上，进场时像粉笔一样从左往右写出来。 */
+.ca-prose .katex-display {
+  margin: 12px 0;
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+  background: var(--board);
+  background-image: var(--grain-bg);
+  color: var(--chalk);
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.04);
+}
+
+.ca-prose .katex-display > .katex {
+  animation: ca-chalk-write 0.9s linear both;
+}
+
+@keyframes ca-chalk-write {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* ===================== 课程地图 ===================== */
+
+.ca-map {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  row-gap: 8px;
+  column-gap: 12px;
+  align-items: center;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-faint);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ca-map .lbl {
+  font-family: var(--font-display);
+  white-space: nowrap;
+}
+
+.ca-map .lbl .n {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.ca-map .lane {
+  position: relative;
+  height: 10px;
+}
+
+.ca-map .lane::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--border-faint);
+}
+
+.ca-map .lane.chap {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+}
+
+.ca-map .lane.chap::before {
+  display: none;
+}
+
+.ca-map .lane.chap > button {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--border-subtle);
+}
+
+.ca-map .lane.chap > button.done {
+  background: var(--text-faint);
+}
+
+.ca-map .lane.chap > button.now {
+  background: var(--text-strong);
+}
+
+.ca-map .mk {
+  position: absolute;
+  top: 1px;
+  height: 8px;
+  border-radius: 2px;
+  translate: -50% 0;
+}
+
+.ca-map .mk.hl {
+  width: 10px;
+  background: var(--marker);
+  box-shadow: inset 0 0 0 1px var(--marker-strong);
+}
+
+.ca-map .mk.nt {
+  width: 8px;
+  border-radius: 50%;
+  background: var(--text-strong);
+}
+
+.ca-map .mk.er {
+  width: 3px;
+  background: var(--status-err);
+}
+
+.ca-map .mk.sk {
+  translate: 0 0;
+  background: repeating-linear-gradient(135deg, var(--border-strong) 0 2px, transparent 2px 5px);
+}
+
+.ca-map .now {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 1.5px;
+  background: var(--marker-strong);
+  pointer-events: none;
+}

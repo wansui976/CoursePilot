@@ -119,8 +119,8 @@ const TranscriptRow = memo(function TranscriptRow({
   return (
     <div className={`px-3 py-0.5 ${fillerReason ? "ca-transcript-filler" : ""}`}>
       {fillerReason && fillerStartMs != null && (
-        <div className="mb-0.5 flex items-center gap-1.5 px-2 pt-1 ca-t-2xs">
-          <span className="rounded-full bg-[var(--status-warn-bg)] px-1.5 text-[var(--status-warn)]">
+        <div className="ca-fold">
+          <span className="ca-fold-pill">
             {t("highlights.hover", { reason: fillerReason })}
           </span>
           <button
@@ -136,12 +136,8 @@ const TranscriptRow = memo(function TranscriptRow({
         data-row={index}
         // 触屏上只有当前句露出纠错按钮（styles/responsive.css）。
         data-active={active ? "" : undefined}
-        className={`group relative rounded ${
-          active
-            ? "bg-[var(--accent-weak-2)]"
-            : currentMatch
-              ? "bg-[var(--accent-weak)]"
-              : "hover:bg-[var(--surface-card-hover)]"
+        className={`ca-tr-row group relative rounded-md ${
+          currentMatch && !active ? "bg-[var(--accent-weak)]" : "hover:bg-[var(--surface-card-hover)]"
         }`}
       >
         {/* 文字占满整行宽度：纠错按钮改为绝对定位在右下角，不再在行内流式占位。 */}
@@ -165,12 +161,10 @@ const TranscriptRow = memo(function TranscriptRow({
           }}
           className="ca-transcript-text ca-prose block w-full cursor-pointer select-text px-2 py-1 text-left text-sm leading-relaxed"
         >
-          <span className="mr-2 text-xs text-[var(--text-muted)]">
-            {formatMs(segment.start_ms)}
+          <span className="ca-tr-time">{formatMs(segment.start_ms)}</span>
+          <span className="ca-tr-body">
+            {highlight ? highlightSegment(segment.text, highlight) : <TranscriptText text={segment.text} />}
           </span>
-          {highlight ? highlightSegment(segment.text, highlight) : (
-            <MathText text={segment.text} />
-          )}
           {translation && (
             <span data-transcript-translation="" className="mt-0.5 block text-[0.92em] text-[var(--text-muted)]">
               {translation}
@@ -193,6 +187,29 @@ const TranscriptRow = memo(function TranscriptRow({
     </div>
   );
 });
+
+/** 老师的口头禅：在句子里变浅色，不删除（引用原话时仍然准确）。只认句首或逗号前后的独立用法。 */
+const VERBAL_TICS = /(^|[，,。\s])((?:那么|然后呢|然后|对吧|对不对|就是说|这个这个|嗯|呃|啊)[，,]?)/g;
+
+function TranscriptText({ text }: { text: string }) {
+  // 有公式的句子交给 MathText，不拆分。
+  if (text.includes("$")) return <MathText text={text} />;
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(VERBAL_TICS)) {
+    const start = (match.index ?? 0) + match[1].length;
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <span key={start} className="ca-tic">
+        {match[2]}
+      </span>,
+    );
+    last = start + match[2].length;
+  }
+  if (parts.length === 0) return <MathText text={text} />;
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
+}
 
 export function TranscriptPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
