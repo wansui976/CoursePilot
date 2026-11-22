@@ -356,3 +356,147 @@ button.ca-time:hover {
 .ca-skeleton {
   border-radius: var(--r-xs);
 }
+
+/* ===================== 外壳 ===================== */
+
+/* 大面积底色叠一层纸张颗粒（深色主题是粉笔灰）。 */
+.ca-main,
+.ca-main-col,
+.ca-side,
+.ca-rail {
+  background-image: var(--grain-bg);
+}
+
+.ca-side,
+.ca-rail {
+  border-right-color: var(--border-faint);
+}
+
+/* 侧栏：应用名用衬线；分组标题是小号衬线，不再全大写加字距。 */
+.ca-side-app {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.ca-nav-label {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+.ca-side-item,
+.ca-nav-item,
+.ca-nav-button {
+  min-height: 30px;
+}
+
+/* 当前项像一张小白纸片微微浮起，而不是一块灰底。 */
+.ca-side-item.active,
+.ca-nav-item.active {
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-raise);
+  color: var(--text-strong);
+  font-weight: 550;
+}
+
+/* 一级页面标题：教科书式的衬线大标题。 */
+.tb-titles h1,
+.ca-view-header[data-level="root"] .ca-view-title {
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+  font-optical-sizing: auto;
+}
+
+.ca-app[data-bucket="compact"] .tb-titles h1,
+.ca-app[data-bucket="medium"] .tb-titles h1 {
+  font-size: 26px;
+}
+
+.ca-view-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.006em;
+}
+
+.ca-view-header {
+  border-bottom-color: var(--border-faint);
+}
+
+/* 学习面板页签：衬线、细墨线下划线。 */
+.ca-study-tab {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-optical-sizing: auto;
+}
+
+.ca-study-tab[data-state="active"] {
+  font-weight: 500;
+  box-shadow: inset 0 -1.5px 0 var(--text-strong);
+}
+
+.ca-study-tabs {
+  gap: 22px;
+}
+
+.ca-tab-count {
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+/* 统计行：衬线大数字 + 小号无衬线标签，中间细线分隔。 */
+.ca-stats {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.ca-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 26px;
+  border-left: 1px solid var(--border-faint);
+}
+
+.ca-stat:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.ca-stat .v {
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.ca-stat .v small {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text-faint);
+  margin-left: 2px;
+}
+
+.ca-stat .k {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+/* 工作台标题：这一讲的名字用衬线。 */
+.wb-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.006em;
+  font-optical-sizing: auto;
+}

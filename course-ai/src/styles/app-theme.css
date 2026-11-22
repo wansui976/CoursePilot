@@ -40,7 +40,7 @@
      覆盖为基于 --video-accent 的版本——那是给近黑面派生的亮色，解决 --accent 在深色控制栏
      上仅 ~2.9:1（低于非文字 3:1）的问题。seek/ProgressBar 在浅色(白)与深色(暗)控制栏下
      都使用这个 token。 */
-  --grad-video-progress: var(--grad-accent);
+  --grad-video-progress: var(--video-accent);
   /* 层级刻度（从低到高），新增浮层时请引用这些变量而非裸写数字： */
   --z-rail: 5; /* 工作台细侧栏 */
   --z-sidebar: 40; /* 宽屏完整侧栏 */

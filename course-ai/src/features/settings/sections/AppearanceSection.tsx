@@ -63,8 +63,8 @@ const THEME_OPTIONS: { key: ThemePref; i18nKey: string }[] = [
 
 /** 外观主题的小缩略图（仿一个迷你窗口）。auto 用左浅右深的斜分。 */
 function ThemeMock({ pref }: { pref: ThemePref }) {
-  const light = { bg: "#e9eaf0", bar: "#f7f8fa", win: "#ffffff", line: "#d7dae2" };
-  const dark = { bg: "#1b1e25", bar: "#23262e", win: "#2c2f38", line: "#3a3e48" };
+  const light = { bg: "#f6f7f5", bar: "#fbfbfa", win: "#ffffff", line: "#e4e6e2" };
+  const dark = { bg: "#191f1c", bar: "#151a18", win: "#1d2420", line: "#2f3833" };
   if (pref === "auto") {
     return (
       <span className="relative block h-full w-full overflow-hidden">
@@ -75,7 +75,7 @@ function ThemeMock({ pref }: { pref: ThemePref }) {
         />
         <span
           className="absolute left-1.5 top-1.5 h-1.5 w-7 rounded-full"
-          style={{ background: "var(--accent, #2f6cea)" }}
+          style={{ background: "var(--accent, #1d6b52)" }}
         />
       </span>
     );
@@ -83,7 +83,7 @@ function ThemeMock({ pref }: { pref: ThemePref }) {
   const c = pref === "dark" ? dark : light;
   return (
     <span className="relative block h-full w-full" style={{ background: c.bg }}>
-      <span className="absolute left-1.5 top-1.5 h-1.5 w-7 rounded-full" style={{ background: "var(--accent, #2f6cea)" }} />
+      <span className="absolute left-1.5 top-1.5 h-1.5 w-7 rounded-full" style={{ background: "var(--accent, #1d6b52)" }} />
       <span
         className="absolute bottom-1.5 left-1.5 right-1.5 top-4 rounded-[3px]"
         style={{ background: c.win, boxShadow: `inset 0 0 0 1px ${c.line}` }}
