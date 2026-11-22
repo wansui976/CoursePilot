@@ -11,7 +11,7 @@ describe("Switch", () => {
 
     const toggle = screen.getByRole("switch", { name: "测试开关" });
     // 药丸的视觉尺寸必须钉住：触屏上 ca-touch-44 的 min-width/min-height 会把它撑成圆形。
-    expect(toggle).toHaveClass("ca-switch", "h-[22px]", "w-[38px]");
+    expect(toggle).toHaveClass("ca-switch", "h-[18px]", "w-[32px]");
     expect(toggle).not.toHaveClass("ca-touch-44");
     expect(toggle).toHaveAttribute("aria-checked", "false");
 
@@ -24,6 +24,6 @@ describe("Switch", () => {
 
     const toggle = screen.getByRole("switch", { name: "测试开关" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(toggle.firstElementChild).toHaveClass("translate-x-[19px]");
+    expect(toggle.firstElementChild).toHaveClass("translate-x-[16px]");
   });
 });

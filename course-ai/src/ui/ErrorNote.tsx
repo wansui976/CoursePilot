@@ -22,17 +22,17 @@ export function ErrorNote({
   return (
     <div
       role="alert"
-      className={`flex items-start gap-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)] ${className ?? ""}`}
+      className={`ca-callout err ${className ?? ""}`}
     >
-      <AlertCircle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-      <span className="min-w-0 flex-1 break-words">
+      <AlertCircle className="ca-callout-icon" />
+      <span className="min-w-0 flex-1 break-words text-[var(--text-normal)]">
         {humanizeError(error, i18n.language)}
       </span>
       {fix && shell && (
         <button
           type="button"
           onClick={() => shell.openSettingsCategory(fix)}
-          className="inline-flex flex-none items-center gap-1 rounded px-1.5 py-0.5 font-medium underline-offset-2 hover:underline"
+          className="ca-callout-act"
         >
           <Settings className="h-3 w-3" />
           {t(fix === "llm" ? "errors.fixLlm" : "errors.fixAsr")}
@@ -42,7 +42,7 @@ export function ErrorNote({
         <button
           type="button"
           onClick={onRetry}
-          className="inline-flex flex-none items-center gap-1 rounded px-1.5 py-0.5 font-medium underline-offset-2 hover:underline"
+          className="ca-callout-act"
         >
           <RefreshCw className="h-3 w-3" />
           {t("common.retry")}

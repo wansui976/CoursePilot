@@ -10,7 +10,7 @@ import type { DevLogEntry, LlmUsageTotals } from "@/lib/types";
 
 function statusClass(status: string): string {
   if (status.startsWith("已应用")) return "text-[var(--status-ok)] bg-[var(--status-ok-bg)]";
-  return "text-red-500 bg-red-500/10";
+  return "text-[var(--status-err)] bg-[var(--status-err-bg)]";
 }
 
 function LogCard({ entry }: { entry: DevLogEntry }) {
@@ -188,7 +188,7 @@ export function DevConsole({ onClose }: { onClose: () => void }) {
                 {t("devConsole.separator")}
                 <span className="text-[var(--status-ok)]">{t("devConsole.applied", { count: applied })}</span>
                 {" · "}
-                <span className={failed > 0 ? "text-red-500" : ""}>{t("devConsole.failed", { count: failed })}</span>
+                <span className={failed > 0 ? "text-[var(--status-err)]" : ""}>{t("devConsole.failed", { count: failed })}</span>
               </>
             )}
           </>

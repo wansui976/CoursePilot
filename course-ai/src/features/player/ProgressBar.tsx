@@ -248,7 +248,7 @@ export function ProgressBar({
               <span className="max-w-full truncate text-xs font-medium">{hoverChapter.title}</span>
             )}
             {hoverHighlight && (
-              <span className="max-w-full truncate text-xs text-amber-200">
+              <span className="max-w-full truncate text-xs text-[var(--marker-strong)]">
                 {t("highlights.hover", {
                   reason: hoverHighlight.reason || t(`highlights.kind.${hoverHighlight.kind}`),
                 })}

@@ -218,7 +218,8 @@
   --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.5);
   --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.03);
   --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 4px 12px rgb(0 0 0 / 0.3);
-  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.07), 0 18px 44px -10px rgb(0 0 0 / 0.75);
+  --shadow-pop: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(255 255 255 / 0.07),
+    0 18px 44px -10px rgb(0 0 0 / 0.75);
 }
 
 html,

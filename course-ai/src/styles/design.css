@@ -1,0 +1,358 @@
+/* 「板书与荧光笔」设计语言的组件层：新组件（时间戳、高亮、标签、提示块、键帽……）与对旧规则的精修。
+   最后导入，同权重下覆盖前面各文件。数值以设计系统为准（见仓库根目录 CLAUDE.md）。 */
+
+/* ===================== 基础 ===================== */
+
+::selection {
+  background: var(--marker);
+}
+
+.ca-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* 主按钮：顶部一道极淡的亮边 + 底部一道暗边，像一块压实的按键。 */
+.ca-btn-primary:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    inset 0 -1px 0 rgb(0 0 0 / 0.14),
+    0 1px 2px rgb(16 24 20 / 0.12);
+}
+
+/* 衬线标题：读的、记的东西用衬线。 */
+.ca-serif {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-feature-settings: "kern", "liga", "lnum";
+}
+
+/* 纸张颗粒：叠在大面积底色上。只用在页面和侧栏，不上卡片、控件和文字。 */
+.ca-paper {
+  position: relative;
+  isolation: isolate;
+}
+
+.ca-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--grain);
+  opacity: var(--grain-opacity);
+}
+
+/* 浮在纹理底上的一张纸（阅读区、复习卡、设置分组）。名字避开对话框底部弹层用的 .ca-sheet。 */
+.ca-paper-sheet {
+  background: var(--surface-panel);
+  border-radius: var(--r-lg);
+  box-shadow: 0 0 0 1px var(--border-faint), var(--shadow-card);
+}
+
+/* 页面里的小节标题：衬线标题 + 一条延伸到边缘的细线，像教科书的章节标题。 */
+.ca-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.ca-section-head > h2,
+.ca-section-head > h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.ca-section-head::after {
+  content: "";
+  order: 1;
+  flex: 1;
+  height: 1px;
+  background: var(--border-faint);
+  transform: translateY(-5px);
+}
+
+.ca-section-head > .ca-section-more {
+  order: 2;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ===================== 荧光笔与时间戳 ===================== */
+
+/* 高亮：画在文字下半部的一道荧光笔，跨行时每行各画一段。 */
+.ca-mark {
+  color: inherit;
+  background: linear-gradient(
+    transparent 38%,
+    var(--marker) 38%,
+    var(--marker) 92%,
+    transparent 92%
+  );
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: 2px;
+}
+
+/* 时间戳芯片：每条结论都指回课上的某一秒。 */
+.ca-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--marker-ink);
+  background: var(--marker-weak);
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  vertical-align: 1px;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+button.ca-time {
+  cursor: pointer;
+}
+
+.ca-time > svg {
+  width: 9px;
+  height: 9px;
+  fill: currentColor;
+  stroke: none;
+}
+
+button.ca-time:hover {
+  background: var(--marker-strong);
+  color: #1b1f1d;
+}
+
+.ca-time.quiet {
+  background: transparent;
+  color: var(--text-faint);
+  padding-inline: 0;
+}
+
+/* 键帽：从上方看下去的一个实体按键。 */
+.ca-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--text-muted);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-xs);
+  box-shadow: inset 0 -1px 0 var(--border-subtle);
+}
+
+/* ===================== 标签与状态徽章 ===================== */
+
+.ca-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--r-xs);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--tag-gray-bg);
+  color: var(--tag-gray-text);
+}
+
+.ca-tag.sm {
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+.ca-badge {
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 8px;
+  border-radius: 9999px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.ca-badge.neutral {
+  color: var(--text-normal);
+  background: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.ca-badge.processing .dot {
+  animation: ca-pulse 1.6s var(--ease) infinite;
+}
+
+@keyframes ca-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ===================== 提示块（错误 / 警示 / 信息） ===================== */
+
+.ca-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-normal);
+}
+
+.ca-callout > .ca-callout-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 2px;
+}
+
+.ca-callout.err {
+  background: var(--status-err-bg);
+}
+
+.ca-callout.err > .ca-callout-icon {
+  color: var(--status-err);
+}
+
+.ca-callout.warn {
+  background: var(--status-warn-bg);
+}
+
+.ca-callout.warn > .ca-callout-icon {
+  color: var(--status-warn);
+}
+
+.ca-callout.info {
+  background: var(--status-info-bg);
+}
+
+.ca-callout.info > .ca-callout-icon {
+  color: var(--status-info);
+}
+
+.ca-callout-act {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font-weight: 550;
+  color: var(--text-strong);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+
+.ca-callout-act:hover {
+  text-decoration-color: currentColor;
+}
+
+.ca-callout-act > svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ===================== 图标按钮 ===================== */
+
+/* 精确指针下收成 32px 的方块，触屏保持 44px 命中区。 */
+@media (pointer: fine) {
+  .ca-icon-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-sm);
+  }
+}
+
+.ca-icon-btn[aria-pressed="true"] {
+  background: var(--surface-card-active);
+  color: var(--accent-text);
+}
+
+/* ===================== 菜单 ===================== */
+
+.ca-menu {
+  border: 0;
+  padding: 6px;
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+}
+
+.ca-menu-item {
+  border-radius: var(--r-xs);
+  padding: 6px 8px;
+}
+
+.ca-menu-sep {
+  margin: 6px -6px;
+  background: var(--border-faint);
+}
+
+/* ===================== 对话框 ===================== */
+
+.ca-dialog-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  letter-spacing: -0.006em;
+  font-optical-sizing: auto;
+}
+
+/* ===================== 分段控件 ===================== */
+
+.ca-seg {
+  border: 0;
+  border-radius: var(--r-md);
+  padding: 2px;
+  background: var(--surface-card-hover);
+}
+
+.ca-seg button.on {
+  color: var(--text-strong);
+  box-shadow: var(--shadow-raise);
+}
+
+/* ===================== 空状态 ===================== */
+
+.ca-empty-state-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 500;
+}
+
+.ca-empty-state-description {
+  font-family: var(--font-reading);
+  font-size: 16px;
+  line-height: 26px;
+  text-wrap: balance;
+}
+
+/* ===================== 骨架 ===================== */
+
+.ca-skeleton {
+  border-radius: var(--r-xs);
+}

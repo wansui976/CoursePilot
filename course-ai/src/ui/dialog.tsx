@@ -86,7 +86,7 @@ export function Modal({
   const heading = (
     <Dialog.Title
       className={cn(
-        "flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)]",
+        "ca-dialog-title flex items-center gap-2 text-[var(--text-strong)]",
         titleClassName,
       )}
     >
@@ -108,7 +108,7 @@ export function Modal({
         <Dialog.Overlay
           data-testid={overlayTestId}
           className={cn(
-            "ca-dialog-overlay fixed inset-0 z-50 flex justify-center bg-black/50",
+            "ca-dialog-overlay fixed inset-0 z-50 flex justify-center bg-[rgb(13_16_15/0.42)] backdrop-blur-[2px]",
             sheet ? "items-end p-0" : "items-center p-4",
           )}
         >
@@ -152,11 +152,11 @@ export function Modal({
                 : undefined
             }
             className={cn(
-              "w-full overflow-y-auto border bg-[var(--surface-panel)] p-4 text-[var(--text-normal)] shadow-[var(--shadow-pop)]",
+              "w-full overflow-y-auto border bg-[var(--surface-panel)] p-5 text-[var(--text-normal)] shadow-[var(--shadow-pop)]",
               sheet
                 ? "ca-sheet max-w-none rounded-t-2xl border-x-0 border-b-0 pt-0"
-                : cn("max-h-[calc(100dvh-2rem)] rounded-2xl sm:p-5", SIZE[size]),
-              tone === "warning" ? "border-[var(--status-warn)]" : "border-[var(--border-subtle)]",
+                : cn("max-h-[calc(100dvh-2rem)] rounded-xl sm:p-6", SIZE[size]),
+              tone === "warning" ? "border-[var(--status-warn)]" : "border-transparent",
               className,
             )}
           >
@@ -184,7 +184,7 @@ export function Modal({
             {description && (
               <Dialog.Description
                 className={cn(
-                  "mt-1 break-words text-xs leading-relaxed text-[var(--text-muted)]",
+                  "mt-1.5 break-words text-[13px] leading-relaxed text-[var(--text-muted)]",
                   descriptionClassName,
                 )}
               >

@@ -361,14 +361,14 @@ html[data-vt-nav="close"]::view-transition-new(root) {
 
 /* 按住时位置与宽度同速收放：位置若还走 0.5s 的弹簧，变宽的圆点会先顶出药丸右缘。 */
 .ca-switch:active > span {
-  width: 20px;
+  width: 17px;
   transition:
     translate var(--dur) var(--ease-out),
     width var(--dur) var(--ease-out);
 }
 
 .ca-switch[aria-checked="true"]:active > span {
-  translate: 15px 0;
+  translate: 13px 0;
 }
 
 /* ===================== 底部 Tab =====================

@@ -166,7 +166,7 @@ function HighlightSection({ highlights }: { highlights: HighlightControls }) {
         >
           {highlights.generating ? t("highlights.generating") : t("highlights.generate")}
           {highlights.generateError != null && !highlights.generating && (
-            <span className="ml-auto text-xs font-normal text-red-300">{t("highlights.generateFailed")}</span>
+            <span className="ml-auto text-xs font-normal text-[var(--stage-err)]">{t("highlights.generateFailed")}</span>
           )}
         </button>
       )}
