@@ -31,7 +31,7 @@ const CJK_FAMILIES: Record<ReadingFont, string[]> = {
 };
 
 /** 西文：衬线类选项配一款衬线西文，黑体沿用界面字体。 */
-const LATIN_SERIF = ['"Iowan Old Style"', '"Charter"', '"Georgia"'];
+const LATIN_SERIF = ['"Newsreader Variable"', '"Iowan Old Style"', '"Charter"', '"Georgia"'];
 
 export const READING_FONTS: { key: ReadingFont; i18nKey: string }[] = [
   { key: "serif", i18nKey: "settings.appearance.readingFontSerif" },

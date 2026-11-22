@@ -1,9 +1,9 @@
 /* 设计令牌：Tailwind @theme、浅色 :root 与深色主题变量。 */
 
 @theme {
-  --color-background: #0a0c10;
+  --color-background: #151a18;
   --color-foreground: oklch(0.985 0 0);
-  --color-primary: oklch(0.64 0.19 256);
+  --color-primary: #1d6b52;
   --color-primary-foreground: var(--on-accent);
   --color-muted: oklch(0.25 0.01 256);
   --color-border: rgb(255 255 255 / 0.1);
@@ -11,196 +11,214 @@
 
   /* 圆角单一刻度：让 Tailwind 的 rounded-md/lg/xl 对齐设计 token --r-sm/md/lg。
      收紧一档（工具感，参考 Linear / Zotero）：大圆角 + 软阴影是模板化界面的标志。 */
-  --radius-sm: 5px;
+  --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
-  --radius-xl: 10px;
+  --radius-xl: 12px;
   /* 2xl / 3xl 也收进同一刻度：对话气泡、对话框等不再是 16px+ 的大圆角。 */
   --radius-2xl: 12px;
   --radius-3xl: 14px;
 }
 
-/* 浅色（默认）：苹果式分层灰阶——chrome 用略暖的系统灰，内容层回到纯白，
-   靠「相邻层明度差 + 柔和投影」分层，App 刻意少用 1px 硬描边。 */
+/* 浅色「纸」与深色「黑板」两套主题（设计语言：板书与荧光笔，设计系统见 CLAUDE.md）。
+   纸面近白、略带绿调；黑板是深绿黑配粉笔白。分层靠底色明度差与发丝线，阴影只给真正浮起的东西。
+   变量名沿用旧版，组件不用改名。 */
 :root {
   color-scheme: light;
 
-  /* 全局唯一字体栈：body 与 .ca-app 共用,避免挂到 body 的浮层回退到未加载的 Inter。 */
-  --font-app: BlinkMacSystemFont, "PingFang SC", -apple-system,
-    "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
-  /* 阅读字体：笔记、摘要、复习卡片等「读」的内容用衬线（参考 Apple 图书 / Readwise），
-     界面操作仍用上面的无衬线。中文：macOS/iOS 宋体、Android 思源宋体；Windows 没有像样的
-     自带中文衬线（SimSun 小字号发虚），故意不写 serif 兜底，让中文落回雅黑、西文仍是 Georgia。 */
-  --font-reading: "Iowan Old Style", "Charter", "Georgia", "Songti SC", "STSong",
-    "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif CN",
+  /* 界面用无衬线，读的内容和标题用衬线，时间与数字用等宽。字体文件随应用打包（main.tsx）。
+     中文落到系统字体：macOS/iOS 苹方与宋体，Windows 雅黑，Android 思源。 */
+  --font-app: "Instrument Sans Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans SC", "Noto Sans CJK SC", BlinkMacSystemFont, -apple-system, system-ui, sans-serif;
+  --font-display: "Newsreader Variable", "Songti SC", "STSong", "Source Han Serif SC",
+    "Noto Serif CJK SC", "Noto Serif SC", "Iowan Old Style", Georgia, var(--font-app);
+  --font-reading: "Newsreader Variable", "Songti SC", "STSong", "Source Han Serif SC",
+    "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif CN", "Iowan Old Style", Georgia,
     var(--font-app);
+  --font-mono: "JetBrains Mono Variable", "SF Mono", ui-monospace, Menlo, monospace;
 
-  --surface-app: #f5f5f7;
-  --surface-rail: #fcfcfd;
-  --surface-sidebar: #fcfcfd;
+  --surface-app: #fbfbfa;
+  --surface-rail: #f6f7f5;
+  --surface-sidebar: #f6f7f5;
   --surface-panel: #ffffff;
-  --surface-header: #ffffff;
+  --surface-header: #fbfbfa;
   --surface-card: #ffffff;
-  --surface-card-hover: #f2f2f5;
-  --surface-card-active: #eff3fc;
-  --surface-input: #fcfcfd;
-  /* 视频舞台的信箱留白：浅色主题用纯白，深色主题用纯黑（见深色块）。 */
-  --surface-stage: #ffffff;
-  /* 舞台上方的通知/手势提示：永远压在产品画面上，深浅主题都走近黑 scrim，
-     与网站本身的灰阶分离（--surface-stage 在浅色下是白的，不能拿来做徽标底）。 */
-  --surface-stage-overlay: rgb(0 0 0 / 0.72);
-  --surface-stage-scrim: rgb(0 0 0 / 0.2);
-  --surface-titlebar: #f6f6f8;
+  --surface-card-hover: #f1f2ef;
+  --surface-card-active: #e9f1ec;
+  --surface-input: #ffffff;
+  /* 视频舞台两种主题都是暗的。 */
+  --surface-stage: #0d100f;
+  --surface-stage-overlay: rgb(13 16 15 / 0.78);
+  --surface-stage-scrim: rgb(13 16 15 / 0.24);
+  --surface-titlebar: #f6f7f5;
 
-  /* 发丝线（hairline）整体调柔：能靠明度/投影分层的地方不再依赖重描边。 */
-  --border-subtle: #e3e4e8;
-  --border-faint: #ebedf0;
-  /* hover 等需要比 subtle 更清晰的强调边框；深浅主题各自定义，别写死浅色灰。 */
-  --border-strong: #d4d7dd;
-  --border-control: #848a94;
-  --border-titlebar: rgb(0 0 0 / 0.06);
+  /* 黑板与粉笔：课程封面、视频舞台、AI 板书、费曼复述。两种主题相同。 */
+  --board: #17211c;
+  --chalk: #eef2ec;
+  --chalk-dim: rgb(238 242 236 / 0.2);
+  --stage-err: #ff8a7f;
 
-  --text-strong: #1c1e24;
-  --text-normal: #565b66;
-  --text-muted: #6b7280;
-  /* 抬到约 4.5:1（白底）以满足正文对比；空状态/占位符等都吃这个变量。 */
-  --text-faint: #71767f;
+  --border-subtle: #e4e6e2;
+  --border-faint: #eeefec;
+  --border-strong: #d3d6d1;
+  --border-control: #8a918c;
+  --border-titlebar: rgb(16 24 20 / 0.06);
 
-  /* 焦点提示不随用户强调色变化，避免亮黄/浅灰强调色在浅底上失去轮廓。 */
-  --focus-ring: #1d4ed8;
+  /* 四级墨色在所有底色上都不低于 4.5:1。 */
+  --text-strong: #1b1f1d;
+  --text-normal: #3f4642;
+  --text-muted: #5f6762;
+  --text-faint: #656d68;
+
+  /* 焦点环固定蓝色，和黑板绿、荧光黄都区分开。 */
+  --focus-ring: #2a66c4;
   --on-accent: #ffffff;
   --on-accent-press: #ffffff;
 
-  --accent-weak: #eef3fd;
-  --accent-weak-2: #e3ecfc;
-  --accent-text: #2a63d8;
-  --video-accent: #7aa6ff;
-  /* 小号状态文字在对应浅色底上均保持至少 4.5:1。 */
-  --status-ok: #147a52;
+  --accent-weak: #e8f2ed;
+  --accent-weak-2: #d6e9df;
+  --accent-text: #1a6a50;
+
+  /* 荧光笔：黄色只表示「课上的某个时刻」——时间戳、当前句、高亮、播放头。 */
+  --marker: rgb(255 214 10 / 0.42);
+  --marker-strong: #ffd60a;
+  --marker-weak: #fff6cc;
+  --marker-ink: #5c4a00;
+  --video-accent: #ffd60a;
+
+  --status-ok: #1f7a4d;
   --on-status-ok: #ffffff;
-  --status-ok-bg: #e9f6f0;
-  --status-warn: #975a00;
-  --status-warn-bg: #faf2e0;
-  --status-err: #c92a2a;
+  --status-ok-bg: #e7f4ec;
+  --status-warn: #9a5b00;
+  --status-warn-bg: #fbf1dc;
+  --status-err: #c0362c;
   --on-status-err: #ffffff;
-  --status-err-bg: #fbeaea;
+  --status-err-bg: #fcebe9;
+  --status-info: #2f62b8;
+  --status-info-bg: #e9effb;
 
-  /* 知识点主题色板：按主题在课程里的序号取模轮换，给长列表提供空间定位色。
-     只用于色点/色条等小面积图形（3:1 即达标），不当正文文字色用。 */
-  --topic-0: #2563eb;
-  --topic-1: #0d9488;
-  --topic-2: #d97706;
-  --topic-3: #7c3aed;
-  --topic-4: #db2777;
-  --topic-5: #65a30d;
+  /* 标签色板：实色给色点/色条（≥3:1），bg + text 给标签文字（≥4.9:1）。键名与后端 COURSE_COLORS 一致，另加 gray。 */
+  --tag-gray: #8a918c; --tag-gray-bg: #eef0ed; --tag-gray-text: #4f5752;
+  --tag-red: #d9493f; --tag-red-bg: #fbe9e7; --tag-red-text: #a8322a;
+  --tag-orange: #d06a22; --tag-orange-bg: #fcefe3; --tag-orange-text: #a24f14;
+  --tag-yellow: #b08400; --tag-yellow-bg: #fbf4d9; --tag-yellow-text: #8a6400;
+  --tag-green: #2f9e67; --tag-green-bg: #e6f4ec; --tag-green-text: #1d6e45;
+  --tag-teal: #1f9a94; --tag-teal-bg: #e3f4f3; --tag-teal-text: #146b67;
+  --tag-blue: #3b7ddd; --tag-blue-bg: #e8f0fc; --tag-blue-text: #2559a8;
+  --tag-purple: #8a5cd6; --tag-purple-bg: #f1ebfb; --tag-purple-text: #6b3fb5;
+  --tag-pink: #d6508f; --tag-pink-bg: #fbe9f2; --tag-pink-text: #a6336b;
 
-  /* 课程颜色标记：侧栏课程图标与色板用，键名与后端 COURSE_COLORS 一致。同样只上小面积图形。 */
-  --course-red: #dc2626;
-  --course-orange: #ea580c;
-  --course-yellow: #ca8a04;
-  --course-green: #16a34a;
-  --course-teal: #0d9488;
-  --course-blue: #2563eb;
-  --course-purple: #9333ea;
-  --course-pink: #db2777;
-  /* 深色底上的小图标（如文件夹封面上的角标）：两种主题都用亮的一档。 */
-  --course-red-on-dark: #f87171;
-  --course-orange-on-dark: #fb923c;
-  --course-yellow-on-dark: #facc15;
-  --course-green-on-dark: #4ade80;
-  --course-teal-on-dark: #2dd4bf;
-  --course-blue-on-dark: #60a5fa;
-  --course-purple-on-dark: #c084fc;
-  --course-pink-on-dark: #f472b6;
+  /* 知识点主题色：按序号取模轮换，指向标签色板。 */
+  --topic-0: var(--tag-blue);
+  --topic-1: var(--tag-teal);
+  --topic-2: var(--tag-orange);
+  --topic-3: var(--tag-purple);
+  --topic-4: var(--tag-pink);
+  --topic-5: var(--tag-green);
 
-  --scrollbar-thumb: #e0e2e8;
-  --scrollbar-thumb-hover: #d0d3da;
+  /* 旧名字：课程颜色 = 标签实色。 */
+  --course-red: var(--tag-red);
+  --course-orange: var(--tag-orange);
+  --course-yellow: var(--tag-yellow);
+  --course-green: var(--tag-green);
+  --course-teal: var(--tag-teal);
+  --course-blue: var(--tag-blue);
+  --course-purple: var(--tag-purple);
+  --course-pink: var(--tag-pink);
+  /* 深色底（黑板封面）上的小图标：两种主题都用亮的一档。 */
+  --course-red-on-dark: #ff7b70;
+  --course-orange-on-dark: #ff9f5a;
+  --course-yellow-on-dark: #f2c94c;
+  --course-green-on-dark: #5ccf8f;
+  --course-teal-on-dark: #4fd1c5;
+  --course-blue-on-dark: #7aaeff;
+  --course-purple-on-dark: #b794f6;
+  --course-pink-on-dark: #f58fc0;
 
-  /* 最轻的一档：分段控件的选中丸、悬浮小图标按钮那种「浮起 1mm」。
-     此前这些地方直接写 Tailwind 的 shadow-sm——那是按浅色背景调的 10% 纯黑，
-     放到暗色主题近黑的底上等于没有，浮层与背景完全糊在一起。
-     名字刻意不叫 --shadow-sm：Tailwind v4 自己在 @theme 里定义了同名变量，
-     重名会连带改掉全应用 shadow-sm 工具类的输出。 */
-  --shadow-raise: 0 1px 2px rgb(20 24 40 / 0.06), 0 1px 1px rgb(20 24 40 / 0.04);
-  /* 卡片几乎不投影：分层靠发丝线与底色明度差，阴影只留给真正浮起的菜单 / 对话框。 */
-  --shadow-card: 0 1px 1px rgb(20 24 40 / 0.03);
-  --shadow-card-hover: 0 1px 3px rgb(20 24 40 / 0.06);
-  --shadow-pop: 0 8px 30px rgb(20 24 40 / 0.1);
+  --scrollbar-thumb: rgb(16 24 20 / 0.14);
+  --scrollbar-thumb-hover: rgb(16 24 20 / 0.26);
+
+  /* 纸张颗粒：叠在大面积底色上，让平面读起来像纸而不是塑料。 */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.09 0 0 0 0 0.08 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-opacity: 0.045;
+
+  /* 名字刻意不叫 --shadow-sm：Tailwind v4 在 @theme 里有同名变量。 */
+  --shadow-raise: 0 0 0 1px rgb(16 24 20 / 0.05), 0 1px 2px rgb(16 24 20 / 0.08);
+  --shadow-card: 0 1px 2px rgb(16 24 20 / 0.04);
+  --shadow-card-hover: 0 2px 10px -2px rgb(16 24 20 / 0.08);
+  --shadow-pop: 0 0 0 1px rgb(16 24 20 / 0.06), 0 4px 8px rgb(16 24 20 / 0.05),
+    0 18px 44px -10px rgb(16 24 20 / 0.2);
 }
 
-/* 深色：沿用当前冷调近黑层级，覆盖默认浅色变量。 */
+/* 深色「黑板」：深绿黑底、粉笔白字；不是浅色的反转。 */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --surface-app: #0a0c10;
-  --surface-rail: #0f1217;
-  --surface-sidebar: #12161c;
-  --surface-panel: #151a21;
-  --surface-header: #0e1116;
-  --surface-card: rgb(255 255 255 / 0.035);
-  --surface-card-hover: rgb(255 255 255 / 0.07);
-  --surface-card-active: rgb(74 132 255 / 0.16);
-  --surface-input: rgb(255 255 255 / 0.06);
+  --surface-app: #151a18;
+  --surface-rail: #191f1c;
+  --surface-sidebar: #191f1c;
+  --surface-panel: #1d2420;
+  --surface-header: #151a18;
+  --surface-card: #1b221e;
+  --surface-card-hover: #242c28;
+  --surface-card-active: #1f3a2f;
+  --surface-input: #1b221e;
   --surface-stage: #000000;
-  --surface-titlebar: #0f1217;
+  --surface-titlebar: #191f1c;
 
-  --border-subtle: #414956;
-  --border-faint: #303742;
-  --border-strong: #687487;
-  /* #687487 在最亮的深色控件底 #252a30 上仍有 3.05:1。 */
-  --border-control: #687487;
+  --border-subtle: #2f3833;
+  --border-faint: #262e2a;
+  --border-strong: #3f4a44;
+  --border-control: #6b7871;
   --border-titlebar: rgb(255 255 255 / 0.06);
 
-  --text-strong: rgb(244 247 255 / 0.96);
-  --text-normal: rgb(228 234 245 / 0.72);
-  --text-muted: #a1abba;
-  /* 在深色 hover/active 表面上仍不低于正常小字所需的 4.5:1。 */
-  --text-faint: #8993a3;
+  --text-strong: #edf1ee;
+  --text-normal: #c3cbc6;
+  --text-muted: #9aa49e;
+  --text-faint: #8d9791;
 
-  --focus-ring: #8bb4ff;
+  --focus-ring: #86b2ff;
 
-  --accent-weak: rgb(74 132 255 / 0.16);
-  --accent-weak-2: rgb(74 132 255 / 0.24);
-  --accent-text: #8fb3ff;
-  --video-accent: #8fb3ff;
-  --status-ok: #34d399;
-  --on-status-ok: #000000;
-  --status-ok-bg: rgb(31 157 107 / 0.14);
-  --status-warn: #fbbf24;
-  --status-warn-bg: rgb(201 138 30 / 0.16);
-  --status-err: #f87171;
-  --on-status-err: #000000;
-  --status-err-bg: rgb(201 42 42 / 0.18);
+  --accent-weak: #1f3a2f;
+  --accent-weak-2: #27493b;
+  --accent-text: #6fd0a8;
 
-  /* 主题色板深色档：整体抬亮，保证在近黑底上仍清晰可辨。 */
-  --topic-0: #8fb3ff;
-  --topic-1: #5eead4;
-  --topic-2: #fbbf24;
-  --topic-3: #c4b5fd;
-  --topic-4: #f9a8d4;
-  --topic-5: #bef264;
+  --marker: rgb(255 214 10 / 0.26);
+  --marker-weak: rgb(255 214 10 / 0.14);
+  --marker-ink: #ffe58a;
 
-  --course-red: #f87171;
-  --course-orange: #fb923c;
-  --course-yellow: #facc15;
-  --course-green: #4ade80;
-  --course-teal: #2dd4bf;
-  --course-blue: #60a5fa;
-  --course-purple: #c084fc;
-  --course-pink: #f472b6;
+  --status-ok: #5ccf8f;
+  --on-status-ok: #0c1a14;
+  --status-ok-bg: rgb(92 207 143 / 0.14);
+  --status-warn: #f2c14e;
+  --status-warn-bg: rgb(242 193 78 / 0.14);
+  --status-err: #ff8a7f;
+  --on-status-err: #1a0c0b;
+  --status-err-bg: rgb(255 138 127 / 0.14);
+  --status-info: #8fb4ff;
+  --status-info-bg: rgb(143 180 255 / 0.14);
+
+  --tag-gray: #8f9993; --tag-gray-bg: rgb(143 153 147 / 0.16); --tag-gray-text: #c3cbc6;
+  --tag-red: #ff7b70; --tag-red-bg: rgb(255 123 112 / 0.16); --tag-red-text: #ff9d94;
+  --tag-orange: #ff9f5a; --tag-orange-bg: rgb(255 159 90 / 0.16); --tag-orange-text: #ffb27e;
+  --tag-yellow: #f2c94c; --tag-yellow-bg: rgb(242 201 76 / 0.16); --tag-yellow-text: #f5d77a;
+  --tag-green: #5ccf8f; --tag-green-bg: rgb(92 207 143 / 0.16); --tag-green-text: #7ddba6;
+  --tag-teal: #4fd1c5; --tag-teal-bg: rgb(79 209 197 / 0.16); --tag-teal-text: #7fdcd3;
+  --tag-blue: #7aaeff; --tag-blue-bg: rgb(122 174 255 / 0.16); --tag-blue-text: #9cc2ff;
+  --tag-purple: #b794f6; --tag-purple-bg: rgb(183 148 246 / 0.16); --tag-purple-text: #c9adf8;
+  --tag-pink: #f58fc0; --tag-pink-bg: rgb(245 143 192 / 0.16); --tag-pink-text: #f7a8ce;
 
   --scrollbar-thumb: rgb(255 255 255 / 0.14);
   --scrollbar-thumb-hover: rgb(255 255 255 / 0.26);
 
-  /* 暗色下光靠投影是分不开层次的：底已经接近纯黑，再黑也黑不出边界。
-     所以每档都叠一道 inset 顶部高光——模拟光从上方来，让抬起的面自己有一条亮边。
-     越高的层高光越亮，与投影一起构成「离底多远」的唯一线索。 */
-  --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.45);
-  /* 卡片不投影，只留一道极淡的顶部亮边——近黑底上分层靠它与发丝线。 */
+  /* 粉笔灰：同样的颗粒换成粉笔白。 */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.93 0 0 0 0 0.95 0 0 0 0 0.93 0 0 0 0.6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-opacity: 0.05;
+
+  --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 1px 2px rgb(0 0 0 / 0.5);
   --shadow-card: inset 0 1px 0 rgb(255 255 255 / 0.03);
-  --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.05);
-  --shadow-pop:
-    inset 0 1px 0 rgb(255 255 255 / 0.08), 0 12px 32px -8px rgb(0 0 0 / 0.6);
+  --shadow-card-hover: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 4px 12px rgb(0 0 0 / 0.3);
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 0.07), 0 18px 44px -10px rgb(0 0 0 / 0.75);
 }
 
 html,
@@ -226,7 +244,7 @@ body {
 /* 图标线宽：lucide 默认 2px，在 16–18px 的小图标上显得粗笨。统一收到 1.75，
    与正文字重更协调（CSS 的 stroke-width 会压过 svg 上的同名属性）。 */
 svg.lucide {
-  stroke-width: 1.75;
+  stroke-width: 1.6;
 }
 
 /* 按钮/表单控件的 font 与 color 继承由 Tailwind preflight 在 base 层提供。这里不要再写

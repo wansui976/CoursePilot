@@ -399,9 +399,9 @@ describe("accent presets", () => {
     expect(useTheme.getState().accent).toBe("green");
   });
 
-  it("defaults to blue when nothing (or something unknown) was saved", () => {
+  it("defaults to chalkboard green when nothing (or something unknown) was saved", () => {
     localStorage.setItem("course-ai-accent", "neon");
     useTheme.getState().sync();
-    expect(useTheme.getState().accent).toBe("blue");
+    expect(useTheme.getState().accent).toBe("green");
   });
 });

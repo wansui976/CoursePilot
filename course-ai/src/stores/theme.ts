@@ -8,16 +8,28 @@ export type AccentKey = "blue" | "purple" | "green" | "orange" | "red" | "custom
 const THEME_KEY = "course-ai-theme";
 const ACCENT_KEY = "course-ai-accent";
 const CUSTOM_ACCENT_KEY = "course-ai-custom-accent";
-const DEFAULT_ACCENT: AccentKey = "blue";
+const DEFAULT_ACCENT: AccentKey = "green";
 const DEFAULT_CUSTOM_ACCENT = "#0b6bcb";
 
 /** 强调色：accent 为基色、press 深一档；text/weak 用 color-mix 随明暗派生。
- *  五个预设是明亮、饱和、色相干净的颜色（参考 Linear / Notion），亮度压在白字仍有
- *  4.8:1 以上的位置；按下态再深一档。custom = 用户通过系统色板任选（色轮）。 */
-export const ACCENTS: { key: AccentKey; i18nKey: string; accent: string; press: string }[] = [
+ *  默认是黑板绿（品牌色）。预设亮度压在白字仍有 4.8:1 以上的位置；按下态再深一档。
+ *  dark：深色「黑板」主题下换成提亮的一档（配深色前景字）。custom = 用户通过系统色板任选。 */
+export const ACCENTS: {
+  key: AccentKey;
+  i18nKey: string;
+  accent: string;
+  press: string;
+  dark?: { accent: string; press: string };
+}[] = [
+  {
+    key: "green",
+    i18nKey: "settings.appearance.accentGreen",
+    accent: "#1d6b52",
+    press: "#165641",
+    dark: { accent: "#5cc49b", press: "#7ad3ae" },
+  },
   { key: "blue", i18nKey: "settings.appearance.accentBlue", accent: "#0b6bcb", press: "#0a5aab" },
   { key: "purple", i18nKey: "settings.appearance.accentPurple", accent: "#7c3aed", press: "#6d28d9" },
-  { key: "green", i18nKey: "settings.appearance.accentGreen", accent: "#0c7f57", press: "#0a6b49" },
   { key: "orange", i18nKey: "settings.appearance.accentOrange", accent: "#c2410c", press: "#9a3412" },
   { key: "red", i18nKey: "settings.appearance.accentRed", accent: "#dc2626", press: "#b91c1c" },
   { key: "custom", i18nKey: "settings.appearance.accentCustom", accent: DEFAULT_CUSTOM_ACCENT, press: "#0a5aab" },
@@ -65,8 +77,8 @@ function hasVisibleHeavyDom(): boolean {
 /** 与 globals.css 中 --surface-app 保持一致。覆盖层直接用常量，避免临时改 data-theme
  *  触发整页重算/闪一下，也避免读到旧主题色导致「圆与背景同色看不见」。 */
 const SURFACE_APP: Record<EffectiveTheme, string> = {
-  light: "#f5f5f7",
-  dark: "#0a0c10",
+  light: "#fbfbfa",
+  dark: "#151a18",
 };
 
 const CIRCLE_MS = 600;
@@ -374,17 +386,6 @@ function readableAccentText(base: string, effective: EffectiveTheme): string {
   return target;
 }
 
-/** 播放器控制层是近黑底，单独派生强调色，不能复用面板上的文字色。 */
-function readableVideoAccent(base: string): string {
-  const background = "#1a1a1a";
-  if (contrastRatio(base, background) >= 4.5) return base;
-  for (let step = 1; step <= 100; step += 1) {
-    const candidate = mixHex(base, "#ffffff", step / 100);
-    if (contrastRatio(candidate, background) >= 4.5) return candidate;
-  }
-  return "#ffffff";
-}
-
 function darkenHex(value: string, amount: number): string {
   return `#${rgbFromHex(value)
     .map((channel) => Math.round(channel * amount).toString(16).padStart(2, "0"))
@@ -410,19 +411,21 @@ export function accentVars(
   const validCustomAccent = isHexColor(customAccent)
     ? normalizeHexColor(customAccent)
     : DEFAULT_CUSTOM_ACCENT;
-  const base = accent === "custom" ? validCustomAccent : entry.accent;
-  const press = accent === "custom" ? darkenHex(base, 0.88) : entry.press;
+  const preset = effective === "dark" && entry.dark ? entry.dark : entry;
+  const base = accent === "custom" ? validCustomAccent : preset.accent;
+  const press = accent === "custom" ? darkenHex(base, 0.88) : preset.press;
   const onAccent = readableForeground(base);
   const onAccentPress = readableForeground(press);
-  const statusOk = effective === "dark" ? "#34d399" : "#147a52";
-  const statusErr = effective === "dark" ? "#f87171" : "#c92a2a";
+  const statusOk = effective === "dark" ? "#5ccf8f" : "#1f7a4d";
+  const statusErr = effective === "dark" ? "#ff8a7f" : "#c0362c";
   return {
     "--accent": base,
     "--accent-press": press,
     "--on-accent": onAccent,
     "--on-accent-press": onAccentPress,
     "--accent-text": readableAccentText(base, effective),
-    "--video-accent": readableVideoAccent(base),
+    // 播放进度是「时间」，固定荧光黄，不跟强调色走。
+    "--video-accent": "#ffd60a",
     "--on-status-ok": readableForeground(statusOk),
     "--on-status-err": readableForeground(statusErr),
     "--accent-weak": `color-mix(in srgb, ${base} 14%, transparent)`,

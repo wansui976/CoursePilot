@@ -516,7 +516,12 @@ if (!["chromium", "webkit"].includes(opts.engine)) throw new Error(`未知引擎
 const browser =
   opts.engine === "webkit"
     ? await webkit.launch({ headless: true })
-    : await chromium.launch({ channel: "chrome", headless: true });
+    : await chromium.launch(
+        // 没装 Chrome 的环境（如 CI 容器）可用 CHROME_PATH 指向任意 Chromium 可执行文件。
+        process.env.CHROME_PATH
+          ? { executablePath: process.env.CHROME_PATH, headless: true }
+          : { channel: "chrome", headless: true },
+      );
 const failures = [];
 const pageErrors = new Set();
 const unknownCmds = new Set();

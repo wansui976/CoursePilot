@@ -1,6 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+// 设计语言用到的三款字体随应用打包（本地优先，离线也要能用）。中文走系统字体。
+import "@fontsource-variable/instrument-sans";
+import "@fontsource-variable/newsreader/opsz.css";
+import "@fontsource-variable/newsreader/opsz-italic.css";
+import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 import "./i18n";
 import { startJobListener } from "@/stores/jobs";
