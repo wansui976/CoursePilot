@@ -176,7 +176,7 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
           />
         </label>
         <span className="row-thumb">
-          <LectureCover title={item.title} className="absolute inset-0 h-full w-full" />
+          <LectureCover videoId={item.id} title={item.title} className="absolute inset-0 h-full w-full" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-[550] text-[var(--text-1)]">

@@ -304,6 +304,7 @@ export function ResumeSection({
           >
             <span className="ca-resume-cover">
               <LectureCover
+                videoId={resume!.video.id}
                 title={resume!.video.title}
                 course={course}
                 index={resume!.index}

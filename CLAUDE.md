@@ -14,9 +14,10 @@ https://claude.ai/artifact/Ki5ntSjcqdaysZd46WpzWc
 
 - 浅色主题叫「纸」，深色叫「黑板」。颜色一律用 `course-ai/src/styles/tokens.css` 里的变量，不写裸色值。
 - 黑板绿（`--accent`）是唯一的操作色，只给主操作和打开的开关；选中态用中性底色。
-- 荧光黄（`--marker*`）只表示「课上的某个时刻」：时间戳、当前句、高亮、播放头。不用来表示警告或装饰。
+- 荧光黄（`--marker*`）只表示「课上的某个时刻」：当前句、高亮、播放头。不用来表示警告或装饰。
+- 可点的时间戳（笔记、摘要、问答里的 `xx:xx`）是跳转操作，用主题色（`--accent-text` / `--accent-weak`）。
 - 读的内容和标题用衬线（`--font-display` / `--font-reading`），操作控件用无衬线（`--font-app`），时间和计数用等宽（`--font-mono`）。
-- 课程和每一讲的封面统一是黑板封面（`ui/BoardCover`），不用视频缩略图。
+- 单个视频的封面用视频自己的首帧（`LectureCover` 传 `videoId`，取不到时退回黑板）；课程、牌堆这类一叠视频用黑板封面（`ui/BoardCover`）。
 - 圆角 4 / 6 / 8 / 12；卡片靠发丝线分层，阴影只给菜单、弹层和对话框。
 
 ## 检查

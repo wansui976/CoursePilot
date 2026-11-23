@@ -4,13 +4,29 @@ import type { CourseColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
- * 黑板封面：课程和每一讲统一用它，不用视频缩略图。
+ * 黑板封面：课程、牌堆这类「一叠视频」用它；单个视频有首帧时用首帧（见 LectureCover）。
  * 黑板底 + 很淡的粉笔学科图 + 左上课程名 + 左下衬线大数字（课程颜色）。
  * 尺寸随容器缩放（容器查询），从列表行里的小缩略图到主页大卡都是同一张图。
  */
 
 /** 每种学科的粉笔图。viewBox 300×169，主要画在右侧 60%，左下留给数字。 */
-const ART: Record<Exclude<CoverKind, "generic">, ReactNode> = {
+const ART: Record<CoverKind, ReactNode> = {
+  // 猜不出学科：画一块写过的黑板——几行粉笔字迹、一个圈出来的重点、一个箭头和一行要点。
+  generic: (
+    <g className="stroke" transform="translate(0 14)">
+      <path d="M156 40c6-5 10 4 16-1s9 3 15-1 10 3 16-1 9 4 15 0 11 3 17-1 9 2 14 0" />
+      <path d="M156 62c6-4 11 3 17-1s9 4 15 0 10-3 16 1 8 2 14-1" />
+      <path d="M156 64c22 3 44 2 66 0" opacity="0.55" />
+      <ellipse cx="246" cy="98" rx="30" ry="15" />
+      <path d="M234 98c5-4 9 3 13 0s8 2 12-1" />
+      <path d="M160 98c18 0 34 0 52 0M204 92l9 6-9 6" />
+      <circle cx="162" cy="130" r="2.2" />
+      <path d="M172 130c6-4 10 3 16-1s10 3 16-1 9 3 15 0" />
+      <circle cx="162" cy="150" r="2.2" />
+      <path d="M172 150c6-3 10 3 15 0s9 2 14-1" />
+      <path d="M262 136l7 8 14-18" />
+    </g>
+  ),
   linear: (
     <>
       <text x="150" y="62" fontSize="24">A = SΛS⁻¹</text>
@@ -133,11 +149,9 @@ export function BoardCover({
   const glyph = number == null ? (caption?.trim().charAt(0) ?? "") : null;
   return (
     <span className={cn("ca-board-cover", className)} data-kind={kind}>
-      {kind !== "generic" && (
-        <svg className="art" viewBox="0 0 300 169" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
-          {ART[kind]}
-        </svg>
-      )}
+      <svg className="art" viewBox="0 0 300 169" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+        {ART[kind]}
+      </svg>
       {caption && (
         <span className="cap" aria-hidden="true">
           {caption}

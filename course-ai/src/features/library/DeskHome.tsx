@@ -74,6 +74,7 @@ export function DeskHome({
           {open && resume ? (
             <>
               <LectureCover
+                videoId={resume.video.id}
                 title={resume.video.title}
                 course={open.course}
                 index={resume.index}

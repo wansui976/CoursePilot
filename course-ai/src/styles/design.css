@@ -112,8 +112,8 @@
   line-height: 16px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  color: var(--marker-ink);
-  background: var(--marker-weak);
+  color: var(--accent-text);
+  background: var(--accent-weak);
   padding: 2px 6px;
   border-radius: var(--r-xs);
   vertical-align: 1px;
@@ -132,8 +132,8 @@ button.ca-time {
 }
 
 button.ca-time:hover {
-  background: var(--marker-strong);
-  color: #1b1f1d;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .ca-time.quiet {
@@ -584,6 +584,22 @@ button.ca-time:hover {
   .ca-board-cover > .art {
     display: none;
   }
+}
+
+/* 单个视频的封面：视频自己的首帧，铺满；叠在上面的进度条、播放按钮照旧。 */
+.ca-video-cover {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--board);
+}
+
+.ca-video-cover > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* ===================== 课程牌堆 ===================== */
@@ -1164,21 +1180,21 @@ button.ca-time:hover {
   background: var(--stage-err);
 }
 
-/* 所有可点的时间戳（摘要、问答、笔记、出处）统一成荧光笔芯片。 */
+/* 所有可点的时间戳（摘要、问答、笔记、出处）统一成主题色芯片：它是可以点的跳转。 */
 .ca-ts-chip {
   font-family: var(--font-mono) !important;
   font-size: 11.5px !important;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  color: var(--marker-ink) !important;
-  background: var(--marker-weak) !important;
+  color: var(--accent-text) !important;
+  background: var(--accent-weak) !important;
   border-radius: var(--r-xs) !important;
   padding: 1px 5px !important;
 }
 
 .ca-ts-chip:hover {
-  background: var(--marker-strong) !important;
-  color: #1b1f1d !important;
+  background: var(--accent) !important;
+  color: var(--on-accent) !important;
 }
 
 /* ===================== AI 板书 ===================== */

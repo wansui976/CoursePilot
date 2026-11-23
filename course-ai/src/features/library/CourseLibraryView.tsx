@@ -1012,6 +1012,7 @@ export function CourseLibraryView({
         >
           <span className="ca-thumb" data-vt-video={video.id}>
             <LectureCover
+              videoId={video.id}
               title={video.title}
               course={selectedCourse}
               showCaption={false}
@@ -1149,6 +1150,7 @@ export function CourseLibraryView({
           <span className="row-main">
             <span className="row-thumb" data-vt-video={video.id}>
               <LectureCover
+              videoId={video.id}
               title={video.title}
               course={selectedCourse}
               showCaption={false}
@@ -1241,6 +1243,7 @@ export function CourseLibraryView({
       >
         <span className="ca-continue-cover">
           <LectureCover
+              videoId={lastVideo.id}
               title={lastVideo.title}
               course={selectedCourse}
               showCaption={false}
