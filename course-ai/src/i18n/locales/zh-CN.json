@@ -703,7 +703,9 @@
       "about": "批注：{{quote}}",
       "lost": "笔记改过了，找不到这条批注对应的原文",
       "erase": "擦掉这条批注"
-    }
+    },
+    "pageMark": "第 {{page}} 页",
+    "pageCount": "打印成讲义约 {{count}} 页（A4）"
   },
   "quiz": {
     "correct": "正确",

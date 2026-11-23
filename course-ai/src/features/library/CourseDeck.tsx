@@ -9,6 +9,7 @@ import { courseBookmark } from "@/lib/bookmark";
 import { Button } from "@/ui/button";
 import { Mark, Tag } from "@/ui/marks";
 import { useSwipeCard } from "@/features/study/useSwipeCard";
+import { haptic, playSound } from "@/lib/feedback";
 
 export type DeckCourse = {
   course: Course;
@@ -56,6 +57,8 @@ export function CourseDeck({
     if (target === front) return;
     // 往后翻一张时，原来最前面的那张做一个「甩回牌底」的动作。
     if ((target - front + n) % n === 1) setLeaving(items[front].course.id);
+    playSound("page");
+    haptic("tick");
     onFrontChange(target);
   }
 

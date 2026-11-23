@@ -69,7 +69,11 @@
   --sky-night-bottom: #23324a;
   --sun: #ffd27a;
   --moon: #eef2ec;
-  --hill: rgb(23 33 28 / 0.55);
+  /* 远山按季节换色。 */
+  --hill-spring: #6f9a6a;
+  --hill-summer: #3f7552;
+  --hill-autumn: #a7784a;
+  --hill-winter: #9aa3a6;
   /* 窗外的天气：云、阴天的灰、雨丝、雪。 */
   --cloud: #f1f4f5;
   --cloud-dark: #8e989e;

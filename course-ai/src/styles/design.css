@@ -2232,3 +2232,73 @@ button.ca-time:hover {
   text-decoration-thickness: 1px;
   text-underline-offset: 4px;
 }
+
+/* ===================== 笔记分页记号 ===================== */
+
+/* 打印成讲义时，下一页从这里开始：一道很淡的虚线，右边一个页码。 */
+.ca-page-break {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  height: 0;
+  border-top: 1px dashed var(--border-subtle);
+  pointer-events: none;
+}
+
+.ca-page-break > span {
+  position: absolute;
+  right: 0;
+  top: -9px;
+  padding: 0 0 0 6px;
+  background: var(--surface-panel);
+  font-family: var(--font-app);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-faint);
+}
+
+.ca-page-count {
+  margin: 0;
+  padding: 4px 16px 20px;
+  text-align: right;
+  font-family: var(--font-app);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+/* 擦掉一条铅笔批注后留下的橡皮屑：几粒小卷，往下掉一点、慢慢淡掉。 */
+.ca-eraser-crumbs {
+  position: absolute;
+  left: 4px;
+  width: 100px;
+  height: 20px;
+  pointer-events: none;
+}
+
+.ca-eraser-crumbs i {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 5px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--eraser) 55%, var(--pencil));
+  transform: rotate(var(--r));
+  animation: ca-crumb-fall 1.6s var(--ease-out) forwards;
+}
+
+@keyframes ca-crumb-fall {
+  0% {
+    opacity: 0.9;
+    transform: translateY(-4px) rotate(var(--r));
+  }
+  60% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px) rotate(calc(var(--r) + 40deg));
+  }
+}

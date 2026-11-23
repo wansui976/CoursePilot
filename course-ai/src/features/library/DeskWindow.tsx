@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import type { Daypart } from "@/lib/daypart";
+import type { Daypart, Season } from "@/lib/daypart";
+import { moonLitPath } from "@/lib/moon";
 import type { WeatherNow } from "@/lib/ipc/system";
 
 /** 雨丝、雪片的位置：固定的一组，看起来随机，每次渲染都一样。 */
@@ -12,10 +13,16 @@ const DROPS = Array.from({ length: 26 }, (_, i) => ({ x: (i * 37 + 11) % 200, y:
  */
 export function DeskWindow({
   part,
+  season = "autumn",
+  moon = 0.5,
   weather,
   placeName,
 }: {
   part: Daypart;
+  /** 远山的颜色跟着季节。 */
+  season?: Season;
+  /** 夜里月亮的月相（0 新月 … 0.5 满月）。 */
+  moon?: number;
   weather: WeatherNow | null;
   placeName?: string;
 }) {
@@ -49,7 +56,9 @@ export function DeskWindow({
           {sun && <circle cx={part === "dusk" ? 150 : 56} cy={part === "day" ? 34 : 70} r="13" fill="var(--sun)" opacity="0.9" />}
           {night && !grey && (
             <>
-              <path d="M150 30a14 14 0 1 0 12 22 11 11 0 1 1-12-22z" fill="var(--moon)" opacity="0.9" />
+              {/* 真实月相：暗的部分隐约可见（地照），亮的部分按盈亏画。 */}
+              <circle cx="150" cy="40" r="12" fill="var(--moon)" opacity="0.06" />
+              <path d={moonLitPath(moon, 150, 40, 12)} fill="var(--moon)" opacity="0.92" />
               {[[40, 24], [70, 46], [104, 18], [124, 52], [178, 70], [28, 62]].map(([x, y]) => (
                 <circle key={`${x}-${y}`} cx={x} cy={y} r="1.2" fill="var(--moon)" opacity="0.8" />
               ))}
@@ -58,7 +67,7 @@ export function DeskWindow({
           {/* 阴天一层灰：天色还在，只是蒙上了。 */}
           {grey && <rect x="0" y="0" width="200" height="140" fill="var(--overcast)" opacity={night ? 0.35 : 0.55} />}
           {(condition === "cloudy" || (part === "day" && condition === "clear")) && (
-            <g fill="var(--cloud)" opacity="0.9">
+            <g fill="var(--cloud)" opacity="0.9" data-clouds="">
               <ellipse cx="128" cy="40" rx="20" ry="7" />
               <ellipse cx="142" cy="35" rx="12" ry="7" />
               {condition === "cloudy" && (
@@ -77,7 +86,11 @@ export function DeskWindow({
               <ellipse cx="180" cy="16" rx="40" ry="15" />
             </g>
           )}
-          <path d="M0 112c26-14 48-18 74-10s44 4 66-8 40-8 60 2v44H0z" fill="var(--hill)" opacity={condition === "fog" ? 0.35 : 1} />
+          <path
+            d="M0 112c26-14 48-18 74-10s44 4 66-8 40-8 60 2v44H0z"
+            fill={night ? `color-mix(in srgb, var(--hill-${season}) 35%, var(--sky-night-bottom))` : `var(--hill-${season})`}
+            opacity={condition === "fog" ? 0.35 : 1}
+          />
           {condition === "fog" && (
             <g fill="var(--cloud)" opacity="0.7" filter="url(#ca-fog-blur)">
               <rect x="-10" y="58" width="220" height="10" rx="5" />

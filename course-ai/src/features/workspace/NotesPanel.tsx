@@ -8,6 +8,7 @@ import { type Editor, EditorContent, useEditor } from "@tiptap/react";
 import { type ExportItem } from "./ExportMenu";
 import { ArchiveRestore, Loader2, NotebookPen, PencilLine, X } from "lucide-react";
 import { PencilMargin } from "./notes/PencilMargin";
+import { PageMarks } from "./notes/PageMarks";
 import { isMobile } from "@/lib/mobileFiles";
 import type { NoteAnnotation } from "@/lib/ipc/media";
 import { Button } from "@/ui/button";
@@ -593,6 +594,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             >
               <EditorContent editor={editor} />
               <PencilMargin videoId={videoId} editor={editor} sheetRef={sheetRef} />
+              <PageMarks editor={editor} sheetRef={sheetRef} />
             </div>
           </>
         )}

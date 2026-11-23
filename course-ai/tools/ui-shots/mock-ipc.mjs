@@ -533,6 +533,8 @@ export function installMockIpc({ theme, safeArea }) {
       condition: localStorage.getItem("__shot-weather") || "drizzle",
       is_day: true,
       temperature_c: 9.6,
+      sunrise_ms: null,
+      sunset_ms: null,
       fetched_at: now,
     }),
     cmd_weather_find_place: () => [
@@ -680,7 +682,8 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_list_transcripts: () => transcript,
     cmd_get_chapters: () => chapters,
     cmd_get_summary: () => summary,
-    cmd_get_notes: () => notes,
+    // __shot-long-notes：把笔记重复十遍，看分页记号。
+    cmd_get_notes: () => (localStorage.getItem("__shot-long-notes") === "1" ? Array(10).fill(notes).join("\n\n") : notes),
     cmd_list_note_versions: () => [
       { id: "h:3", source: "history", edited_at: now - 25 * 60_000, captured_at: now - 20 * 60_000, content: notes.replace("> 一句话", "> 草稿：一句话") },
       { id: "h:2", source: "history", edited_at: now - 3 * 3_600_000, captured_at: now - 2 * 3_600_000, content: "# 梯度下降笔记\n\n## 核心思想\n\n沿负梯度方向迭代更新参数。[00:15]" },

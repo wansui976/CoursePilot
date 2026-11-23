@@ -32,6 +32,9 @@ pub struct Weather {
     pub condition: Condition,
     pub is_day: bool,
     pub temperature_c: f64,
+    /// 今天当地的日出、日落（毫秒时间戳）；拿不到为 None，窗外退回固定钟点。
+    pub sunrise_ms: Option<i64>,
+    pub sunset_ms: Option<i64>,
     pub fetched_at: i64,
 }
 
@@ -66,6 +69,24 @@ fn round2(v: f64) -> f64 {
 #[derive(Deserialize)]
 struct ForecastBody {
     current: CurrentBody,
+    #[serde(default)]
+    utc_offset_seconds: i64,
+    #[serde(default)]
+    daily: Option<DailyBody>,
+}
+
+#[derive(Deserialize)]
+struct DailyBody {
+    #[serde(default)]
+    sunrise: Vec<String>,
+    #[serde(default)]
+    sunset: Vec<String>,
+}
+
+/// Open-Meteo 的当地时间（"2026-11-23T06:31"，不带时区）+ 时差 → 毫秒时间戳。
+fn local_to_ms(text: &str, utc_offset_seconds: i64) -> Option<i64> {
+    let naive = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M").ok()?;
+    Some((naive.and_utc().timestamp() - utc_offset_seconds) * 1000)
 }
 
 #[derive(Deserialize)]
@@ -78,10 +99,17 @@ struct CurrentBody {
 pub fn parse_forecast(body: &str, now: i64) -> AppResult<Weather> {
     let parsed: ForecastBody = serde_json::from_str(body)
         .map_err(|error| AppError::Other(format!("天气数据看不懂：{error}")))?;
+    let offset = parsed.utc_offset_seconds;
+    let first = |list: Option<&Vec<String>>| {
+        list.and_then(|items| items.first())
+            .and_then(|text| local_to_ms(text, offset))
+    };
     Ok(Weather {
         condition: condition_of(parsed.current.weather_code),
         is_day: parsed.current.is_day != 0,
         temperature_c: parsed.current.temperature_2m,
+        sunrise_ms: first(parsed.daily.as_ref().map(|daily| &daily.sunrise)),
+        sunset_ms: first(parsed.daily.as_ref().map(|daily| &daily.sunset)),
         fetched_at: now,
     })
 }
@@ -156,6 +184,8 @@ pub async fn cmd_weather_now(latitude: f64, longitude: f64) -> AppResult<Weather
             ("latitude", lat.to_string()),
             ("longitude", lon.to_string()),
             ("current", "weather_code,is_day,temperature_2m".to_string()),
+            ("daily", "sunrise,sunset".to_string()),
+            ("forecast_days", "1".to_string()),
             ("timezone", "auto".to_string()),
         ])
         .send()
@@ -227,7 +257,15 @@ mod tests {
         assert_eq!(weather.condition, Condition::Rain);
         assert!(weather.is_day);
         assert_eq!(weather.temperature_c, 12.4);
+        assert_eq!(weather.sunrise_ms, None);
         assert!(parse_forecast("{}", 0).is_err());
+        // 上海（UTC+8）当地 06:31 日出 = UTC 前一天 22:31。
+        let with_sun = r#"{"utc_offset_seconds":28800,"current":{"weather_code":0,"is_day":1,"temperature_2m":10},
+                          "daily":{"sunrise":["2026-11-23T06:31"],"sunset":["2026-11-23T16:53"]}}"#;
+        let weather = parse_forecast(with_sun, 0).unwrap();
+        let sunrise = chrono::DateTime::from_timestamp_millis(weather.sunrise_ms.unwrap()).unwrap();
+        assert_eq!(sunrise.to_rfc3339(), "2026-11-22T22:31:00+00:00");
+        assert!(weather.sunset_ms.unwrap() > weather.sunrise_ms.unwrap());
     }
 
     #[test]

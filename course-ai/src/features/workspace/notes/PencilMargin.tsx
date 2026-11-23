@@ -9,6 +9,18 @@ import { qk } from "@/lib/queryKeys";
 import { findQuoteRange, GAP, stackTops } from "@/lib/pencilLayout";
 
 const HIGHLIGHT = "ca-pencil";
+/** 橡皮屑留多久。 */
+const CRUMBS_MS = 1600;
+/** 几粒橡皮屑的位置和朝向（[x, y, 旋转]），固定一组。 */
+const CRUMBS: [number, number, number][] = [
+  [6, 4, 20],
+  [18, 10, -35],
+  [30, 2, 60],
+  [42, 12, -10],
+  [55, 6, 45],
+  [68, 14, -60],
+  [80, 3, 15],
+];
 /** 没有批注时用同一个空数组：每次渲染新建一个会让测量的 effect 反复触发。 */
 const NONE: NoteAnnotation[] = [];
 
@@ -34,6 +46,8 @@ export function PencilMargin({
     queryKey: qk.noteAnnotations(videoId),
     queryFn: () => ipc.ai.noteAnnotations(videoId),
   });
+  // 擦过的地方留几粒橡皮屑，一会儿就散掉。
+  const [crumbs, setCrumbs] = useState<{ id: string; top: number }[]>([]);
   const erase = useMutation({
     mutationFn: (id: string) => ipc.ai.eraseNoteAnnotation(videoId, id),
     onMutate: (id) =>
@@ -41,6 +55,11 @@ export function PencilMargin({
         list.filter((item) => item.id !== id),
       ),
   });
+  function eraseNote(id: string, top: number) {
+    setCrumbs((list) => [...list, { id, top }]);
+    window.setTimeout(() => setCrumbs((list) => list.filter((crumb) => crumb.id !== id)), CRUMBS_MS);
+    erase.mutate(id);
+  }
   const [placed, setPlaced] = useState<Placed[]>([]);
   const [tops, setTops] = useState<number[]>([]);
   const noteRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -104,9 +123,16 @@ export function PencilMargin({
     setTops((prev) => (prev.length === next.length && prev.every((v, i) => v === next[i]) ? prev : next));
   }, [placed]);
 
-  if (annotations.length === 0) return null;
+  if (annotations.length === 0 && crumbs.length === 0) return null;
   return (
     <div className="ca-pencil-margin" aria-label={t("notes.pencil.margin")}>
+      {crumbs.map((crumb) => (
+        <span key={crumb.id} className="ca-eraser-crumbs" style={{ top: crumb.top }} aria-hidden="true">
+          {CRUMBS.map(([x, y, r], k) => (
+            <i key={k} style={{ "--x": `${x}px`, "--y": `${y}px`, "--r": `${r}deg` } as React.CSSProperties} />
+          ))}
+        </span>
+      ))}
       {placed.map(({ annotation, anchored }, i) => (
         <div
           key={annotation.id}
@@ -124,7 +150,7 @@ export function PencilMargin({
             className="ca-pencil-erase"
             aria-label={t("notes.pencil.erase")}
             title={t("notes.pencil.erase")}
-            onClick={() => erase.mutate(annotation.id)}
+            onClick={() => eraseNote(annotation.id, tops[i] ?? 0)}
           >
             <Eraser aria-hidden="true" />
           </button>

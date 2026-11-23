@@ -3,12 +3,12 @@ import { create } from "zustand";
 /**
  * 界面声音与触感：只在几个时刻出声、只在状态变化时震动（设计系统 SoundDesign / Haptics）。
  *
- * 声音：粉笔书写、翻卡、点亮三种，现场用 Web Audio 合成（不带音频文件），
+ * 声音：粉笔书写、翻卡、翻页（课程牌堆）、点亮四种，现场用 Web Audio 合成（不带音频文件），
  * 默认「很轻」，可在设置 → 外观里关掉；启动后头两秒不出声。
  * 触感：手机上用 navigator.vibrate（Android WebView 支持；iOS WebView 没有这个接口，调用无效果）。
  */
 export type SoundLevel = "off" | "quiet" | "normal";
-export type SoundKind = "chalk" | "flip" | "stamp";
+export type SoundKind = "chalk" | "flip" | "page" | "stamp";
 export type HapticKind = "tick" | "soft" | "stamp" | "warning" | "success";
 
 const SOUND_KEY = "course-ai-ui-sound";
@@ -116,6 +116,27 @@ function synth(c: AudioContext, kind: SoundKind, scale: number): AudioScheduledS
     envelope(g, t, [[0.03, 0.16], [0.12, 0.06], [0.25, 0]], scale);
     s.start(t);
     out.push(s);
+  } else if (kind === "page") {
+    // 翻一页厚纸：先是纸面擦过的一声「唰」（带通往上扫），末尾纸落下的一下轻响。
+    const swish = noise(c, 0.22);
+    const band = c.createBiquadFilter();
+    const g1 = c.createGain();
+    band.type = "bandpass";
+    band.Q.value = 0.9;
+    band.frequency.setValueAtTime(900, t);
+    band.frequency.exponentialRampToValueAtTime(2600, t + 0.18);
+    swish.connect(band).connect(g1).connect(c.destination);
+    envelope(g1, t, [[0.04, 0.12], [0.14, 0.07], [0.2, 0]], scale);
+    swish.start(t);
+    const tap = noise(c, 0.06);
+    const low = c.createBiquadFilter();
+    const g2 = c.createGain();
+    low.type = "lowpass";
+    low.frequency.value = 700;
+    tap.connect(low).connect(g2).connect(c.destination);
+    envelope(g2, t + 0.19, [[0.005, 0.18], [0.05, 0]], scale);
+    tap.start(t + 0.19);
+    out.push(swish, tap);
   } else {
     const o = c.createOscillator();
     const g = c.createGain();

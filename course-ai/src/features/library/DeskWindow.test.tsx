@@ -14,7 +14,7 @@ describe("DeskWindow", () => {
     const { container } = render(
       <DeskWindow
         part="day"
-        weather={{ condition: "rain", is_day: true, temperature_c: 9.6, fetched_at: 0 }}
+        weather={{ condition: "rain", is_day: true, temperature_c: 9.6, sunrise_ms: null, sunset_ms: null, fetched_at: 0 }}
         placeName="上海"
       />,
     );

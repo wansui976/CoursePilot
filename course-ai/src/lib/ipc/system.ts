@@ -42,6 +42,9 @@ export interface WeatherNow {
   condition: WeatherCondition;
   is_day: boolean;
   temperature_c: number;
+  /** 当地今天的日出、日落（毫秒时间戳）；拿不到为 null。 */
+  sunrise_ms: number | null;
+  sunset_ms: number | null;
   fetched_at: number;
 }
 

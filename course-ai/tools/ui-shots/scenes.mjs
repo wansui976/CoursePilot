@@ -124,6 +124,33 @@ export const scenes = [
     },
   },
   {
+    // 窗外的四季和月相：春、夏、秋、冬的白天，和几个夜晚的月亮（新月后、上弦、满月、下弦）。
+    name: "home-desk-seasons",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("course-ai-home-layout", "desk");
+        localStorage.removeItem("course-ai-weather-place");
+      });
+      const moments = [
+        ["spring", new Date(2026, 3, 15, 11)],
+        ["summer", new Date(2026, 6, 15, 11)],
+        ["autumn", new Date(2026, 9, 15, 11)],
+        ["winter", new Date(2026, 0, 15, 11)],
+        ["crescent", new Date(2026, 10, 13, 22)],
+        ["quarter", new Date(2026, 10, 17, 22)],
+        ["full", new Date(2026, 10, 24, 22)],
+        ["waning", new Date(2026, 11, 2, 22)],
+      ];
+      for (const [suffix, time] of moments) {
+        await page.clock.setFixedTime(time);
+        await page.reload({ waitUntil: "networkidle" });
+        await page.locator(".ca-desk-window").first().waitFor();
+        await shot(suffix);
+      }
+    },
+  },
+  {
     // 设置里选窗外天气的地点：搜「上海」出两个结果。
     name: "settings-weather",
     devices: ["desktop"],
@@ -495,6 +522,31 @@ export const scenes = [
       await page.getByRole("tab", { name: /笔记/ }).click();
       await page.locator(".ca-pencil-note").first().waitFor();
       await page.waitForTimeout(600);
+      await shot();
+      // 擦掉第二条：原地留几粒橡皮屑。
+      const second = page.locator(".ca-pencil-note").nth(1);
+      await second.hover();
+      await second.getByRole("button", { name: "擦掉这条批注" }).click();
+      await page.locator(".ca-eraser-crumbs i").first().waitFor({ state: "attached" });
+      const crumbs = await page.locator(".ca-eraser-crumbs i").count();
+      if (crumbs < 5) throw new Error(`橡皮屑只有 ${crumbs} 粒`);
+      await page.waitForTimeout(250);
+      await shot("erased");
+    },
+  },
+  {
+    // 笔记分页记号：长笔记往下滚，看第 2 页从哪儿开始。
+    name: "notes-pages",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-long-notes", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("tab", { name: /笔记/ }).click();
+      const mark = page.locator(".ca-page-break").first();
+      await mark.waitFor({ state: "attached" });
+      await mark.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
       await shot();
     },
   },

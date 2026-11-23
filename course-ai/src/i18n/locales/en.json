@@ -704,7 +704,10 @@
       "about": "Note on: {{quote}}",
       "lost": "The notes changed; the text this refers to is gone",
       "erase": "Erase this note"
-    }
+    },
+    "pageMark": "Page {{page}}",
+    "pageCount_one": "About {{count}} page as a printed handout (A4)",
+    "pageCount_other": "About {{count}} pages as a printed handout (A4)"
   },
   "quiz": {
     "correct": "Correct",
