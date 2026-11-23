@@ -12,6 +12,11 @@ import { MistakeDeck } from "@/features/study/MistakeDeck";
 import { CourseDeck } from "./CourseDeck";
 import { LectureCover } from "./LectureCover";
 import { UpdateNotice } from "./UpdateNotice";
+import { DeskWindow } from "./DeskWindow";
+import { SolarTermBoard } from "./SolarTermBoard";
+import { daypartOf, lampOn } from "@/lib/daypart";
+import { useNow } from "@/lib/useNow";
+import { useHomeLayout } from "@/stores/homeLayout";
 
 type DeskSummary = {
   course: Course;
@@ -48,19 +53,27 @@ export function DeskHome({
   const { t } = useTranslation();
   const shell = useOptionalShell();
   const [front, setFront] = useState(0);
+  const now = useNow();
+  const part = daypartOf(now);
+  const showWindow = useHomeLayout((state) => state.deskWindow);
   const open = summaries.find((summary) => summary.resume) ?? null;
   const resume = open?.resume ?? null;
 
   return (
     <div className="ca-main-col ca-desk">
       <header className="ca-desk-head">
-        <h1 className="ca-desk-title">{t("desk.title")}</h1>
+        <h1 className="ca-desk-title ca-title-with-term">
+          {t("desk.title")}
+          <SolarTermBoard now={now} />
+        </h1>
         <Button variant="default" size="sm" disabled={creatingCourse} onClick={onCreateCourse}>
           {creatingCourse ? <Loader2 className="animate-spin" /> : <FolderPlus />}
           {t("desk.newCourse")}
         </Button>
       </header>
-      <div className="ca-desk-surface">
+      {/* 晚上台灯亮起：光圈落在摊开的那一讲上，周围暗一点。 */}
+      <div className="ca-desk-surface" data-lamp={lampOn(now) ? "" : undefined} data-window={showWindow ? "" : undefined}>
+        {showWindow && <DeskWindow part={part} />}
         {createError && <ErrorNote error={createError} className="ca-desk-error" />}
         <UpdateNotice className="ca-desk-error" />
 

@@ -695,7 +695,15 @@
     "takeNoteTitle": "在当前时间记一笔（{{key}}）",
     "imageMissing": "这张图片还没同步到这台设备",
     "imageBroken": "图片无法显示",
-    "imageTooLarge": "图片太大，压缩后仍超过上限，换一张小一些的试试"
+    "imageTooLarge": "图片太大，压缩后仍超过上限，换一张小一些的试试",
+    "pencil": {
+      "ask": "请 AI 在页边写铅笔批注",
+      "again": "重新批注（替换现在的批注）",
+      "margin": "页边批注",
+      "about": "批注：{{quote}}",
+      "lost": "笔记改过了，找不到这条批注对应的原文",
+      "erase": "擦掉这条批注"
+    }
   },
   "quiz": {
     "correct": "正确",
@@ -806,7 +814,8 @@
     "sharing": "分享中…",
     "exporting": "导出中…",
     "notesImage": "分享长图（PNG）",
-    "mindmapImage": "分享图片（PNG）"
+    "mindmapImage": "分享图片（PNG）",
+    "notesPrint": "讲义（打印 / PDF）"
   },
   "timestamp": {
     "hide": "隐藏时间戳",
@@ -892,7 +901,18 @@
       "uiSoundQuiet": "很轻",
       "uiSoundNormal": "正常",
       "haptics": "触感",
-      "hapticsHint": "手机上滑动复习卡、答错、复习完时轻轻震一下。"
+      "hapticsHint": "手机上滑动复习卡、答错、复习完时轻轻震一下。",
+      "deskWindow": "课桌上的窗",
+      "deskWindowHint": "课桌左上角一扇小窗，按本地时间显示天色。纯装饰。",
+      "notePaper": "笔记纸张",
+      "notePaperHint": "笔记页底下的格子，像练习本一样。只是背景，不影响导出。",
+      "notePapers": {
+        "plain": "空白",
+        "lined": "横线",
+        "grid": "方格",
+        "dots": "点阵",
+        "mi": "米字格"
+      }
     },
     "studyReminder": {
       "title": "学习提醒",
@@ -2134,7 +2154,9 @@
     "statCourses": "门课程",
     "statVideos": "讲",
     "statWatched": "已看完",
-    "statDue": "待复习"
+    "statDue": "待复习",
+    "bookmark": "书签：停在第 {{lecture}} 讲",
+    "bookmarkDusty": "书签：停在第 {{lecture}} 讲，{{days}} 天没打开了"
   },
   "search": {
     "results": "搜索结果",
@@ -2518,7 +2540,13 @@
     "reviewStart": "开始复习",
     "reviewNone": "今天都复习完了",
     "deckCaption": "我的课程 · {{count}} 门",
-    "nothingOpen": "挑一门课开始吧"
+    "nothingOpen": "挑一门课开始吧",
+    "window": {
+      "dawn": "窗外：清晨",
+      "day": "窗外：白天",
+      "dusk": "窗外：黄昏",
+      "night": "窗外：夜晚"
+    }
   },
   "memoryCurve": {
     "toggle": "记忆曲线",

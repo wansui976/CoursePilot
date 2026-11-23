@@ -6,7 +6,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { type Editor, EditorContent, useEditor } from "@tiptap/react";
 import { type ExportItem } from "./ExportMenu";
-import { ArchiveRestore, NotebookPen, X } from "lucide-react";
+import { ArchiveRestore, Loader2, NotebookPen, PencilLine, X } from "lucide-react";
+import { PencilMargin } from "./notes/PencilMargin";
+import { isMobile } from "@/lib/mobileFiles";
+import type { NoteAnnotation } from "@/lib/ipc/media";
 import { Button } from "@/ui/button";
 import { TextSkeleton } from "@/ui/skeleton";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -41,6 +44,7 @@ import { insertNoteStamp } from "./notes/insertNoteStamp";
 import { NotesToolbar } from "./notes/NotesToolbar";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
+import { useNotePaper } from "@/stores/notePaper";
 import {
   notesCoordinator,
   type NotesSaveStatus,
@@ -62,6 +66,8 @@ function docTextLength(editor: { state?: { doc: { textContent: string } } }): nu
 
 export function NotesPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
+  const notePaper = useNotePaper((state) => state.paper);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
   const showTimestamps = useTimestampPrefs((s) => s.showTimestamps);
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -357,6 +363,20 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     });
   }
 
+  // 铅笔批注：AI 读一遍编辑器里的当前内容，在页边写几句。
+  const annotationsQuery = useQuery({
+    queryKey: qk.noteAnnotations(videoId),
+    queryFn: () => ipc.ai.noteAnnotations(videoId),
+  });
+  const annotationCount = annotationsQuery.data?.length ?? 0;
+  const annotate = useMutation({
+    mutationFn: () => {
+      if (!editor || editor.isDestroyed) return Promise.reject(new Error(t("notes.editorUnavailable")));
+      return ipc.ai.annotateNotes(videoId, tiptapToMarkdown(editor.getJSON()));
+    },
+    onSuccess: (list: NoteAnnotation[]) => qc.setQueryData(qk.noteAnnotations(videoId), list),
+  });
+
   const generate = useMutation({
     meta: taskMeta("notes", { videoId }),
     mutationFn: async () => {
@@ -394,6 +414,18 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       },
       mime: "text/markdown",
       saveAs: "notes.md",
+    },
+    {
+      // 讲义：A4 打印页，左边留装订线、打两个孔；桌面端打开后直接弹出打印框，存成 PDF。
+      label: t("export.notesPrint"),
+      run: () => {
+        if (!editor || editor.isDestroyed) {
+          return Promise.reject(new Error(t("notes.editorUnavailable")));
+        }
+        return ipc.export.notesPrint(videoId, editor.getHTML(), !isMobile());
+      },
+      mime: "application/pdf",
+      saveAs: "notes-print.html",
     },
     {
       // 分享长图：按当前编辑器里的内容画，用户刚改的也算。
@@ -476,6 +508,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         />
       )}
       {imageError != null && <ErrorNote className="mx-3 mt-2" error={imageError} />}
+      {annotate.isError && <ErrorNote className="mx-3 mt-2" error={annotate.error} onRetry={() => annotate.mutate()} />}
       {notesQuery.isError && (
         <ErrorNote
           className="mx-3 mb-2"
@@ -551,7 +584,16 @@ export function NotesPanel({ videoId }: { videoId: string }) {
                 </div>
               </div>
             )}
-            <EditorContent editor={editor} />
+            {/* 纸张（横线、方格……）画在这层上：它随内容一起变高，格子跟着滚动。 */}
+            <div
+              ref={sheetRef}
+              className="ca-paper-sheet"
+              data-paper={notePaper}
+              data-annotated={annotationCount > 0 ? "" : undefined}
+            >
+              <EditorContent editor={editor} />
+              <PencilMargin videoId={videoId} editor={editor} sheetRef={sheetRef} />
+            </div>
           </>
         )}
       </div>
@@ -575,6 +617,16 @@ export function NotesPanel({ videoId }: { videoId: string }) {
               className={panelActionButtonClass}
             >
               <ArchiveRestore className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={annotationCount > 0 ? t("notes.pencil.again") : t("notes.pencil.ask")}
+              title={annotationCount > 0 ? t("notes.pencil.again") : t("notes.pencil.ask")}
+              disabled={annotate.isPending || !editor}
+              onClick={() => annotate.mutate()}
+              className={panelActionButtonClass}
+            >
+              {annotate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
             </button>
             <TimestampToggle />
           </>

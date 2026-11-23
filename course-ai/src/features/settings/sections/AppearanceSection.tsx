@@ -11,6 +11,7 @@ import {
 } from "@/stores/readingFont";
 import { DENSITIES, useDensity } from "@/stores/density";
 import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
+import { NOTE_PAPERS, useNotePaper } from "@/stores/notePaper";
 import { useFeedbackPrefs, type SoundLevel } from "@/lib/feedback";
 import { Switch } from "@/ui/switch";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
@@ -112,6 +113,10 @@ export function AppearanceSection() {
   const setDensity = useDensity((s) => s.setDensity);
   const homeLayout = useHomeLayout((s) => s.layout);
   const setHomeLayout = useHomeLayout((s) => s.setLayout);
+  const deskWindow = useHomeLayout((s) => s.deskWindow);
+  const notePaper = useNotePaper((s) => s.paper);
+  const setNotePaper = useNotePaper((s) => s.setPaper);
+  const setDeskWindow = useHomeLayout((s) => s.setDeskWindow);
   const sound = useFeedbackPrefs((s) => s.sound);
   const setSound = useFeedbackPrefs((s) => s.setSound);
   const haptics = useFeedbackPrefs((s) => s.haptics);
@@ -289,6 +294,26 @@ export function AppearanceSection() {
             onChange={setReadingSize}
           />
         </Row>
+        <StackRow label={t("settings.appearance.notePaper")} hint={t("settings.appearance.notePaperHint")}>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5" role="group" aria-label={t("settings.appearance.notePaper")}>
+            {NOTE_PAPERS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={notePaper === option}
+                onClick={() => setNotePaper(option)}
+                className={`flex flex-col gap-1.5 rounded-lg border p-1.5 text-left text-xs transition-colors ${
+                  notePaper === option
+                    ? "border-[var(--accent)] font-medium text-[var(--text-strong)] ring-1 ring-[var(--accent)]"
+                    : "border-[var(--border-subtle)] text-[var(--text-muted)] hover:border-[var(--border-strong)]"
+                }`}
+              >
+                <span className="ca-paper-swatch" data-paper={option} aria-hidden="true" />
+                <span className="px-1">{t(`settings.appearance.notePapers.${option}`)}</span>
+              </button>
+            ))}
+          </div>
+        </StackRow>
       </Group>
 
       {/* 密度和语言各只有一项：此前各占一个分组，分组标题和行标签写着同一个词。合成一组。 */}
@@ -304,6 +329,15 @@ export function AppearanceSection() {
             onChange={setHomeLayout}
           />
         </Row>
+        {homeLayout === "desk" && (
+          <Row label={t("settings.appearance.deskWindow")} hint={t("settings.appearance.deskWindowHint")} layout="inline">
+            <Switch
+              aria-label={t("settings.appearance.deskWindow")}
+              checked={deskWindow}
+              onCheckedChange={setDeskWindow}
+            />
+          </Row>
+        )}
         <Row label={t("settings.appearance.uiSound")} hint={t("settings.appearance.uiSoundHint")} layout="inline">
           <Segmented
             label={t("settings.appearance.uiSound")}

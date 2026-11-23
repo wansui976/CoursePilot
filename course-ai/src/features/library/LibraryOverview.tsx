@@ -22,6 +22,10 @@ import { CourseDeck } from "./CourseDeck";
 import { DeskHome } from "./DeskHome";
 import { LectureCover } from "./LectureCover";
 import { CourseBoardCover } from "./CourseBoardCover";
+import { SolarTermBoard } from "./SolarTermBoard";
+import { Bookmark } from "./Bookmark";
+import { courseBookmark } from "@/lib/bookmark";
+import { useNow } from "@/lib/useNow";
 import { UpdateNotice } from "./UpdateNotice";
 /** 「继续学习」最多列几门课。 */
 const RESUME_LIMIT = 3;
@@ -80,6 +84,7 @@ export function LibraryOverview({
   // 进度从库里回填（换设备、同步下来）后重新渲染：进度是渲染期直接读本地缓存的。
   usePlaybackRevision((state) => state.revision);
   const { t } = useTranslation();
+  const now = useNow();
   const layout = useHomeLayout((state) => state.layout);
   const deckExpanded = useHomeLayout((state) => state.deckExpanded);
   const setDeckExpanded = useHomeLayout((state) => state.setDeckExpanded);
@@ -125,7 +130,10 @@ export function LibraryOverview({
       <header className="ca-topbar">
         <div className="tb-lead">
           <div className="tb-titles">
-            <h1>{t("nav.courseLibrary")}</h1>
+            <h1 className="ca-title-with-term">
+              {t("nav.courseLibrary")}
+              <SolarTermBoard now={now} />
+            </h1>
             <div className="ca-stats">
               <div className="ca-stat">
                 <span className="v">{courses.length}</span>
@@ -219,6 +227,7 @@ export function LibraryOverview({
             <div className="ca-course-grid">
               {summaries.map(({ course, videos, watched }) => {
                 const ratio = videos.length > 0 ? watched / videos.length : 0;
+                const bookmark = courseBookmark(course.id, videos);
                 return (
                   <button
                     key={course.id}
@@ -233,7 +242,9 @@ export function LibraryOverview({
                         number={course.video_count}
                         unit={t("library.lectureUnit")}
                         caption={course.name}
-                      />
+                      >
+                        {bookmark && <Bookmark bookmark={bookmark} course={course} />}
+                      </CourseBoardCover>
                     </span>
                     <span className="ca-course-body">
                       <span className="ca-course-name">{course.name}</span>

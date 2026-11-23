@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { stableIndex, type CoverKind, type CoverShape } from "@/lib/coverKind";
-import { COURSE_COLORS, type CourseColor } from "@/lib/types";
+import { courseTone, stableIndex, type CoverKind, type CoverShape } from "@/lib/coverKind";
+import type { CourseColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -277,7 +277,7 @@ export function BoardCover({
 }) {
   const key = seed ?? caption ?? "";
   // 没选颜色的课按名字稳定地分一个颜色，不然一排课全是白字。
-  const tone = color ?? COURSE_COLORS[stableIndex(key, COURSE_COLORS.length)];
+  const tone = courseTone(color, key);
   const numberColor = `var(--course-${tone}-on-dark)`;
   const glyph = number == null ? (caption?.trim().charAt(0) ?? "") : null;
   return (
@@ -303,6 +303,11 @@ export function BoardCover({
       <span className="no" style={{ color: numberColor }} aria-hidden="true">
         {glyph ?? (unit ? String(number) : String(number).padStart(2, "0"))}
         {glyph == null && unit ? <small>{unit}</small> : null}
+      </span>
+      {/* 黑板下沿放粉笔的木槽：一截粉笔、一块板擦。小尺寸时不画。 */}
+      <span className="ledge" aria-hidden="true">
+        <i />
+        <b />
       </span>
       {children}
     </span>

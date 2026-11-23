@@ -88,6 +88,158 @@ pub async fn cmd_export_notes(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 笔记导出成「讲义」：一页 A4 的打印版 HTML，左边留装订线、打两个孔，衬线排版。
+/// 桌面端导出后用浏览器打开并自动弹出打印框，选「存为 PDF」就是一份能装订的讲义。
+/// `content_html` 是编辑器当前内容（前端 getHTML），笔记图片引用在这里换成内嵌图。
+#[tauri::command]
+pub async fn cmd_export_notes_print(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    video_id: String,
+    content_html: String,
+    open: bool,
+) -> AppResult<String> {
+    if content_html.trim().is_empty() {
+        return Err(AppError::NotFound("no notes to export".into()));
+    }
+    let video = load_video(&state, &video_id).await?;
+    let course: String = sqlx::query_scalar("SELECT name FROM courses WHERE id=?")
+        .bind(&video.course_id)
+        .fetch_optional(&state.db.pool)
+        .await?
+        .unwrap_or_default();
+    let body = inline_html_note_images(&state.db, &strip_scripts(&content_html)).await?;
+    let title = crate::export::display_title(&video.title);
+    let html = notes_print_html(&title, &course, &body);
+    let dir = export_dir(&video, &app)?;
+    let path = dir.join("notes-print.html");
+    std::fs::write(&path, html)?;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if open {
+        use tauri_plugin_opener::OpenerExt as _;
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|error| AppError::Other(format!("open notes: {error}")))?;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = open;
+
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 编辑器输出里不该有脚本；保险起见把 <script> 段整段去掉（打印页自己的脚本在模板里）。
+fn strip_scripts(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let lower = html.to_ascii_lowercase();
+    let mut cursor = 0;
+    while let Some(start) = lower[cursor..].find("<script").map(|i| i + cursor) {
+        out.push_str(&html[cursor..start]);
+        match lower[start..].find("</script>") {
+            Some(end) => cursor = start + end + "</script>".len(),
+            None => {
+                cursor = html.len();
+                break;
+            }
+        }
+    }
+    out.push_str(&html[cursor..]);
+    out
+}
+
+/// 把 src="note-image:<id>" 换成 data URI，打印页离开应用也能显示图片。
+async fn inline_html_note_images(db: &crate::db::Db, html: &str) -> AppResult<String> {
+    use base64::Engine as _;
+    use crate::commands::note_images::{read_note_image, IMAGE_REF_PREFIX};
+    let needle = format!("src=\"{IMAGE_REF_PREFIX}");
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find(&needle) {
+        let id_start = start + needle.len();
+        let Some(id_len) = rest[id_start..].find('"') else {
+            break;
+        };
+        let id = &rest[id_start..id_start + id_len];
+        out.push_str(&rest[..start]);
+        match read_note_image(db, id).await {
+            Ok((mime, bytes)) => {
+                out.push_str("src=\"data:");
+                out.push_str(&mime);
+                out.push_str(";base64,");
+                out.push_str(&base64::engine::general_purpose::STANDARD.encode(bytes));
+                out.push('"');
+            }
+            Err(AppError::NotFound(_)) => out.push_str("src=\"\""),
+            Err(error) => return Err(error),
+        }
+        rest = &rest[id_start + id_len + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+/// 打印页模板。装订线和两个孔用 position: fixed，打印时每一页都有。
+pub(crate) fn notes_print_html(title: &str, course: &str, body: &str) -> String {
+    let title = escape_html(title);
+    let course = escape_html(course);
+    format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  @page {{ size: A4; margin: 18mm 16mm 18mm 0; }}
+  :root {{ --ink: #1b1f1d; --muted: #5f6762; --line: #d9dcd6; --mark: rgb(255 214 10 / 0.42); --accent: #1a6a50; }}
+  html {{ background: #fbfbfa; }}
+  body {{ margin: 0; color: var(--ink); font: 11pt/1.75 "Newsreader", "Noto Serif SC", "Songti SC", "SimSun", serif; }}
+  .binding {{ position: fixed; top: 0; bottom: 0; left: 0; width: 26mm; border-right: 1px dashed var(--line); }}
+  .binding::before {{ content: "装订线"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-90deg);
+    font: 8pt/1 "Instrument Sans", "Noto Sans SC", sans-serif; letter-spacing: 0.6em; color: var(--line); white-space: nowrap; }}
+  .hole {{ position: fixed; left: 9mm; width: 6mm; height: 6mm; border-radius: 50%; border: 1px solid var(--line);
+    background: radial-gradient(circle, #ebebe6 0 55%, transparent 60%); }}
+  .hole.top {{ top: 30%; }} .hole.bottom {{ top: 65%; }}
+  main {{ margin-left: 34mm; margin-right: 6mm; max-width: 165mm; }}
+  header {{ border-bottom: 1px solid var(--ink); padding-bottom: 4mm; margin-bottom: 6mm; }}
+  header .course {{ font-size: 9.5pt; color: var(--muted); letter-spacing: 0.04em; }}
+  header h1 {{ margin: 1mm 0 0; font-size: 20pt; line-height: 1.3; font-weight: 500; }}
+  h1, h2, h3, h4 {{ font-weight: 600; line-height: 1.4; break-after: avoid; }}
+  h1 {{ font-size: 16pt; }} h2 {{ font-size: 13.5pt; margin: 6mm 0 2mm; }} h3 {{ font-size: 12pt; margin: 4mm 0 1.5mm; }}
+  p, li {{ orphans: 2; widows: 2; }}
+  li > p {{ margin: 0; }}
+  ul, ol {{ margin: 2mm 0; padding-left: 6mm; }}
+  blockquote {{ margin: 3mm 0; padding-left: 4mm; border-left: 2px solid var(--line); color: var(--muted); }}
+  mark {{ background: var(--mark); color: inherit; padding: 0 1px; }}
+  code {{ font: 9.5pt "JetBrains Mono", ui-monospace, monospace; }}
+  img {{ max-width: 100%; break-inside: avoid; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 10pt; }}
+  th, td {{ border: 1px solid var(--line); padding: 1.5mm 2mm; text-align: left; }}
+  [data-timestamp], .ca-ts-chip {{ font: 9pt "JetBrains Mono", ui-monospace, monospace; color: var(--accent); }}
+  button {{ all: unset; }}
+  footer {{ margin-top: 10mm; padding-top: 3mm; border-top: 1px solid var(--line); font-size: 8.5pt; color: var(--muted); }}
+  @media screen {{ body {{ padding: 18mm 0; }} }}
+</style>
+</head>
+<body>
+<div class="binding" aria-hidden="true"></div>
+<div class="hole top" aria-hidden="true"></div>
+<div class="hole bottom" aria-hidden="true"></div>
+<main>
+<header><div class="course">{course}</div><h1>{title}</h1></header>
+{body}
+<footer>CoursePilot · 课堂笔记</footer>
+</main>
+<script>window.addEventListener("load", () => setTimeout(() => window.print(), 300));</script>
+</body>
+</html>"#
+    )
+}
+
 fn notes_markdown_for_export(current: Option<String>, stored: Option<String>) -> AppResult<String> {
     let markdown = current.or(stored);
     markdown
@@ -302,6 +454,26 @@ pub async fn cmd_save_share_image(
     let _ = open;
 
     Ok(path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod print_tests {
+    use super::*;
+
+    #[test]
+    fn print_page_has_binding_and_escapes_the_title() {
+        let html = notes_print_html("<第 1 讲>", "线代", "<p>正文</p>");
+        assert!(html.contains("class=\"binding\""));
+        assert!(html.contains("hole top") && html.contains("hole bottom"));
+        assert!(html.contains("&lt;第 1 讲&gt;"));
+        assert!(html.contains("<p>正文</p>"));
+    }
+
+    #[test]
+    fn scripts_are_removed_from_the_body() {
+        assert_eq!(strip_scripts("<p>a</p><SCRIPT>x()</script><p>b</p>"), "<p>a</p><p>b</p>");
+        assert_eq!(strip_scripts("<p>a</p><script>never closed"), "<p>a</p>");
+    }
 }
 
 #[cfg(test)]

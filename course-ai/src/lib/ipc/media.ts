@@ -31,6 +31,14 @@ import type {
   TranslationRow,
 } from "./types";
 
+/** 页边的一条铅笔批注：锚在笔记里的一小段原文上。 */
+export interface NoteAnnotation {
+  id: string;
+  quote: string;
+  note: string;
+  created_at: number;
+}
+
 export const pipeline = {
   process: (videoId: string): Promise<void> =>
     invoke("cmd_process_video", { videoId }),
@@ -132,6 +140,14 @@ export const ai = {
     invoke("cmd_get_summary", { videoId }),
   saveNotes: (videoId: string, contentJson: string): Promise<void> =>
     invoke("cmd_save_notes", { videoId, contentJson }),
+  /** 笔记页边的铅笔批注。 */
+  noteAnnotations: (videoId: string): Promise<NoteAnnotation[]> =>
+    invoke("cmd_note_annotations", { videoId }),
+  /** 让 AI 读一遍当前笔记写批注（替换这个视频原来的批注）。 */
+  annotateNotes: (videoId: string, contentMarkdown: string): Promise<NoteAnnotation[]> =>
+    invoke("cmd_annotate_notes", { videoId, contentMarkdown }),
+  eraseNoteAnnotation: (videoId: string, id: string): Promise<void> =>
+    invoke("cmd_erase_note_annotation", { videoId, id }),
   // 笔记的历史版本（本机留底 + 每日启动快照），新的在前；只读，恢复由前端装回编辑器。
   noteVersions: (videoId: string): Promise<NoteVersion[]> =>
     invoke("cmd_list_note_versions", { videoId }),
@@ -291,6 +307,9 @@ export const exporting = {
     invoke("cmd_export_subtitles", { videoId, format }),
   notes: (videoId: string, contentMarkdown?: string): Promise<string> =>
     invoke("cmd_export_notes", { videoId, contentMarkdown }),
+  /** 笔记讲义：A4 打印页，留装订线、打孔。`open` 时桌面端用浏览器打开并弹出打印框。 */
+  notesPrint: (videoId: string, contentHtml: string, open: boolean): Promise<string> =>
+    invoke("cmd_export_notes_print", { videoId, contentHtml, open }),
   quiz: (videoId: string): Promise<string> =>
     invoke("cmd_export_quiz", { videoId }),
   mindmap: (videoId: string): Promise<string> =>

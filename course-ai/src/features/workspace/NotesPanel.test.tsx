@@ -12,6 +12,7 @@ const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
   mockIpc: {
     ai: {
       getNotes: vi.fn(),
+      noteAnnotations: vi.fn(async () => []),
       noteVersions: vi.fn(),
       generate: vi.fn(),
       saveNotes: vi.fn(),
@@ -78,6 +79,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: confirmMock }));
 // 格式条与图片节点各自用真编辑器测（notes/*.test）。
 vi.mock("./notes/extensions", () => ({ notesExtensions: () => [] }));
 vi.mock("./notes/NotesToolbar", () => ({ NotesToolbar: () => null }));
+// 页边批注要量真编辑器里的文字位置，替身编辑器没有 view；它自己的排版由 lib/pencilLayout.test 测。
+vi.mock("./notes/PencilMargin", () => ({ PencilMargin: () => null }));
 const { storeNoteImage, insertBlocks } = vi.hoisted(() => ({
   storeNoteImage: vi.fn(),
   insertBlocks: vi.fn(),

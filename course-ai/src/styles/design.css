@@ -578,6 +578,60 @@ button.ca-time:hover {
   opacity: 0.7;
 }
 
+/* 黑板槽：木条 + 一截粉笔 + 一块板擦。默认不画，够大的黑板才有（下面的容器查询）。 */
+.ca-board-cover > .ledge {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: max(7px, 4.2cqh);
+  background: linear-gradient(var(--wood), var(--wood-dark));
+  box-shadow: 0 -1px 0 rgb(0 0 0 / 0.35);
+}
+
+.ca-board-cover > .ledge i,
+.ca-board-cover > .ledge b {
+  position: absolute;
+  bottom: 70%;
+  border-radius: 1.5px;
+}
+
+.ca-board-cover > .ledge i {
+  left: 58%;
+  width: max(14px, 6cqw);
+  height: max(3px, 1.6cqh);
+  background: var(--chalk);
+  opacity: 0.85;
+}
+
+.ca-board-cover > .ledge b {
+  left: calc(58% + max(22px, 9cqw));
+  width: max(18px, 9cqw);
+  height: max(4px, 2.6cqh);
+  background: var(--eraser);
+}
+
+@container (min-width: 220px) {
+  .ca-board-cover > .ledge {
+    display: block;
+  }
+
+  .ca-board-cover > .no {
+    bottom: calc(6cqh + max(7px, 4.2cqh));
+  }
+
+  /* 叠在封面上的进度条和计数让到木槽上面。 */
+  .ca-board-cover > .ca-deck-progress,
+  .ca-board-cover > .ov-bar {
+    bottom: max(7px, 4.2cqh);
+  }
+
+  .ca-board-cover > .ca-deck-count {
+    bottom: calc(9px + max(7px, 4.2cqh));
+  }
+}
+
 /* 小缩略图（列表行）里只留数字。 */
 @container (max-width: 150px) {
   .ca-board-cover > .cap,
@@ -867,6 +921,7 @@ button.ca-time:hover {
 }
 
 .ca-desk-surface {
+  position: relative;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 230px;
   grid-template-areas:
@@ -875,6 +930,113 @@ button.ca-time:hover {
   gap: 36px 40px;
   padding: 24px 40px 48px;
   align-items: start;
+}
+
+/* 有窗时左栏上面是窗、下面是便利贴，笔记本跨两行。 */
+.ca-desk-surface[data-window] {
+  grid-template-areas:
+    "window notebook pile"
+    "note notebook pile"
+    "deck deck miss";
+}
+
+/* 窗：刷了漆的木框、十字窗棂，里面是按时间变的天色。 */
+.ca-desk-window {
+  grid-area: window;
+  position: relative;
+  margin: 0;
+  aspect-ratio: 10 / 7;
+  border: 9px solid var(--window-frame);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px var(--window-frame-edge),
+    inset 0 0 0 1px rgb(16 24 20 / 0.12),
+    0 14px 24px -18px rgb(16 24 20 / 0.5);
+}
+
+.ca-desk-window svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ca-desk-window-bars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--window-frame), var(--window-frame)) center / 6px 100% no-repeat,
+    linear-gradient(var(--window-frame), var(--window-frame)) center / 100% 6px no-repeat;
+}
+
+/* 台灯：天黑以后，一圈暖光落在摊开的笔记本上，光圈外暗一点。 */
+.ca-desk-surface[data-lamp]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 46% 52% at 50% 26%,
+    var(--lamp-glow) 0%,
+    transparent 70%,
+    var(--lamp-shade) 100%
+  );
+  /* 光没有边：上下两头淡出，不在桌面边缘留一道硬线。 */
+  -webkit-mask-image: linear-gradient(transparent, #000 80px, #000 calc(100% - 160px), transparent);
+  mask-image: linear-gradient(transparent, #000 80px, #000 calc(100% - 160px), transparent);
+  animation: ca-lamp-on 0.9s var(--ease-out);
+}
+
+@keyframes ca-lamp-on {
+  from {
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.6;
+  }
+  45% {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 节气那天：标题旁边一小块黑板，粉笔写着节气名和第一候。 */
+.ca-title-with-term {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ca-term-board {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 12px 7px;
+  border-radius: var(--r-sm);
+  background: var(--board);
+  background-image: var(--grain-bg);
+  box-shadow: inset 0 -4px 0 var(--wood);
+  color: var(--chalk);
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  transform: rotate(-1.5deg);
+}
+
+.ca-term-board b {
+  font-weight: 500;
+}
+
+.ca-term-board span {
+  font-size: 13px;
+  color: color-mix(in srgb, var(--chalk) 68%, transparent);
 }
 
 .ca-desk-error {
@@ -1052,6 +1214,12 @@ button.ca-time:hover {
   padding-inline: 20px;
 }
 
+/* 窄屏不放窗：一列里它只是挡路的装饰。 */
+.ca-app[data-bucket="compact"] .ca-desk-window,
+.ca-app[data-bucket="medium"] .ca-desk-window {
+  display: none;
+}
+
 .ca-app[data-bucket="compact"] .ca-notebook {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1205,10 +1373,14 @@ button.ca-time:hover {
 /* 独立成行的公式写在一块小黑板上，进场时像粉笔一样从左往右写出来。 */
 .ca-prose .katex-display {
   margin: 12px 0;
-  padding: 14px 18px;
+  padding: 14px 18px 20px;
   border-radius: var(--r-md);
-  background: var(--board);
-  background-image: var(--grain-bg);
+  /* 底下一条木槽，槽里一截粉笔。 */
+  background:
+    linear-gradient(var(--chalk), var(--chalk)) 22px calc(100% - 7px) / 18px 3px no-repeat,
+    linear-gradient(var(--wood), var(--wood-dark)) bottom / 100% 7px no-repeat,
+    var(--grain-bg),
+    var(--board);
   color: var(--chalk);
   overflow-x: auto;
   overflow-y: hidden;
@@ -1707,7 +1879,7 @@ button.ca-time:hover {
   right: 11px;
   bottom: 11px;
   height: 12px;
-  background: linear-gradient(#3a2b1f, #2a1f16);
+  background: linear-gradient(var(--wood), var(--wood-dark));
 }
 
 .ca-chalk-ledge i {
@@ -1728,7 +1900,7 @@ button.ca-time:hover {
   width: 50px;
   height: 9px;
   border-radius: 2px;
-  background: #5a4a3a;
+  background: var(--eraser);
 }
 
 /* 手机上滑卡：卡片跟手、印章随拖动距离显现，像盖了一个橡皮章。 */
@@ -1808,4 +1980,233 @@ button.ca-time:hover {
   aspect-ratio: 16 / 9;
   width: 100%;
   border-radius: var(--r-sm);
+}
+
+/* ===================== 书签丝带 ===================== */
+
+/* 从封面上沿垂下来的一条丝带，燕尾，写着停在第几讲。 */
+.ca-bookmark {
+  position: absolute;
+  top: 0;
+  right: 13%;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 16px;
+  height: 22%;
+  min-height: 34px;
+  padding-bottom: 9px;
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.12), transparent 30%, transparent 70%, rgb(0 0 0 / 0.12)),
+    var(--ribbon);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% calc(100% - 6px), 0 100%);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.3);
+  pointer-events: auto;
+}
+
+.ca-bookmark .n {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--board);
+}
+
+/* 落灰：丝带褪色，封面上蒙一层粉笔灰。 */
+.ca-bookmark[data-dusty] {
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.12), transparent 30%, transparent 70%, rgb(0 0 0 / 0.12)),
+    color-mix(in srgb, var(--ribbon) 40%, var(--chalk-dim));
+}
+
+.ca-dust {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background-color: color-mix(in srgb, var(--chalk) 12%, transparent);
+  background-image: var(--grain-bg), var(--grain-bg);
+  background-size: 90px 90px, 140px 140px;
+  background-position: 0 0, 37px 61px;
+}
+
+/* 小缩略图里不夹书签。 */
+@container (max-width: 150px) {
+  .ca-bookmark,
+  .ca-dust {
+    display: none;
+  }
+}
+
+/* ===================== 笔记纸张 ===================== */
+
+/* 格距 = 正文行高（1.7em），从编辑器内边距（16px）往下开始，和第一行对齐。
+   用在笔记编辑器外面那层，也用在设置里的小样上。 */
+.ca-paper-sheet,
+.ca-paper-swatch {
+  --rule: var(--border-faint);
+  --rule-strong: var(--border-subtle);
+  --pitch: calc(0.9rem * var(--reading-scale, 1) * 1.7);
+  min-height: 100%;
+}
+
+.ca-paper-sheet {
+  background-origin: content-box;
+}
+
+.ca-paper-swatch[data-paper="lined"] {
+  background-image: linear-gradient(transparent calc(var(--pitch) - 1px), var(--rule-strong) calc(var(--pitch) - 1px));
+  background-size: 100% var(--pitch);
+}
+
+/* 横线画在每一段自己身上：段落之间的空距不是行高的整数倍，整页一套横线会穿过字。
+   这样每一行字底下正好一条线，段与段之间留白，像在横线本上隔一行另起。 */
+.ca-paper-sheet[data-paper="lined"] .tiptap-notes :is(p, blockquote p) {
+  background-image: linear-gradient(transparent calc(1.7em - 2px), var(--rule-strong) calc(1.7em - 2px), var(--rule-strong) calc(1.7em - 1px), transparent calc(1.7em - 1px));
+  background-size: 100% 1.7em;
+}
+
+.ca-paper-sheet[data-paper="grid"],
+.ca-paper-swatch[data-paper="grid"] {
+  background-image:
+    linear-gradient(transparent calc(var(--pitch) - 1px), var(--rule) calc(var(--pitch) - 1px)),
+    linear-gradient(90deg, transparent calc(var(--pitch) - 1px), var(--rule) calc(var(--pitch) - 1px));
+  background-size: var(--pitch) var(--pitch);
+  background-position: 16px 16px;
+}
+
+.ca-paper-sheet[data-paper="dots"],
+.ca-paper-swatch[data-paper="dots"] {
+  background-image: radial-gradient(circle at 1px 1px, var(--rule-strong) 1px, transparent 1.5px);
+  background-size: var(--pitch) var(--pitch);
+  background-position: 16px calc(16px - 1px);
+}
+
+/* 米字格：两行一格，外框实线，中间十字和两条对角虚一点（用更淡的线代替虚线）。 */
+.ca-paper-sheet[data-paper="mi"],
+.ca-paper-swatch[data-paper="mi"] {
+  --cell: calc(var(--pitch) * 2);
+  --rule: color-mix(in srgb, var(--border-faint) 55%, transparent);
+  background-image:
+    linear-gradient(transparent calc(var(--cell) - 1px), var(--rule-strong) calc(var(--cell) - 1px)),
+    linear-gradient(90deg, transparent calc(var(--cell) - 1px), var(--rule-strong) calc(var(--cell) - 1px)),
+    linear-gradient(transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(90deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(45deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(-45deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+  background-size: var(--cell) var(--cell);
+  background-position: 16px 16px;
+}
+
+.ca-paper-swatch {
+  display: block;
+  height: 44px;
+  min-height: 0;
+  border-radius: var(--r-xs);
+  background-color: var(--surface-panel);
+  box-shadow: inset 0 0 0 1px var(--border-faint);
+  --pitch: 11px;
+}
+
+.ca-paper-swatch[data-paper] {
+  background-position: 4px 4px;
+}
+
+/* ===================== 铅笔批注 ===================== */
+
+.ca-paper-sheet {
+  position: relative;
+}
+
+/* 有批注时给页边让出一栏。 */
+.ca-paper-sheet[data-annotated] .tiptap-notes {
+  padding-right: min(168px, 36%);
+}
+
+.ca-pencil-margin {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  width: calc(min(168px, 36%) - 18px);
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 一条批注：铅笔灰的衬线小字，微微歪一点，像随手写在页边。 */
+.ca-pencil-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--pencil) 45%, transparent);
+  font-family: var(--font-reading);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--pencil);
+  transform: rotate(-0.6deg);
+  pointer-events: auto;
+  transition: top 0.18s var(--ease-out), opacity 0.18s;
+  animation: ca-pencil-in 0.4s var(--ease-out) both;
+}
+
+.ca-pencil-note[data-loose] {
+  opacity: 0.55;
+  border-left-style: dashed;
+}
+
+.ca-pencil-note > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.ca-pencil-erase {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-xs);
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+}
+
+.ca-pencil-erase svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ca-pencil-note:hover .ca-pencil-erase,
+.ca-pencil-erase:focus-visible {
+  opacity: 1;
+}
+
+.ca-pencil-erase:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-strong);
+}
+
+@media (pointer: coarse) {
+  .ca-pencil-erase {
+    opacity: 0.7;
+  }
+}
+
+@keyframes ca-pencil-in {
+  from {
+    opacity: 0;
+    transform: translateX(4px) rotate(-0.6deg);
+  }
+  to {
+    transform: rotate(-0.6deg);
+  }
+}
+
+/* 批注对应的原文：底下一道铅笔波浪线（CSS 自定义高亮，不改笔记内容）。 */
+::highlight(ca-pencil) {
+  text-decoration: underline wavy color-mix(in srgb, var(--pencil) 70%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
 }

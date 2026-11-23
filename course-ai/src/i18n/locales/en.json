@@ -696,7 +696,15 @@
     "takeNoteTitle": "Take a note at the current time ({{key}})",
     "imageMissing": "This image hasn't synced to this device yet",
     "imageBroken": "Image can't be displayed",
-    "imageTooLarge": "The image is still too large after compression. Try a smaller one."
+    "imageTooLarge": "The image is still too large after compression. Try a smaller one.",
+    "pencil": {
+      "ask": "Ask AI for pencil notes in the margin",
+      "again": "Annotate again (replaces current notes)",
+      "margin": "Margin notes",
+      "about": "Note on: {{quote}}",
+      "lost": "The notes changed; the text this refers to is gone",
+      "erase": "Erase this note"
+    }
   },
   "quiz": {
     "correct": "Correct",
@@ -807,7 +815,8 @@
     "sharing": "Sharing…",
     "exporting": "Exporting…",
     "notesImage": "Share image (PNG)",
-    "mindmapImage": "Share image (PNG)"
+    "mindmapImage": "Share image (PNG)",
+    "notesPrint": "Handout (print / PDF)"
   },
   "timestamp": {
     "hide": "Hide timestamps",
@@ -893,7 +902,18 @@
       "uiSoundQuiet": "Quiet",
       "uiSoundNormal": "Normal",
       "haptics": "Haptics",
-      "hapticsHint": "A light tap on phones when you swipe a card, miss one, or finish a review."
+      "hapticsHint": "A light tap on phones when you swipe a card, miss one, or finish a review.",
+      "deskWindow": "Window on the desk",
+      "deskWindowHint": "A small window in the desk's corner that follows the local time of day. Decoration only.",
+      "notePaper": "Note paper",
+      "notePaperHint": "The ruling under your notes, like an exercise book. Background only; exports are unaffected.",
+      "notePapers": {
+        "plain": "Plain",
+        "lined": "Lined",
+        "grid": "Grid",
+        "dots": "Dots",
+        "mi": "Practice grid"
+      }
     },
     "studyReminder": {
       "title": "Study Reminder",
@@ -2148,7 +2168,9 @@
     "statCourses": "courses",
     "statVideos": "lectures",
     "statWatched": "watched",
-    "statDue": "due"
+    "statDue": "due",
+    "bookmark": "Bookmark: stopped at lecture {{lecture}}",
+    "bookmarkDusty": "Bookmark: stopped at lecture {{lecture}}, untouched for {{days}} days"
   },
   "search": {
     "results": "Search results",
@@ -2532,7 +2554,13 @@
     "reviewStart": "Start review",
     "reviewNone": "All reviewed for today",
     "deckCaption": "My courses · {{count}}",
-    "nothingOpen": "Pick a course to start"
+    "nothingOpen": "Pick a course to start",
+    "window": {
+      "dawn": "Outside: dawn",
+      "day": "Outside: daytime",
+      "dusk": "Outside: dusk",
+      "night": "Outside: night"
+    }
   },
   "memoryCurve": {
     "toggle": "Memory curve",

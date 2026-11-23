@@ -86,6 +86,12 @@ export function installMockIpc({ theme, safeArea }) {
     // 隐私模式等存储不可用：只是少了进度条，不影响截图。
   }
 
+  const pencilNotes = [
+    { id: "p1", quote: "负梯度", note: "为什么是负梯度？梯度指向增长最快的方向。", created_at: now },
+    { id: "p2", quote: "在谷底两侧来回震荡", note: "画一张等高线图，看步子怎么跨过谷底。", created_at: now },
+    { id: "p3", quote: "学习率衰减", note: "常见几种：step、cosine、warmup——第 5 讲会讲。", created_at: now },
+  ];
+
   // —— 封面：每集画一张「课件首页」风格的渐变图（JPEG 字节，与后端返回一致）——
   const palette = [["#1e3a8a", "#3b82f6"], ["#312e81", "#8b5cf6"], ["#134e4a", "#14b8a6"], ["#7c2d12", "#f97316"], ["#1f2937", "#64748b"], ["#831843", "#ec4899"], ["#14532d", "#22c55e"], ["#0c4a6e", "#0ea5e9"], ["#422006", "#eab308"]];
   async function cover(videoId) {
@@ -522,6 +528,10 @@ export function installMockIpc({ theme, safeArea }) {
       return [7, 2, 0, 5, 1, 8, 3, 6, 4].map((i, order_index) => ({ ...list[i], order_index }));
     },
     cmd_video_cover: ({ videoId }) => cover(videoId),
+    // —— 铅笔批注：设 __shot-pencil 时笔记页边有三条 ——
+    cmd_note_annotations: () => (localStorage.getItem("__shot-pencil") === "1" ? pencilNotes : []),
+    cmd_annotate_notes: () => pencilNotes,
+    cmd_erase_note_annotation: () => null,
     // —— 黑板封面：AI 判断的学科 / 关键术语 / 新学科的图 ——
     // 设 __shot-ai-covers 时，第二门课给关键术语（通用黑板），第三门课给一幅 AI 画的图。
     cmd_course_covers: () => [],
@@ -763,7 +773,7 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_client_store_load: () => [],
     cmd_client_store_put: () => null,
     cmd_video_progress: () =>
-      videos.filter((v) => progress[v.id]).map((v) => ({ video_id: v.id, position_ms: Math.round(v.duration_ms * progress[v.id]), duration_ms: v.duration_ms, course_id: v.course_id, updated_at: now - 86_400_000 })),
+      videos.filter((v) => progress[v.id]).map((v) => ({ video_id: v.id, position_ms: Math.round(v.duration_ms * progress[v.id]), duration_ms: v.duration_ms, course_id: v.course_id, updated_at: now - (localStorage.getItem("__shot-dusty") === "1" ? 21 : 1) * 86_400_000 })),
     cmd_count_due: () => 12,
     cmd_next_due_at: () => now + 3 * 3_600_000,
     cmd_due_by_course: () => [["c1", 9], ["c2", 3]],

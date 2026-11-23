@@ -1,3 +1,4 @@
+import { COURSE_COLORS, type CourseColor } from "@/lib/types";
 /**
  * 板书封面的学科类型：根据课程名（没有就用视频标题）猜一个，决定封面上画什么粉笔图。
  * 猜不到就是 generic（大号衬线首字）。顺序有讲究：更具体的词放前面（「线性代数」先于「数学」）。
@@ -96,4 +97,9 @@ export function stableIndex(text: string | null | undefined, n: number): number 
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0) % n;
+}
+
+/** 课程的颜色：选了就用它；没选按课程名稳定地分一个（封面数字、书签丝带用同一个）。 */
+export function courseTone(color: CourseColor | null | undefined, seed: string | null | undefined): CourseColor {
+  return color ?? COURSE_COLORS[stableIndex(seed, COURSE_COLORS.length)];
 }

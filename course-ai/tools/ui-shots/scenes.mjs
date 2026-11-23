@@ -105,6 +105,39 @@ export const scenes = [
     },
   },
   {
+    // 书签丝带：第一门课停在第 3 讲；三周没打开时丝带褪色、封面落灰。
+    name: "home-bookmark",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await shot();
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-dusty", "1");
+        for (const key of Object.keys(localStorage)) if (key.startsWith("video-at:")) localStorage.removeItem(key);
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator(".ca-dust").first().waitFor();
+      await shot("dusty");
+    },
+  },
+  {
+    // 课桌的时辰：立冬那天白天（窗外晴天、标题旁写着节气）和晚上（台灯亮、窗外夜色）。
+    name: "home-desk-time",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-many-courses", "1");
+        localStorage.setItem("course-ai-home-layout", "desk");
+      });
+      for (const [hour, suffix] of [[10, "day"], [21, "night"]]) {
+        await page.clock.setFixedTime(new Date(2026, 10, 7, hour, 0));
+        await page.reload({ waitUntil: "networkidle" });
+        await page.locator(".ca-desk-window").first().waitFor();
+        await page.waitForTimeout(1000);
+        await shot(suffix);
+      }
+    },
+  },
+  {
     name: "course",
     devices: ALL,
     run: async ({ page, shot }) => {
@@ -392,6 +425,38 @@ export const scenes = [
         await shot("focus");
         await page.keyboard.press("Escape");
       }
+    },
+  },
+  {
+    // 笔记纸张：横线、方格、点阵、米字格。
+    name: "notes-paper",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      for (const paper of ["lined", "grid", "dots", "mi"]) {
+        await page.evaluate((value) => localStorage.setItem("course-ai-note-paper", value), paper);
+        await page.reload({ waitUntil: "networkidle" });
+        await openVideo(page);
+        await page.getByRole("tab", { name: /笔记/ }).click();
+        await page.locator(".ca-paper-sheet .tiptap-notes").waitFor();
+        await shot(paper);
+      }
+    },
+  },
+  {
+    // 铅笔批注：横线纸上，页边三条批注，原文下一道铅笔波浪线。
+    name: "notes-pencil",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-pencil", "1");
+        localStorage.setItem("course-ai-note-paper", "lined");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("tab", { name: /笔记/ }).click();
+      await page.locator(".ca-pencil-note").first().waitFor();
+      await page.waitForTimeout(600);
+      await shot();
     },
   },
   {

@@ -47,7 +47,7 @@ use crate::commands::courses::{
 };
 use crate::commands::danmaku::{cmd_get_comments, cmd_get_danmaku};
 use crate::commands::export::{
-    cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_quiz,
+    cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_notes_print, cmd_export_quiz,
     cmd_export_subtitles, cmd_save_share_image,
 };
 use crate::commands::note_history::cmd_list_note_versions;
@@ -71,6 +71,9 @@ use crate::commands::srs::{
 };
 use crate::commands::study_marks::{
     cmd_card_history, cmd_card_marks, cmd_concept_mastery, cmd_mistake_cards, cmd_review_mistake,
+};
+use crate::commands::note_annotations::{
+    cmd_annotate_notes, cmd_erase_note_annotation, cmd_note_annotations,
 };
 use crate::commands::course_covers::{
     cmd_classify_course_cover, cmd_course_covers, cmd_set_course_cover_kind,
@@ -427,6 +430,7 @@ pub fn run() {
             cmd_get_screenshots,
             cmd_export_subtitles,
             cmd_export_notes,
+            cmd_export_notes_print,
             cmd_export_quiz,
             cmd_export_mindmap,
             cmd_export_handout,
@@ -527,6 +531,9 @@ pub fn run() {
             cmd_course_covers,
             cmd_classify_course_cover,
             cmd_set_course_cover_kind,
+            cmd_note_annotations,
+            cmd_annotate_notes,
+            cmd_erase_note_annotation,
             cmd_due_by_course,
             cmd_add_card,
             cmd_notify,
