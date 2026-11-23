@@ -165,6 +165,44 @@ export function DecodeFailureCard({
   );
 }
 
+/** 边看边传（局域网里的电脑、网盘）一直没有数据过来，或者转发断了：说清楚是哪一头、
+ * 最近一次出了什么错（手机上看不到日志），给一个「重新连接」（重新找一遍电脑、换条新连接）。 */
+export function StreamStalledCard({
+  kind,
+  problem,
+  onReconnect,
+}: {
+  kind: "lan" | "drive";
+  /** 媒体服务记下的最近一次转发问题；空串 = 没有记录（只是一直等不到数据）。 */
+  problem: string;
+  onReconnect: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="alert"
+      className="absolute inset-x-4 top-1/2 z-30 mx-auto flex max-w-md -translate-y-1/2 flex-col gap-2 rounded-xl bg-[var(--surface-stage-overlay)] px-4 py-3 text-left text-white shadow-[var(--shadow-pop)]"
+    >
+      <p className="text-sm font-semibold">{t("videoPlayer.streamStalledTitle")}</p>
+      <p className="text-xs leading-relaxed text-white/70">
+        {kind === "lan" ? t("videoPlayer.streamStalledLan") : t("videoPlayer.streamStalledDrive")}
+      </p>
+      {problem && (
+        <p className="break-words text-[11px] leading-relaxed text-white/55">
+          {t("videoPlayer.streamStalledDetail", { problem })}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={onReconnect}
+        className="ca-touch-44 self-start rounded-md bg-white/15 px-2.5 py-1 text-xs font-medium text-white"
+      >
+        {t("videoPlayer.streamReconnect")}
+      </button>
+    </div>
+  );
+}
+
 /** 点画面 / 空格切换播放时，画面中央闪一下播放或暂停图标（YouTube 式）。 */
 export function PlayFlash({ kind, onDone }: { kind: "play" | "pause"; onDone: () => void }) {
   return (

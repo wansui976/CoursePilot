@@ -89,7 +89,7 @@ use crate::commands::webdav_import::{
     cmd_webdav_browse, cmd_webdav_download_video, cmd_webdav_import_stream, cmd_webdav_source_delete,
     cmd_webdav_source_save, cmd_webdav_source_test, cmd_webdav_sources, cmd_webdav_stream_url,
 };
-use crate::commands::lan_share::{cmd_lan_download_video, cmd_lan_share_set_enabled, cmd_lan_share_status, cmd_lan_stream_url};
+use crate::commands::lan_share::{cmd_lan_download_video, cmd_lan_share_set_enabled, cmd_lan_share_status, cmd_lan_stream_url, cmd_remote_stream_problem};
 use crate::commands::semantic::{
     cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild, cmd_semantic_resume,
     cmd_semantic_save, cmd_semantic_status, cmd_semantic_test,
@@ -505,6 +505,7 @@ pub fn run() {
             cmd_webdav_download_video,
             cmd_lan_share_set_enabled,
             cmd_lan_stream_url,
+            cmd_remote_stream_problem,
             cmd_lan_download_video,
             cmd_analyze_course_concepts,
             cmd_cancel_course_analysis,

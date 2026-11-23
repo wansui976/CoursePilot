@@ -16,6 +16,9 @@ vi.mock("@/lib/ipc", () => ({
     danmaku: {
       list: vi.fn().mockResolvedValue([]),
     },
+    lanShare: {
+      streamProblem: vi.fn().mockResolvedValue(null),
+    },
     videos: {
       // 已探测过、无黑边。
       ensureCrop: vi.fn().mockResolvedValue({
@@ -71,6 +74,97 @@ beforeEach(async () => {
     .mockResolvedValue({ state: "idle", percent: 0 });
   await i18n.changeLanguage("zh-CN");
   localStorage.removeItem("course-ai-playback-rate");
+});
+
+function renderRemotePlayer(onReconnect: () => void) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <VideoPlayer
+        src="http://127.0.0.1:1234/m/abc?lan=1"
+        videoId="video-1"
+        remote={{ kind: "lan", onReconnect }}
+      />
+    </QueryClientProvider>,
+  );
+}
+
+describe("VideoPlayer 边看边传", () => {
+  const streamProblem = () =>
+    ipc.lanShare.streamProblem as unknown as { mockResolvedValue: (v: string | null) => void };
+
+  it("转发连不上电脑时说出原因，而不是停在 00:00 / 00:00 或者报成编码问题", async () => {
+    streamProblem().mockResolvedValue("连不上 192.168.3.5:10887（connection refused）");
+    const onReconnect = vi.fn();
+    renderRemotePlayer(onReconnect);
+    const before = document.querySelector("video")!;
+    Object.defineProperty(before, "error", { configurable: true, value: { code: 4 } });
+
+    await act(async () => {
+      fireEvent.error(before);
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("视频没有传过来");
+    expect(alert).toHaveTextContent("192.168.3.5:10887");
+    expect(alert).not.toHaveTextContent("编码");
+
+    fireEvent.click(within(alert).getByRole("button", { name: "重新连接" }));
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(document.querySelector("video")).not.toBe(before);
+  });
+
+  it("网络错误（code 2）以前被直接忽略，现在也给出重新连接", async () => {
+    streamProblem().mockResolvedValue(null);
+    renderRemotePlayer(vi.fn());
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "error", { configurable: true, value: { code: 2 } });
+
+    await act(async () => {
+      fireEvent.error(video);
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("重新连接");
+  });
+
+  it("一直在加载却拿不到视频信息：20 秒后说出来", async () => {
+    streamProblem().mockResolvedValue(null);
+    vi.useFakeTimers();
+    try {
+      renderRemotePlayer(vi.fn());
+      const video = document.querySelector("video")!;
+      Object.defineProperty(video, "readyState", { configurable: true, value: 0 });
+      Object.defineProperty(video, "networkState", { configurable: true, value: 2 });
+      fireEvent.loadStart(video);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(19_000);
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("视频没有传过来");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("编码不支持（没有转发错误）时仍走解码失败、请电脑转码", async () => {
+    streamProblem().mockResolvedValue(null);
+    (ipc.videos.codec as unknown as { mockResolvedValue: (v: string) => void }).mockResolvedValue("hvc1");
+    renderRemotePlayer(vi.fn());
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "error", { configurable: true, value: { code: 4 } });
+
+    await act(async () => {
+      fireEvent.error(video);
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("hvc1");
+  });
 });
 
 describe("VideoPlayer iOS gestures", () => {

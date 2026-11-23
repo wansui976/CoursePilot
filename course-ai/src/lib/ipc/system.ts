@@ -277,6 +277,8 @@ export const lanShare = {
   setEnabled: (enabled: boolean): Promise<LanShareStatus> => invoke("cmd_lan_share_set_enabled", { enabled }),
   /** 本机没有文件时，在局域网里找一台有的设备；找到了返回本机转发的播放地址，否则 null。 */
   streamUrl: (videoId: string): Promise<string | null> => invoke("cmd_lan_stream_url", { videoId }),
+  /** 边看边传卡住时：最近一次转发出了什么问题（连不上、对方回了错误码、传到一半断了）；没有给 null。 */
+  streamProblem: (videoId: string): Promise<string | null> => invoke("cmd_remote_stream_problem", { videoId }),
   /** 把这个视频整段下到本机（进度见 `lan-share:download` 事件）；返回更新后的视频条目。 */
   downloadVideo: (videoId: string): Promise<Video> => invoke("cmd_lan_download_video", { videoId }),
 };

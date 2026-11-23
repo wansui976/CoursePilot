@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
 	<!-- 用数据线把课程视频拷进 iPad：Finder / Apple 设备里会显示这个 App 的「文稿」，
-	     拖进去之后在 App 里「导入 → 上传本地视频」从「我的 iPad → course-ai」选中。 -->
+	     拖进去之后在 App 里「导入 → 从电脑导入（数据线）」一键导入。 -->
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

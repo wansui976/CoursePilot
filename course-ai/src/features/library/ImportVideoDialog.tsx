@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  Cable,
   ChevronDown,
   Download,
   FileVideo,
@@ -28,9 +29,12 @@ import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { ipc, type FolderVideo } from "@/lib/ipc";
 import { pickDirectoryPath, pickPersistedFile } from "@/lib/mobileFiles";
-import { isMobile } from "@/lib/platform";
+import { isIOS, isMobile } from "@/lib/platform";
 
 // 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
+const CableImportDialog = lazy(() =>
+  import("./CableImportDialog").then((m) => ({ default: m.CableImportDialog })),
+);
 const BilibiliImportDialog = lazy(() =>
   import("./BilibiliImportDialog").then((m) => ({ default: m.BilibiliImportDialog })),
 );
@@ -67,10 +71,13 @@ export function ImportVideoButton({
   const [showBili, setShowBili] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
+  const [showCable, setShowCable] = useState(false);
   const [folderVideos, setFolderVideos] = useState<FolderVideo[] | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   // 移动端无 yt-dlp sidecar / 无法扫描任意文件夹，隐藏「下载网络视频」「导入整个文件夹」入口。
   const mobile = isMobile();
+  // 数据线导入只在 iOS 有：Finder / Apple 设备能直接往 App 文稿里拖文件。
+  const ios = isIOS();
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
 
@@ -223,6 +230,28 @@ export function ImportVideoButton({
               </span>
             </button>
 
+            {ios && (
+              <button
+                role="menuitem"
+                tabIndex={-1}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setShowCable(true);
+                }}
+                className="ca-touch-44 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+              >
+                <Cable className="mt-0.5 h-4 w-4 flex-none text-primary" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--text-strong)]">
+                    {t("import.fromComputer")}
+                  </span>
+                  <span className="block text-xs text-[var(--text-muted)]">
+                    {t("import.fromComputerHint")}
+                  </span>
+                </span>
+              </button>
+            )}
+
             {!mobile && (
               <button
                 role="menuitem"
@@ -332,6 +361,15 @@ export function ImportVideoButton({
           </div>
         </>,
         document.body,
+      )}
+      {showCable && (
+        <Suspense fallback={null}>
+          <CableImportDialog
+            courseId={courseId}
+            onClose={() => setShowCable(false)}
+            returnFocusRef={triggerRef}
+          />
+        </Suspense>
       )}
       {showBili && (
         <Suspense fallback={null}>

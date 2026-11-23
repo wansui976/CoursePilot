@@ -127,6 +127,29 @@ struct PickAndPersistFileResponse {
     duration_ms: Option<i64>,
 }
 
+#[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct CableFileEntry {
+    name: String,
+    path: String,
+    size: i64,
+}
+
+#[cfg(target_os = "ios")]
+#[derive(Deserialize)]
+struct ListCableFilesResponse {
+    files: Vec<CableFileEntry>,
+    scanned: i64,
+}
+
+#[cfg(target_os = "ios")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TakeCableFileRequest {
+    source_path: String,
+    category: String,
+}
+
 /// 原生截帧落地一张 JPEG，替代桌面端 ffmpeg（Android: MediaMetadataRetriever；
 /// iOS: AVAssetImageGenerator）。用初始化时存下的全局 AppHandle，因调用点
 /// （slides 流水线 capture_jpeg_at）没有 State/AppHandle。
@@ -360,12 +383,86 @@ fn percent_decode_path(input: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
+/// 数据线导入（iOS）：列出用 Finder / Apple 设备拷进 App「文稿」的视频和音频。
+/// 其他平台没有这个入口，返回空列表。
+#[tauri::command]
+pub async fn list_cable_files<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "ios")]
+    {
+        let mobile_files = app.state::<MobileFiles<R>>();
+        let response = mobile_files
+            .0
+            .run_mobile_plugin::<ListCableFilesResponse>("listCableFiles", serde_json::json!({}))
+            .map_err(|error| error.to_string())?;
+        Ok(serde_json::json!({
+            "files": response
+                .files
+                .into_iter()
+                .map(|file| {
+                    serde_json::json!({
+                        "name": file.name,
+                        "path": file.path,
+                        "size": file.size,
+                    })
+                })
+                .collect::<Vec<_>>(),
+            "scanned": response.scanned,
+        }))
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Ok(serde_json::json!({ "files": [], "scanned": 0 }))
+    }
+}
+
+/// 数据线导入（iOS）：把一个「文稿」里的文件移进 App 资料库并读取时长。
+/// 移走而不是拷贝：视频动辄几个 G，避免一份内容占两份空间。
+#[tauri::command]
+pub async fn take_cable_file<R: Runtime>(
+    app: AppHandle<R>,
+    source_path: String,
+    category: String,
+) -> Result<Option<serde_json::Value>, String> {
+    #[cfg(target_os = "ios")]
+    {
+        let mobile_files = app.state::<MobileFiles<R>>();
+        let response = mobile_files
+            .0
+            .run_mobile_plugin::<PickAndPersistFileResponse>(
+                "takeCableFile",
+                TakeCableFileRequest {
+                    source_path,
+                    category,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(response.path.map(|path| {
+            serde_json::json!({
+                "path": path,
+                "durationMs": response.duration_ms,
+            })
+        }))
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, source_path, category);
+        Ok(None)
+    }
+}
+
 pub fn init() -> TauriPlugin<tauri::Wry> {
     PluginBuilder::new("mobile-files")
         .invoke_handler(tauri::generate_handler![
             persist_picked_file,
             pick_and_persist_file,
-            share_file
+            share_file,
+            list_cable_files,
+            take_cable_file
         ])
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]

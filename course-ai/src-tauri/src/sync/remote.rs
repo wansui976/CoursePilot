@@ -342,6 +342,31 @@ pub async fn run_once(
     Ok(report)
 }
 
+/// 已经写到网盘上的局域网地址和现在的不一样了（换了网络、端口变了）。
+/// 这次运行还没写过的不算：第一轮同步自然会写。同一个新地址只催一轮：
+/// 断网时写不上去，别每分钟都为它去撞一次服务器（下一轮常规同步还会再写）。
+fn lan_advert_outdated() -> bool {
+    if !crate::lan_share::supported() || cfg!(test) {
+        return false;
+    }
+    static NUDGED: OnceLock<Mutex<Option<Option<crate::lan_share::Advert>>>> = OnceLock::new();
+    let current = crate::lan_share::advert();
+    let outdated = prepared()
+        .lock()
+        .unwrap()
+        .values()
+        .any(|prepared| matches!(&prepared.lan_published, Some(published) if *published != current));
+    if !outdated {
+        return false;
+    }
+    let mut nudged = NUDGED.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    if nudged.as_ref() == Some(&current) {
+        return false;
+    }
+    *nudged = Some(current);
+    true
+}
+
 /// 局域网直连播放的地址写到网盘上自己的文件夹里（变了才写；关掉了就删掉）。出错只记日志，下一轮再试。
 async fn publish_lan(
     dav: &WebDav,
@@ -1198,7 +1223,15 @@ impl Engine {
         loop {
             tokio::time::sleep(LOCAL_CHECK).await;
             let enabled = is_enabled(&self.db).await.unwrap_or(false);
-            if enabled && outbox::pending_count(&self.db).await.unwrap_or(0) > baseline {
+            if !enabled {
+                continue;
+            }
+            // 电脑换了网络（家里 Wi‑Fi ↔ 公司、连上 / 断开 Tailscale）：地址马上写到网盘上，
+            // 别让手机拿着旧地址等到下一轮同步（空闲时要半小时）。
+            if lan_advert_outdated() {
+                return;
+            }
+            if outbox::pending_count(&self.db).await.unwrap_or(0) > baseline {
                 tokio::time::sleep(LOCAL_DEBOUNCE).await;
                 return;
             }

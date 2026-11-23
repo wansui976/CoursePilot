@@ -619,6 +619,7 @@ export function installMockIpc({ theme, safeArea }) {
     }),
     cmd_lan_share_status: () => ({ supported: true, enabled: true, running: true, port: 47321, addresses: ["192.168.1.5"], error: null }),
     cmd_lan_stream_url: () => null,
+    cmd_remote_stream_problem: () => null,
     cmd_remote_sync_media_size: () => 734 * 1024 * 1024,
     cmd_webdav_stream_url: ({ videoId }) => (localStorage.getItem("__shot-drive") === "1" ? mediaUrl(videoId) : null),
     cmd_webdav_sources: () => [
