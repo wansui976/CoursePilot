@@ -1,5 +1,6 @@
 /** 课程库：课程、视频与回收站。 */
 import { invoke } from "@tauri-apps/api/core";
+import type { CourseCover, CoverKind } from "../coverKind";
 import type { CropStatus } from "../blackBars";
 import type { SkipRange } from "../silenceSkip";
 import type {
@@ -50,6 +51,14 @@ export const courses = {
     invoke("cmd_reorder_courses", { orderedIds }),
   setColor: (id: string, color: CourseColor | null): Promise<void> =>
     invoke("cmd_set_course_color", { id, color }),
+  /** 存下来的黑板封面（AI 判断的或手动选的）。 */
+  covers: (): Promise<CourseCover[]> => invoke("cmd_course_covers"),
+  /** 让 AI 看课程名和视频标题判断封面；已有结果时直接返回，force 时重新判断。 */
+  classifyCover: (courseId: string, force = false): Promise<CourseCover> =>
+    invoke("cmd_classify_course_cover", { courseId, force }),
+  /** 手动选封面学科；null = 清掉，回到自动判断。 */
+  setCoverKind: (courseId: string, kind: CoverKind | null): Promise<CourseCover | null> =>
+    invoke("cmd_set_course_cover_kind", { courseId, kind }),
 };
 
 export const folders = {

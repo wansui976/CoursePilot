@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { stableIndex, type CoverKind } from "@/lib/coverKind";
+import { stableIndex, type CoverKind, type CoverShape } from "@/lib/coverKind";
 import { COURSE_COLORS, type CourseColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
  */
 
 /** 每种学科的粉笔图。viewBox 300×169，主要画在右侧 60%，左下留给数字。 */
-const ART: Record<Exclude<CoverKind, "generic">, ReactNode> = {
+const ART: Record<Exclude<CoverKind, "generic" | "custom">, ReactNode> = {
   linear: (
     <>
       <text x="150" y="62" fontSize="24">A = SΛS⁻¹</text>
@@ -197,12 +197,62 @@ const GENERIC_ART: ReactNode[] = [
   </g>,
 ];
 
+/** AI 为新学科画的图：逐个画成 React 元素（后端已校验过形状和坐标），不插入原始 SVG。 */
+function ShapeArt({ shapes }: { shapes: CoverShape[] }) {
+  return (
+    <>
+      {shapes.map((shape, i) => {
+        switch (shape.t) {
+          case "path":
+            return <path key={i} className="stroke" d={shape.d} />;
+          case "circle":
+            return <circle key={i} className="stroke" cx={shape.cx} cy={shape.cy} r={shape.r} />;
+          case "ellipse":
+            return <ellipse key={i} className="stroke" cx={shape.cx} cy={shape.cy} rx={shape.rx} ry={shape.ry} />;
+          case "rect":
+            return <rect key={i} className="stroke" x={shape.x} y={shape.y} width={shape.w} height={shape.h} rx={2} />;
+          case "line":
+            return <line key={i} className="stroke" x1={shape.x1} y1={shape.y1} x2={shape.x2} y2={shape.y2} />;
+          case "text":
+            return (
+              <text key={i} x={shape.x} y={shape.y} fontSize={shape.s}>
+                {shape.v}
+              </text>
+            );
+          default:
+            return null;
+        }
+      })}
+    </>
+  );
+}
+
+/** 这门课的关键术语，像板书一样一行一个写在右边，第一个下面划一道。 */
+function TermsArt({ terms }: { terms: string[] }) {
+  const longest = Math.max(...terms.map((term) => term.length), 1);
+  // 右侧大约 140 个单位宽；中文一个字约 1em。
+  const size = Math.max(12, Math.min(22, Math.floor(138 / longest)));
+  const ys = terms.length === 1 ? [104] : terms.length === 2 ? [86, 124] : [72, 106, 140];
+  return (
+    <>
+      {terms.map((term, i) => (
+        <text key={term} x={156} y={ys[i]} fontSize={size} className={/[\u3400-\u9fff]/.test(term) ? "upright" : undefined}>
+          {term}
+        </text>
+      ))}
+      <path className="stroke" d={`M156 ${ys[0] + 7}c${size * 1.6} 2 ${size * 3.2} 1 ${Math.min(130, size * longest * 0.9)} -1`} opacity={0.6} />
+    </>
+  );
+}
+
 export function BoardCover({
   kind,
   number,
   unit,
   caption,
   seed,
+  art,
+  terms,
   color,
   className,
   children,
@@ -216,6 +266,10 @@ export function BoardCover({
   caption?: string;
   /** 挑通用黑板和默认颜色用的种子（课程名）；不传就用 caption。 */
   seed?: string;
+  /** kind = custom 时 AI 画的图。 */
+  art?: CoverShape[] | null;
+  /** AI 给的关键术语：通用黑板上写的就是它们。 */
+  terms?: string[];
   color?: CourseColor | null;
   className?: string;
   /** 叠在封面上的东西（时长、进度条、播放按钮）。 */
@@ -229,7 +283,17 @@ export function BoardCover({
   return (
     <span className={cn("ca-board-cover", className)} data-kind={kind}>
       <svg className="art" viewBox="0 0 300 169" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
-        {kind === "generic" ? GENERIC_ART[stableIndex(key, GENERIC_ART.length)] : ART[kind]}
+        {kind === "custom" && art && art.length > 0 ? (
+          <ShapeArt shapes={art} />
+        ) : kind === "generic" || kind === "custom" ? (
+          terms && terms.length > 0 ? (
+            <TermsArt terms={terms} />
+          ) : (
+            GENERIC_ART[stableIndex(key, GENERIC_ART.length)]
+          )
+        ) : (
+          ART[kind]
+        )}
       </svg>
       {caption && (
         <span className="cap" aria-hidden="true">

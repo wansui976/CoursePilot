@@ -76,6 +76,21 @@ export const scenes = [
     },
   },
   {
+    // AI 判断的封面：第二门课写关键术语，第三门课是 AI 画的图；再打开封面选择。
+    name: "home-ai-covers",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-ai-covers", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await page.waitForTimeout(500);
+      await shot();
+      await page.getByRole("button", { name: "课程操作" }).last().click({ force: true });
+      await page.getByRole("menuitem", { name: /封面/ }).click();
+      await page.getByRole("list", { name: "封面样式" }).waitFor();
+      await shot("picker");
+    },
+  },
+  {
     // 主页样式选「课桌」。
     name: "home-desk",
     devices: ["desktop", "tablet"],

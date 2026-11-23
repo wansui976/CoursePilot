@@ -2,11 +2,9 @@ import { useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, FolderPlus, Layers, LayoutGrid, Loader2, Play } from "lucide-react";
-import { guessCoverKind } from "@/lib/coverKind";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
 import { DECK_THRESHOLD, useHomeLayout } from "@/stores/homeLayout";
-import { BoardCover } from "@/ui/BoardCover";
 import { Button } from "@/ui/button";
 import { IconButton } from "@/ui/icon-button";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -23,6 +21,7 @@ import { displayTitle } from "@/lib/videoTitle";
 import { CourseDeck } from "./CourseDeck";
 import { DeskHome } from "./DeskHome";
 import { LectureCover } from "./LectureCover";
+import { CourseBoardCover } from "./CourseBoardCover";
 import { UpdateNotice } from "./UpdateNotice";
 /** 「继续学习」最多列几门课。 */
 const RESUME_LIMIT = 3;
@@ -229,12 +228,11 @@ export function LibraryOverview({
                     onClick={() => onSelectCourse(course.id)}
                   >
                     <span className="ca-course-cover" data-tiles={0}>
-                      <BoardCover
-                        kind={guessCoverKind(course.name)}
+                      <CourseBoardCover
+                        course={course}
                         number={course.video_count}
                         unit={t("library.lectureUnit")}
                         caption={course.name}
-                        color={course.color}
                       />
                     </span>
                     <span className="ca-course-body">

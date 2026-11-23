@@ -72,6 +72,9 @@ use crate::commands::srs::{
 use crate::commands::study_marks::{
     cmd_card_history, cmd_card_marks, cmd_concept_mastery, cmd_mistake_cards, cmd_review_mistake,
 };
+use crate::commands::course_covers::{
+    cmd_classify_course_cover, cmd_course_covers, cmd_set_course_cover_kind,
+};
 use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
 use crate::commands::remote_sync::{
     cmd_remote_sync_now, cmd_remote_sync_nudge, cmd_remote_sync_save, cmd_remote_sync_set_enabled,
@@ -521,6 +524,9 @@ pub fn run() {
             cmd_mistake_cards,
             cmd_review_mistake,
             cmd_concept_mastery,
+            cmd_course_covers,
+            cmd_classify_course_cover,
+            cmd_set_course_cover_kind,
             cmd_due_by_course,
             cmd_add_card,
             cmd_notify,

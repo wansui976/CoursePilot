@@ -1,10 +1,9 @@
 import { useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
-import { guessCoverKind } from "@/lib/coverKind";
 import type { Course, VideoListItem } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
-import { BoardCover } from "@/ui/BoardCover";
+import { CourseBoardCover } from "./CourseBoardCover";
 import { Button } from "@/ui/button";
 import { Mark, Tag } from "@/ui/marks";
 import { useSwipeCard } from "@/features/study/useSwipeCard";
@@ -103,13 +102,13 @@ export function CourseDeck({
                 className="spine"
                 style={{ background: course.color ? `var(--tag-${course.color})` : "var(--tag-gray)" }}
               />
-              <BoardCover
+              <CourseBoardCover
                 className="ca-deck-cover"
-                kind={guessCoverKind(course.name)}
+                course={course}
+                hints={item.videos.slice(0, 20).map((video) => video.title)}
                 number={course.video_count}
                 unit={t("library.lectureUnit")}
                 caption={course.name}
-                color={course.color}
               >
                 <span className="ca-deck-count">
                   {Math.min(item.watched, item.videos.length)} / {item.videos.length}
@@ -121,7 +120,7 @@ export function CourseDeck({
                     }}
                   />
                 </span>
-              </BoardCover>
+              </CourseBoardCover>
               <span className="ca-deck-meta">
                 <span className="ca-deck-name">{course.name}</span>
               </span>

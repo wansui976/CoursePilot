@@ -1,9 +1,8 @@
-import { guessCoverKind } from "@/lib/coverKind";
 import { lectureNumberOf } from "@/lib/lectureOrder";
 import type { Course } from "@/lib/types";
 import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
 import { cn } from "@/lib/utils";
-import { BoardCover } from "@/ui/BoardCover";
+import { CourseBoardCover } from "./CourseBoardCover";
 
 /**
  * 一讲的封面。传了 videoId 就用视频自己的首帧（单个视频认得出是哪一段）；
@@ -24,7 +23,7 @@ export function LectureCover({
   /** 这一讲的视频 id：有首帧就显示首帧。 */
   videoId?: string;
   title: string;
-  course?: Pick<Course, "name" | "color"> | null;
+  course?: (Pick<Course, "name" | "color"> & { id?: string }) | null;
   /** 在课程里的位置（从 0 开始），标题里没有讲次时用。 */
   index?: number;
   /** 课程页里每一讲都是同一门课，封面上就不再写课程名。 */
@@ -44,15 +43,14 @@ export function LectureCover({
   const fromTitle = lectureNumberOf(title);
   const number = fromTitle ?? (index != null ? index + 1 : null);
   return (
-    <BoardCover
-      kind={guessCoverKind(course?.name, title)}
+    <CourseBoardCover
+      course={course ?? { name: title, color: null }}
+      hints={[title]}
       number={number}
       caption={showCaption ? (course?.name ?? title) : undefined}
-      seed={course?.name ?? title}
-      color={course?.color ?? null}
       className={className}
     >
       {children}
-    </BoardCover>
+    </CourseBoardCover>
   );
 }

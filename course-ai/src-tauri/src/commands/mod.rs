@@ -26,6 +26,7 @@ pub mod srs;
 pub mod stats;
 pub mod storage;
 pub mod study_marks;
+pub mod course_covers;
 pub mod subscriptions;
 pub mod sync;
 pub mod tools;

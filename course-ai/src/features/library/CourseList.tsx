@@ -12,8 +12,9 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
-import { FolderOpen, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
+import { FolderOpen, Image, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
 import { SubscriptionsDialog } from "./SubscriptionsDialog";
+import { CoverPickerDialog } from "./CoverPickerDialog";
 import { nextOrder } from "./SortableVideos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -159,6 +160,7 @@ export function CourseList({
   // 叠放布局（手机）用底部操作弹层，和应用里其它菜单一致。
   const menuSheet = Boolean(useOptionalShell()?.compactOverlays);
   const [subscriptionsFor, setSubscriptionsFor] = useState<{ id: string; name: string } | null>(null);
+  const [coverFor, setCoverFor] = useState<Course | null>(null);
   // 打开时记录触发按钮的屏幕坐标：菜单 portal 到 body 用 fixed 定位，
   // 不再被 `.ca-nav`（overflow-y:auto）滚动容器裁掉。
   const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
@@ -437,6 +439,16 @@ export function CourseList({
         <ColorSwatches value={course.color} onChange={(color) => chooseColor(course.id, color)} />
         <MenuItem
           className="ca-touch-44 flex items-center gap-2"
+          onClick={() => {
+            setCoverFor(course);
+            closeMenu();
+          }}
+        >
+          <Image aria-hidden="true" className={icon} />
+          {t("cover.menu")}
+        </MenuItem>
+        <MenuItem
+          className="ca-touch-44 flex items-center gap-2"
           onClick={() => void handleRelinkRoot(course.id, course.name)}
         >
           <FolderOpen aria-hidden="true" className={icon} />
@@ -691,6 +703,7 @@ export function CourseList({
           onClose={() => setSubscriptionsFor(null)}
         />
       )}
+      {coverFor && <CoverPickerDialog course={coverFor} onClose={() => setCoverFor(null)} />}
     </>
   );
 }

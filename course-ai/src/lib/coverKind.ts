@@ -19,7 +19,47 @@ export type CoverKind =
   | "biology"
   | "programming"
   | "history"
+  | "custom"
   | "generic";
+
+/** 有现成粉笔图、可以手动选的学科（不含 AI 画的 custom 和通用黑板）。 */
+export const DRAWN_KINDS = [
+  "linear",
+  "calculus",
+  "probability",
+  "ml",
+  "network",
+  "systems",
+  "datastruct",
+  "economics",
+  "language",
+  "psychology",
+  "philosophy",
+  "physics",
+  "chemistry",
+  "biology",
+  "programming",
+  "history",
+] as const satisfies readonly CoverKind[];
+
+/** AI 为新学科画的一笔（坐标系同封面 viewBox 300×169），后端已校验过。 */
+export type CoverShape =
+  | { t: "path"; d: string }
+  | { t: "circle"; cx: number; cy: number; r: number }
+  | { t: "ellipse"; cx: number; cy: number; rx: number; ry: number }
+  | { t: "rect"; x: number; y: number; w: number; h: number }
+  | { t: "line"; x1: number; y1: number; x2: number; y2: number }
+  | { t: "text"; x: number; y: number; s: number; v: string };
+
+/** 一门课存下来的封面：AI 判断的或手动选的。 */
+export interface CourseCover {
+  course_id: string;
+  kind: CoverKind;
+  terms: string[];
+  art: CoverShape[] | null;
+  source: "ai" | "user";
+  updated_at: number;
+}
 
 const RULES: [CoverKind, RegExp][] = [
   ["linear", /线性代数|矩阵|linear\s*algebra|特征值|向量空间/i],

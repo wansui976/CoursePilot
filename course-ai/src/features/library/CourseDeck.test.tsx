@@ -4,6 +4,14 @@ import "@/i18n";
 import type { Course, VideoListItem } from "@/lib/types";
 import { CourseDeck, type DeckCourse } from "./CourseDeck";
 
+// 封面学科走关键词猜测，不连后端。
+vi.mock("@/lib/useCourseCover", async () => {
+  const { guessCoverKind } = await import("@/lib/coverKind");
+  return {
+    useCoverFor: (_id: string | undefined, ...texts: string[]) => ({ kind: guessCoverKind(...texts), art: null, terms: [] }),
+  };
+});
+
 function course(id: string, name: string): Course {
   return {
     id,

@@ -7,6 +7,7 @@ import { AppRail } from "@/features/shell/AppRail";
 import type { ShellNav } from "@/features/shell/shellNav";
 import type { ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
 import { useReviewReturn } from "@/stores/reviewReturn";
+import { useAutoClassifyCovers } from "@/lib/useCourseCover";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
 import { useDownloadsSync } from "@/features/library/useDownloads";
 import { useRecorrection } from "@/features/library/useRecorrection";
@@ -200,6 +201,8 @@ export function Home() {
 
   const { data: videos = [], isSuccess: videosLoaded } = useQuery(queries.videos(selectedCourseId));
   const { data: courses = [], isSuccess: coursesLoaded } = useQuery(queries.courses());
+  // 新课程的黑板封面：后台请 AI 判断学科（没配模型时什么都不做，封面按关键词猜）。
+  useAutoClassifyCovers(courses.map((course) => course.id));
   const recorrection = useRecorrection({ selectedCourseId, selectedVideoId, videos });
   // 顶栏副标「已看完 N 个」：本地按播放进度聚合，零后端改动。
   // 不 memo：看完一集从工作台返回时 videos 引用不变（react-query 结构共享），

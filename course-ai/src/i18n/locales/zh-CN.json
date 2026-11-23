@@ -2562,5 +2562,36 @@
     "step1": "放一门课上来",
     "step2": "看完一讲",
     "step3": "明天回来复习"
+  },
+  "cover": {
+    "menu": "封面…",
+    "title": "「{{course}}」的封面",
+    "sourceAi": "AI 判断为「{{kind}}」。点一块黑板改成它，手动选的 AI 不会再改。",
+    "sourceUser": "你选的是「{{kind}}」。",
+    "sourceGuess": "还没让 AI 判断，现在按课程名里的关键词猜。",
+    "optionsLabel": "封面样式",
+    "reset": "恢复自动",
+    "rejudge": "让 AI 重新判断",
+    "judging": "判断中…",
+    "kinds": {
+      "linear": "线性代数",
+      "calculus": "微积分",
+      "probability": "概率统计",
+      "ml": "机器学习",
+      "network": "计算机网络",
+      "systems": "计算机系统",
+      "datastruct": "数据结构与算法",
+      "economics": "经济金融",
+      "language": "外语",
+      "psychology": "心理学",
+      "philosophy": "哲学",
+      "physics": "物理",
+      "chemistry": "化学",
+      "biology": "生物医学",
+      "programming": "编程",
+      "history": "历史",
+      "custom": "AI 画的图",
+      "generic": "通用黑板"
+    }
   }
 }

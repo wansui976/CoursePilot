@@ -2576,5 +2576,36 @@
     "step1": "Add a course",
     "step2": "Watch a lecture",
     "step3": "Come back tomorrow to review"
+  },
+  "cover": {
+    "menu": "Cover…",
+    "title": "Cover for “{{course}}”",
+    "sourceAi": "AI chose “{{kind}}”. Pick a board to change it; the AI won't override your choice.",
+    "sourceUser": "You chose “{{kind}}”.",
+    "sourceGuess": "Not judged by AI yet; guessed from keywords in the course name.",
+    "optionsLabel": "Cover styles",
+    "reset": "Back to automatic",
+    "rejudge": "Ask AI again",
+    "judging": "Judging…",
+    "kinds": {
+      "linear": "Linear algebra",
+      "calculus": "Calculus",
+      "probability": "Probability",
+      "ml": "Machine learning",
+      "network": "Networking",
+      "systems": "Computer systems",
+      "datastruct": "Data structures",
+      "economics": "Economics",
+      "language": "Languages",
+      "psychology": "Psychology",
+      "philosophy": "Philosophy",
+      "physics": "Physics",
+      "chemistry": "Chemistry",
+      "biology": "Biology & medicine",
+      "programming": "Programming",
+      "history": "History",
+      "custom": "Drawn by AI",
+      "generic": "Plain board"
+    }
   }
 }

@@ -522,6 +522,32 @@ export function installMockIpc({ theme, safeArea }) {
       return [7, 2, 0, 5, 1, 8, 3, 6, 4].map((i, order_index) => ({ ...list[i], order_index }));
     },
     cmd_video_cover: ({ videoId }) => cover(videoId),
+    // —— 黑板封面：AI 判断的学科 / 关键术语 / 新学科的图 ——
+    // 设 __shot-ai-covers 时，第二门课给关键术语（通用黑板），第三门课给一幅 AI 画的图。
+    cmd_course_covers: () => [],
+    cmd_classify_course_cover: ({ courseId }) => {
+      const ai = localStorage.getItem("__shot-ai-covers") === "1";
+      const base = { course_id: courseId, terms: [], art: null, source: "ai", updated_at: now };
+      if (ai && courseId === "c2") return { ...base, kind: "generic", terms: ["虹鳟", "生食标准", "寄生虫"] };
+      if (ai && courseId === "c3")
+        return {
+          ...base,
+          kind: "custom",
+          terms: ["三文鱼"],
+          art: [
+            { t: "path", d: "M168 96 C 190 66 240 66 262 96 C 240 126 190 126 168 96 Z" },
+            { t: "path", d: "M262 96 L 288 76 L 284 96 L 288 116 Z" },
+            { t: "circle", cx: 186, cy: 90, r: 3 },
+            { t: "path", d: "M200 80 C 206 90 206 102 200 112 M218 78 C 224 90 224 102 218 114 M236 80 C 242 90 242 102 236 112" },
+            { t: "line", x1: 160, y1: 146, x2: 290, y2: 146 },
+            { t: "text", x: 164, y: 140, s: 13, v: "Salmo salar" },
+          ],
+        };
+      const kinds = { c1: "ml", c2: "linear", c3: "systems", c4: "economics", c5: "language", c6: "datastruct" };
+      return { ...base, kind: kinds[courseId] ?? "generic" };
+    },
+    cmd_set_course_cover_kind: ({ courseId, kind }) =>
+      kind ? { course_id: courseId, kind, terms: [], art: null, source: "user", updated_at: now } : null,
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     // —— 多设备同步 / 局域网直连播放 / 从网盘导入 ——
     cmd_remote_sync_status: () => ({
