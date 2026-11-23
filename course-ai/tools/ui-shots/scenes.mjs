@@ -129,12 +129,12 @@ export const scenes = [
     devices: ["desktop"],
     run: async ({ page, shot }) => {
       await page.evaluate(() => {
-        localStorage.setItem("__shot-many-courses", "1");
+        localStorage.removeItem("__shot-many-courses");
         localStorage.setItem("course-ai-home-layout", "desk");
         localStorage.setItem("course-ai-weather-place", JSON.stringify({ name: "武汉", region: "中国", latitude: 30.59, longitude: 114.31 }));
         localStorage.setItem("__shot-weather", "cloudy");
       });
-      for (const width of [1000, 1240]) {
+      for (const width of [1000, 1240, 1600]) {
         await page.setViewportSize({ width, height: 760 });
         await page.clock.setFixedTime(new Date(2026, 10, 23, 21, 0));
         await page.reload({ waitUntil: "networkidle" });

@@ -800,7 +800,7 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_client_store_load: () => [],
     cmd_client_store_put: () => null,
     cmd_video_progress: () =>
-      videos.filter((v) => progress[v.id]).map((v) => ({ video_id: v.id, position_ms: Math.round(v.duration_ms * progress[v.id]), duration_ms: v.duration_ms, course_id: v.course_id, updated_at: now - (localStorage.getItem("__shot-dusty") === "1" ? 21 : 1) * 86_400_000 })),
+      videos.filter((v) => progress[v.id]).map((v) => ({ video_id: v.id, position_ms: Math.round(v.duration_ms * progress[v.id]), duration_ms: v.duration_ms, course_id: v.course_id, updated_at: now - (localStorage.getItem("__shot-dusty") === "1" ? 21 : 1) * 86_400_000 - (v.id === "v3" ? 0 : 3_600_000) })),
     cmd_count_due: () => 12,
     cmd_next_due_at: () => now + 3 * 3_600_000,
     cmd_due_by_course: () => [["c1", 9], ["c2", 3]],

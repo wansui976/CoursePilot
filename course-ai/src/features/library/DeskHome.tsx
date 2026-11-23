@@ -24,7 +24,12 @@ type DeskSummary = {
   course: Course;
   videos: VideoListItem[];
   watched: number;
-  resume: { video: VideoListItem; ratio: number; positionSec: number; index: number } | null;
+  resume: {
+    video: VideoListItem;
+    ratio: number;
+    positionSec: number;
+    index: number;
+  } | null;
   next: VideoListItem | null;
 };
 
@@ -60,7 +65,10 @@ export function DeskHome({
   const showWindow = useHomeLayout((state) => state.deskWindow);
   const windowWeather = useWindowWeather(showWindow);
   const sun = windowWeather.weather
-    ? { sunrise: windowWeather.weather.sunrise_ms, sunset: windowWeather.weather.sunset_ms }
+    ? {
+        sunrise: windowWeather.weather.sunrise_ms,
+        sunset: windowWeather.weather.sunset_ms,
+      }
     : null;
   const part = daypartOf(now, sun);
   const open = summaries.find((summary) => summary.resume) ?? null;
@@ -73,108 +81,159 @@ export function DeskHome({
           {t("desk.title")}
           <SolarTermBoard now={now} />
         </h1>
-        <Button variant="default" size="sm" disabled={creatingCourse} onClick={onCreateCourse}>
-          {creatingCourse ? <Loader2 className="animate-spin" /> : <FolderPlus />}
+        <Button
+          variant="default"
+          size="sm"
+          disabled={creatingCourse}
+          onClick={onCreateCourse}
+        >
+          {creatingCourse ? (
+            <Loader2 className="animate-spin" />
+          ) : (
+            <FolderPlus />
+          )}
           {t("desk.newCourse")}
         </Button>
       </header>
-      <div className="ca-desk-surface" data-window={showWindow ? "" : undefined}>
-        {showWindow && (
-          <DeskWindow
-            part={part}
-            season={seasonOf(now, windowWeather.place?.latitude)}
-            moon={moonPhase(now)}
-            weather={windowWeather.weather}
-            placeName={windowWeather.place?.name}
-          />
+      <div className="ca-desk-surface">
+        {createError && (
+          <ErrorNote error={createError} className="ca-desk-error" />
         )}
-        {createError && <ErrorNote error={createError} className="ca-desk-error" />}
         <UpdateNotice className="ca-desk-error" />
-
-        <aside className="ca-sticky" aria-label={t("desk.noteTitle")}>
-          <span className="ca-sticky-title">{t("desk.noteTitle")}</span>
-          {resume && <span>{t("desk.noteResume", { title: displayTitle(resume.video.title) })}</span>}
-          <span>{dueCount > 0 ? t("desk.noteReview", { count: dueCount }) : t("desk.noteNoReview")}</span>
-        </aside>
-
-        <section className="ca-desk-obj ca-notebook" aria-label={t("desk.openNotebook")}>
-          {open && resume ? (
-            <>
-              <LectureCover
-                videoId={resume.video.id}
-                title={resume.video.title}
-                course={open.course}
-                index={resume.index}
-                className="ca-notebook-cover"
-              >
-                <span className="ca-deck-progress" aria-hidden="true">
-                  <i style={{ width: `${resume.ratio * 100}%` }} />
+        {/* 上面一排三栏：左边窗和便利贴，中间摊开的笔记本，右边待复习和错题。各栏自己往下摞，
+            互不牵连；窄了就把小物件排成一行放在笔记本下面。下面一排是课程牌堆。 */}
+        <div className="ca-desk-top">
+          <div className="ca-desk-col ca-desk-left">
+            {showWindow && (
+              <DeskWindow
+                part={part}
+                season={seasonOf(now, windowWeather.place?.latitude)}
+                moon={moonPhase(now)}
+                weather={windowWeather.weather}
+                placeName={windowWeather.place?.name}
+              />
+            )}
+            <aside className="ca-sticky" aria-label={t("desk.noteTitle")}>
+              <span className="ca-sticky-title">{t("desk.noteTitle")}</span>
+              {resume && (
+                <span>
+                  {t("desk.noteResume", {
+                    title: displayTitle(resume.video.title),
+                  })}
                 </span>
-              </LectureCover>
-              <div className="ca-notebook-page">
-                <span className="ca-desk-label">
-                  {open.course.name} · {t("desk.openNotebook")}
-                </span>
-                <h2 className="ca-notebook-title">{displayTitle(resume.video.title)}</h2>
-                <p className="ca-notebook-line">
-                  <Mark>{t("desk.lastStop", { time: formatMs(Math.round(resume.positionSec * 1000)) })}</Mark>
-                </p>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="self-start"
-                  onClick={() => onResume(open.course.id, resume.video.id, resume.positionSec)}
-                >
-                  <Play className="fill-current" />
-                  {t("desk.continueAt", { time: formatMs(Math.round(resume.positionSec * 1000)) })}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <div className="ca-notebook-page ca-notebook-empty">
-              <span className="ca-desk-label">{t("desk.openNotebook")}</span>
-              <h2 className="ca-notebook-title">{t("desk.nothingOpen")}</h2>
-            </div>
-          )}
-        </section>
-
-        <section className="ca-desk-pile" aria-label={t("desk.reviewPile")}>
-          {[3, 2, 1].map((depth) => (
-            <span
-              key={depth}
-              className="ca-desk-obj ca-pile-sheet"
-              style={{ transform: `translate(${depth * 3}px, ${-depth * 4}px)`, zIndex: 5 - depth }}
-              aria-hidden="true"
-            />
-          ))}
-          <button
-            type="button"
-            className="ca-desk-obj ca-pile-top"
-            onClick={() => shell?.openMainView("dashboard")}
-          >
-            <span className="ca-desk-label">{t("desk.reviewPile")}</span>
-            <span className="ca-pile-count">
-              {dueCount}
-              <small>{t("desk.reviewCards")}</small>
-            </span>
-            <span className="ca-pile-go">
-              {dueCount > 0 ? (
-                <>
-                  <BookOpen className="h-3.5 w-3.5" />
-                  {t("desk.reviewStart")} <Kbd>R</Kbd>
-                </>
-              ) : (
-                t("desk.reviewNone")
               )}
-            </span>
-          </button>
-        </section>
+              <span>
+                {dueCount > 0
+                  ? t("desk.noteReview", { count: dueCount })
+                  : t("desk.noteNoReview")}
+              </span>
+            </aside>
+          </div>
 
-        <div className="ca-desk-miss">
-          <MistakeDeck onReview={() => shell?.openMainView("dashboard")} />
+          <section
+            className="ca-desk-obj ca-notebook"
+            aria-label={t("desk.openNotebook")}
+          >
+            {open && resume ? (
+              <>
+                <LectureCover
+                  videoId={resume.video.id}
+                  title={resume.video.title}
+                  course={open.course}
+                  index={resume.index}
+                  className="ca-notebook-cover"
+                >
+                  <span className="ca-deck-progress" aria-hidden="true">
+                    <i style={{ width: `${resume.ratio * 100}%` }} />
+                  </span>
+                </LectureCover>
+                <div className="ca-notebook-page">
+                  <span className="ca-desk-label">
+                    {open.course.name} · {t("desk.openNotebook")}
+                  </span>
+                  <h2 className="ca-notebook-title">
+                    {displayTitle(resume.video.title)}
+                  </h2>
+                  <p className="ca-notebook-line">
+                    <Mark>
+                      {t("desk.lastStop", {
+                        time: formatMs(Math.round(resume.positionSec * 1000)),
+                      })}
+                    </Mark>
+                  </p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="self-start"
+                    onClick={() =>
+                      onResume(
+                        open.course.id,
+                        resume.video.id,
+                        resume.positionSec,
+                      )
+                    }
+                  >
+                    <Play className="fill-current" />
+                    {t("desk.continueAt", {
+                      time: formatMs(Math.round(resume.positionSec * 1000)),
+                    })}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="ca-notebook-page ca-notebook-empty">
+                <span className="ca-desk-label">{t("desk.openNotebook")}</span>
+                <h2 className="ca-notebook-title">{t("desk.nothingOpen")}</h2>
+              </div>
+            )}
+          </section>
+
+          <div className="ca-desk-col ca-desk-right">
+            <section className="ca-desk-pile" aria-label={t("desk.reviewPile")}>
+              {[3, 2, 1].map((depth) => (
+                <span
+                  key={depth}
+                  className="ca-desk-obj ca-pile-sheet"
+                  style={{
+                    transform: `translate(${depth * 3}px, ${-depth * 4}px)`,
+                    zIndex: 5 - depth,
+                  }}
+                  aria-hidden="true"
+                />
+              ))}
+              <button
+                type="button"
+                className="ca-desk-obj ca-pile-top"
+                onClick={() => shell?.openMainView("dashboard")}
+              >
+                <span className="ca-desk-label">{t("desk.reviewPile")}</span>
+                <span className="ca-pile-count">
+                  {dueCount}
+                  <small>{t("desk.reviewCards")}</small>
+                </span>
+                <span className="ca-pile-go">
+                  {dueCount > 0 ? (
+                    <>
+                      <BookOpen className="h-3.5 w-3.5" />
+                      {t("desk.reviewStart")} <Kbd>R</Kbd>
+                    </>
+                  ) : (
+                    t("desk.reviewNone")
+                  )}
+                </span>
+              </button>
+            </section>
+
+            <div className="ca-desk-miss">
+              <MistakeDeck onReview={() => shell?.openMainView("dashboard")} />
+            </div>
+          </div>
         </div>
 
-        <section className="ca-desk-deck" aria-label={t("desk.deckCaption", { count: summaries.length })}>
+        <section
+          className="ca-desk-deck"
+          aria-label={t("desk.deckCaption", { count: summaries.length })}
+        >
           <CourseDeck
             items={summaries}
             front={Math.min(front, Math.max(0, summaries.length - 1))}
@@ -182,7 +241,9 @@ export function DeskHome({
             onOpenCourse={onSelectCourse}
             onContinue={onContinue}
           />
-          <span className="ca-desk-label">{t("desk.deckCaption", { count: summaries.length })}</span>
+          <span className="ca-desk-label">
+            {t("desk.deckCaption", { count: summaries.length })}
+          </span>
         </section>
       </div>
     </div>

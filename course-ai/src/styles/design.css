@@ -909,7 +909,9 @@ button.ca-time:hover {
 
 /* ===================== 课桌主页 ===================== */
 
+/* 课桌按自己的宽度排版（容器查询），不按窗口档位：侧栏展开、窗口不宽时也摆得开。 */
 .ca-desk {
+  container: desk / inline-size;
   overflow-y: auto;
   background-color: color-mix(in srgb, var(--surface-sidebar) 70%, var(--border-faint));
 }
@@ -934,32 +936,29 @@ button.ca-time:hover {
 
 .ca-desk-surface {
   position: relative;
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 230px;
-  grid-template-areas:
-    "note notebook pile"
-    "deck deck miss";
-  gap: 36px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 44px;
   padding: 24px 40px 48px;
+}
+
+/* 上面一排：左栏（窗、便利贴）| 笔记本 | 右栏（待复习、错题），各栏自己往下摞，互不牵连。 */
+.ca-desk-top {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) 230px;
+  gap: 40px;
   align-items: start;
 }
 
-/* 课桌按自己的宽度摆（容器查询），不按窗口档位：侧栏展开、窗口不大时也摆得开。 */
-.ca-desk {
-  container: desk / inline-size;
-}
-
-/* 有窗时左栏上面是窗、下面是便利贴，笔记本跨两行。 */
-.ca-desk-surface[data-window] {
-  grid-template-areas:
-    "window notebook pile"
-    "note notebook pile"
-    "deck deck miss";
+.ca-desk-col {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+  min-width: 0;
 }
 
 /* 窗：刷了漆的木框、十字窗棂，里面是按时间变的天色和当地的天气；下面一行地点、天气、气温。 */
 .ca-desk-window-wrap {
-  grid-area: window;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1099,7 +1098,6 @@ button.ca-time:hover {
 
 /* 便利贴：一张胶带粘着的黄纸。 */
 .ca-sticky {
-  grid-area: note;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1136,17 +1134,21 @@ button.ca-time:hover {
 }
 
 /* 摊开的笔记本：左页黑板封面，右页这一讲。 */
+/* 摊开的笔记本：左页封面保持 16:9，右页这一讲；一行的高度取两页里高的那个，封面跟着拉伸、裁边。 */
 .ca-notebook {
-  grid-area: notebook;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 260px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   overflow: hidden;
   transform: rotate(0.5deg);
 }
 
 .ca-notebook-cover {
-  min-height: 260px;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+}
+
+.ca-notebook-cover img {
+  object-fit: cover;
 }
 
 .ca-notebook-page {
@@ -1182,7 +1184,6 @@ button.ca-time:hover {
 
 /* 待复习的一摞卡。 */
 .ca-desk-pile {
-  grid-area: pile;
   position: relative;
   height: 160px;
   margin-top: 8px;
@@ -1235,51 +1236,55 @@ button.ca-time:hover {
 }
 
 .ca-desk-miss {
-  grid-area: miss;
   transform: rotate(-1.5deg);
 }
 
 .ca-desk-deck {
-  grid-area: deck;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.ca-app[data-bucket="compact"] .ca-desk-surface,
-.ca-app[data-bucket="medium"] .ca-desk-surface {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "note" "notebook" "pile" "deck" "miss";
-  padding-inline: 20px;
-}
-
-/* 中等宽度：两栏。左栏窗 + 便利贴，右栏摊开的笔记本；下面一排待复习和错题，再下面牌堆。 */
+/* 中等宽度（课桌 ≤1100px）：摊开的笔记本占满一行放最上面，
+   窗、便利贴、待复习、错题这些小物件排成一行放在下面，放不下就换行。 */
 @container desk (max-width: 1100px) {
-  .ca-desk-surface,
-  .ca-desk-surface[data-window] {
-    grid-template-columns: 220px minmax(0, 1fr);
-    grid-template-areas:
-      "note notebook"
-      "pile miss"
-      "deck deck";
-    gap: 32px 32px;
+  .ca-desk-top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 32px 36px;
   }
 
-  .ca-desk-surface[data-window] {
-    grid-template-areas:
-      "window notebook"
-      "note notebook"
-      "pile miss"
-      "deck deck";
+  .ca-desk-col {
+    display: contents;
+  }
+
+  .ca-desk-top > .ca-notebook {
+    order: -1;
+    flex: 1 0 100%;
+  }
+
+  .ca-desk-window-wrap,
+  .ca-sticky,
+  .ca-desk-pile {
+    flex: 0 0 220px;
+  }
+
+  .ca-desk-miss {
+    flex: 0 1 300px;
   }
 }
 
-/* 再窄：一列，窗也收起来。 */
-@container desk (max-width: 700px) {
-  .ca-desk-surface,
-  .ca-desk-surface[data-window] {
+/* 摊开的笔记本分不出左右两页那么宽时（课桌 ≤640px），封面在上、这一讲在下，封面限高。 */
+@container desk (max-width: 640px) {
+  .ca-notebook {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "note" "notebook" "pile" "deck" "miss";
+  }
+
+  .ca-notebook-cover {
+    max-height: 200px;
+  }
+
+  .ca-desk-surface {
     padding-inline: 20px;
   }
 
@@ -1288,23 +1293,17 @@ button.ca-time:hover {
   }
 }
 
-/* 摊开的笔记本分不出左右两页那么宽时（课桌不到 ~960px），封面在上、这一讲在下。 */
-@container desk (max-width: 960px) {
-  .ca-notebook {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .ca-notebook-cover {
-    min-height: 0;
-    aspect-ratio: 16 / 9;
-  }
+/* 手机：一列。 */
+.ca-app[data-bucket="compact"] .ca-desk-top {
+  display: flex;
+  flex-direction: column;
 }
 
-/* 窄屏不放窗：一列里它只是挡路的装饰。 */
-.ca-app[data-bucket="compact"] .ca-desk-window-wrap,
-.ca-app[data-bucket="medium"] .ca-desk-window-wrap {
-  display: none;
+.ca-app[data-bucket="compact"] .ca-desk-col {
+  display: contents;
 }
+
+
 
 .ca-app[data-bucket="compact"] .ca-notebook {
   grid-template-columns: minmax(0, 1fr);
