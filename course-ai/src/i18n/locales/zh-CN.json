@@ -210,7 +210,12 @@
     "transcodeRetry": "重试转码",
     "transcodeDone": "转码完成，正在打开…",
     "transcodeStuck": "转码完成了，但播放器还是没能打开。点下面重新加载一次。",
-    "transcodeReopen": "重新加载"
+    "transcodeReopen": "重新加载",
+    "streamStalledTitle": "视频没有传过来",
+    "streamStalledLan": "这台设备上没有视频文件，正从电脑上边看边传，可电脑那边一直没有数据过来。确认电脑开着 CoursePilot 和「局域网直连播放」，两台设备在同一个 Wi‑Fi（或同一个 Tailscale 网络）里。",
+    "streamStalledDrive": "这台设备上没有视频文件，正从网盘边看边传，可网盘那边一直没有数据过来。检查一下网络，或者先下载到本机再看。",
+    "streamStalledDetail": "最近一次的错误：{{problem}}",
+    "streamReconnect": "重新连接"
   },
   "morePanel": {
     "quiz": "练习",

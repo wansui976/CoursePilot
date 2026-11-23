@@ -212,6 +212,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
         Some(Source::Remote(remote)) => {
             proxy(
                 &mut stream,
+                id,
                 &remote,
                 &request.method,
                 request.range.as_deref(),
@@ -290,8 +291,62 @@ pub(crate) async fn serve_file<S: AsyncWrite + Unpin>(
 }
 
 /// 把 `<video>` 的请求转给局域网里的那台设备，回应原样（状态、长度、Range）转回来。
+/// 每个远端视频最近一次转发出的问题（连不上、对方回了错误码、传到一半断了）。
+/// 手机上看不到日志：播放器卡住时把这句话直接摆给用户。转发成功一次就清掉。
+fn problems() -> &'static Mutex<HashMap<String, String>> {
+    static PROBLEMS: std::sync::OnceLock<Mutex<HashMap<String, String>>> =
+        std::sync::OnceLock::new();
+    PROBLEMS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 这条远端视频最近一次转发出了什么问题；没出过问题（或者后来好了）给 None。
+pub fn remote_problem(id: &str) -> Option<String> {
+    problems().lock().unwrap().get(id).cloned()
+}
+
+fn note_problem(id: &str, problem: Option<String>) {
+    let mut problems = problems().lock().unwrap();
+    match problem {
+        Some(problem) => {
+            problems.insert(id.to_string(), problem);
+        }
+        None => {
+            problems.remove(id);
+        }
+    }
+}
+
+/// 只报地址和端口：网盘的下载链接查询串里带着口令。
+fn remote_host(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| {
+            let host = url.host_str()?.to_string();
+            Some(match url.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host,
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// 错误连同底下的原因（reqwest 自己只说「error sending request」）。
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = Some(error);
+    while let Some(error) = current {
+        let text = error.to_string();
+        if !parts.iter().any(|part| part.contains(&text)) {
+            parts.push(text);
+        }
+        current = error.source();
+    }
+    parts.join("：")
+}
+
 async fn proxy<S: AsyncWrite + Unpin>(
     stream: &mut S,
+    id: &str,
     remote: &RemoteSource,
     method: &str,
     range_header: Option<&str>,
@@ -310,11 +365,23 @@ async fn proxy<S: AsyncWrite + Unpin>(
         Ok(response) => response,
         Err(error) => {
             tracing::warn!(%error, "局域网里的设备连不上了");
+            note_problem(
+                id,
+                Some(format!(
+                    "连不上 {}（{}）",
+                    remote_host(&remote.url),
+                    error_chain(&error)
+                )),
+            );
             respond_empty(stream, "502 Bad Gateway").await;
             return Ok(());
         }
     };
     let status = response.status();
+    note_problem(
+        id,
+        (!status.is_success()).then(|| format!("{} 回了 {status}", remote_host(&remote.url))),
+    );
     let mut header = format!(
         "HTTP/1.1 {} {}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n",
         status.as_u16(),
@@ -339,9 +406,25 @@ async fn proxy<S: AsyncWrite + Unpin>(
         let _ = stream.flush().await;
         return Ok(());
     }
-    while let Ok(Some(chunk)) = response.chunk().await {
-        if stream.write_all(&chunk).await.is_err() {
-            break; // 播放器换了位置、断开了这条：正常。
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if stream.write_all(&chunk).await.is_err() {
+                    break; // 播放器换了位置、断开了这条：正常。
+                }
+            }
+            Ok(None) => break,
+            Err(error) => {
+                note_problem(
+                    id,
+                    Some(format!(
+                        "和 {} 的连接传到一半断了（{}）",
+                        remote_host(&remote.url),
+                        error_chain(&error)
+                    )),
+                );
+                break;
+            }
         }
     }
     let _ = stream.flush().await;

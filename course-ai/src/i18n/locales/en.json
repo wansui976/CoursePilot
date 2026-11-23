@@ -210,7 +210,12 @@
     "transcodeRetry": "Retry transcoding",
     "transcodeDone": "Transcoding finished, opening…",
     "transcodeStuck": "Transcoding finished, but the player still couldn't open it. Reload it below.",
-    "transcodeReopen": "Reload"
+    "transcodeReopen": "Reload",
+    "streamStalledTitle": "The video isn't coming through",
+    "streamStalledLan": "This device has no copy of the video and is streaming it from the computer, but no data has arrived. Check that CoursePilot and LAN streaming are on there, and that both devices are on the same Wi‑Fi (or the same Tailscale network).",
+    "streamStalledDrive": "This device has no copy of the video and is streaming it from the cloud drive, but no data has arrived. Check the network, or download it to this device first.",
+    "streamStalledDetail": "Last error: {{problem}}",
+    "streamReconnect": "Reconnect"
   },
   "morePanel": {
     "quiz": "Quiz",

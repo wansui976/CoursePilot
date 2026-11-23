@@ -1224,6 +1224,10 @@ pub async fn cmd_video_codec(
         std::path::Path::new(&file_path),
         std::path::Path::new(&data_dir),
     );
+    if !path.is_file() {
+        // 本机没有文件、正在从局域网里的电脑边看边传：问那台电脑。
+        return Ok(crate::lan_share::phone_video_codec(&video_id).await);
+    }
     Ok(crate::pipeline::playable::video_codec(&path)
         .map(|codec| String::from_utf8_lossy(&codec).to_string()))
 }

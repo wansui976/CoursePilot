@@ -155,9 +155,7 @@ fn local_addresses() -> Vec<String> {
                 if_addrs::IfAddr::V4(v4) => Some((interface.name, interface.is_p2p, v4.ip)),
                 if_addrs::IfAddr::V6(_) => None,
             })
-            .filter(|(name, point_to_point, ip)| {
-                shareable_ipv4(*ip) && !is_tunnel(name, *point_to_point)
-            })
+            .filter(|(name, point_to_point, ip)| publishable(name, *point_to_point, *ip))
             .map(|(_, _, ip)| ip.to_string())
             .collect();
         // 固定顺序：网卡枚举顺序变了，写进网盘的内容（以及界面上的显示）不跟着跳。
@@ -165,6 +163,22 @@ fn local_addresses() -> Vec<String> {
         found.dedup();
         found
     }
+}
+
+/// 写进公布地址里的：同一个 Wi‑Fi 里连得上的，加上 Tailscale 这类组网给的 100.64/10 地址
+/// （两台设备都在同一个 tailnet 里时，手机不在家也连得上）。组网地址挂在隧道网卡上
+/// （macOS 上是 utun），所以要在排除隧道之前先认出来。连不上的地址只是并行试探时白等 3 秒，
+/// 不碍事。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn publishable(name: &str, point_to_point: bool, ip: std::net::Ipv4Addr) -> bool {
+    tailnet_ipv4(ip) || (shareable_ipv4(ip) && !is_tunnel(name, point_to_point))
+}
+
+/// 100.64/10：Tailscale 给每台设备的地址就在这一段（也是运营商级 NAT 的地址段）。
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn tailnet_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let [first, second, ..] = ip.octets();
+    first == 100 && (64..=127).contains(&second)
 }
 
 /// 别的设备和这台电脑在同一个局域网里时，有可能连上的地址。
@@ -179,8 +193,8 @@ fn shareable_ipv4(ip: std::net::Ipv4Addr) -> bool {
         || first >= 240 // 保留段
         // 198.18/15：Clash / Surge 等 TUN 代理的假 IP 段
         || (first == 198 && (second == 18 || second == 19))
-        // 100.64/10：运营商级 NAT、Tailscale 等组网地址，不在同一个 Wi‑Fi 里
-        || (first == 100 && (64..=127).contains(&second)))
+        // 100.64/10：运营商级 NAT、Tailscale 等组网地址，不在同一个 Wi‑Fi 里（组网地址另外认，见 publishable）
+        || tailnet_ipv4(ip))
 }
 
 /// VPN / 点对点网卡上的地址不在「同一个局域网」里，公布了手机也连不上。
@@ -386,6 +400,8 @@ where
                         .map(|ext| ext.to_ascii_lowercase())
                         .filter(|ext| !ext.is_empty() && ext.len() <= 8)
                         .unwrap_or_else(|| "mp4".into()),
+                    codec: crate::pipeline::playable::video_codec(&path)
+                        .map(|codec| String::from_utf8_lossy(&codec).to_string()),
                 };
                 let body = serde_json::to_vec(&info).unwrap_or_default();
                 respond_json(&mut stream, "200 OK", &body).await;
@@ -451,6 +467,9 @@ async fn respond_json<S: AsyncWrite + Unpin>(stream: &mut S, status: &str, body:
 pub struct VideoFileInfo {
     pub size: u64,
     pub ext: String,
+    /// 这份文件的视频编码（mp4 的 stsd，比如 `avc1`、`hvc1`、`av01`）。老版本的电脑不给。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec: Option<String>,
 }
 
 /// `/t/<id>` 回的一行状态，和播放器现有的转码 UI 同一套字段。
@@ -1087,6 +1106,13 @@ async fn remote_source(db: &Db, video_id: &str) -> AppResult<RemoteSource> {
     Ok(source)
 }
 
+/// 手机上播放器报解码失败时问一声：电脑给的那份文件是什么编码。
+/// 本机没有文件，读不了 stsd；老版本的电脑不报编码时给 None。
+pub async fn phone_video_codec(video_id: &str) -> Option<String> {
+    let source = source_for(video_id)?;
+    fetch_file_info(&source).await.ok().flatten()?.codec
+}
+
 /// 问电脑 `/i/<id>`：整段下载会是多大的文件、什么扩展名。老版本的电脑没有这个接口时给 None。
 async fn fetch_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInfo>> {
     let Some((base, id)) = source.url.rsplit_once("/v/") else {
@@ -1141,6 +1167,7 @@ async fn head_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInfo
         .map(|size| VideoFileInfo {
             size,
             ext: ext.into(),
+            codec: None,
         }))
 }
 
@@ -1448,6 +1475,13 @@ mod tests {
         assert!(is_tunnel("wlan0", true));
         assert!(!is_tunnel("en0", false));
         assert!(!is_tunnel("wlp2s0", false));
+        // Tailscale：Windows / Linux 上是普通名字的网卡，macOS 上挂在 utun 上，都要公布。
+        let lan = |name: &str, p2p: bool, ip: &str| publishable(name, p2p, ip.parse().unwrap());
+        assert!(lan("Tailscale", false, "100.100.1.2"));
+        assert!(lan("utun5", true, "100.101.2.3"));
+        assert!(lan("en0", false, "192.168.3.5"));
+        assert!(!lan("utun4", true, "10.8.0.2")); // 别的 VPN
+        assert!(!lan("utun6", false, "198.18.0.1"));
     }
 
     // 一个测试里走完：start/stop 动的是进程里唯一的那个共享服务，分开写会互相踩。
@@ -1475,6 +1509,7 @@ mod tests {
         assert_eq!(response.status(), 206);
         assert_eq!(response.headers()["content-range"], "bytes 4-7/16");
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"4567");
+        assert_eq!(crate::media_server::remote_problem(&video_id), None);
 
         // 整段下载到本机：本地先有半截 .part，从半截接着下；下完 file_path 指过去。
         remember_source(&video_id, source.clone());
@@ -1549,6 +1584,8 @@ mod tests {
             .unwrap();
         assert_eq!(state["state"], "done");
         assert_eq!(state["percent"], 100);
+        // 手机上本机没有文件，播放器报解码失败时问电脑：给的那份是什么编码。
+        assert_eq!(phone_video_codec(&video_id).await.as_deref(), Some("avc1"));
 
         // 没有这个视频、口令不对、证书指纹不对：都找不到。
         assert!(probe(std::slice::from_ref(&local), "no-such-video")
@@ -1575,6 +1612,15 @@ mod tests {
         assert!(probe(std::slice::from_ref(&local), &video_id)
             .await
             .is_none());
+        // 电脑那头关了，手机上的转发连不上：记下原因，播放器卡住时摆给用户看。
+        let response = reqwest::Client::new()
+            .get(media.url(&video_id))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 502);
+        let problem = crate::media_server::remote_problem(&video_id).expect("记下了转发的问题");
+        assert!(problem.contains(&format!("127.0.0.1:{port}")), "{problem}");
         sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?")
             .bind(&video_id)
             .execute(&db.pool)
@@ -1585,5 +1631,52 @@ mod tests {
             .await
             .is_some());
         stop();
+    }
+
+    /// 手动测「局域网直连播放」用的电脑端：用当前代码开共享，带一门课和一个真视频，把课程数据和
+    /// 局域网地址推到一个 WebDAV 上，然后一直跑着，等手机（真机 / 安卓模拟器）连同一个 WebDAV 来播。
+    /// `COURSEPILOT_DAV_URL=http://127.0.0.1:18080/dav/ COURSEPILOT_DAV_USER=me COURSEPILOT_DAV_PASSWORD=secret \
+    ///  COURSEPILOT_VIDEO=/path/to.mp4 COURSEPILOT_EXTRA_ADDR=10.0.2.2 cargo test --lib lan_pc_for_manual_test -- --ignored --nocapture`
+    /// `COURSEPILOT_EXTRA_ADDR` 会加进公布的地址（安卓模拟器经 10.0.2.2 访问电脑）。
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "手动：给手机端测局域网直连播放用"]
+    async fn lan_pc_for_manual_test() {
+        let env = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("要设置 {key}"));
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("pc.db")).await.unwrap();
+        let course = crate::commands::courses::create_course(&db, "局域网测试课".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, env("COURSEPILOT_VIDEO").into(), None)
+            .await
+            .unwrap();
+        let config = crate::sync::remote::RemoteConfig {
+            url: env("COURSEPILOT_DAV_URL"),
+            folder: crate::sync::remote::DEFAULT_FOLDER.into(),
+            user: env("COURSEPILOT_DAV_USER"),
+            password: env("COURSEPILOT_DAV_PASSWORD"),
+        };
+        let sync = |db: Db, config: crate::sync::remote::RemoteConfig, root: std::path::PathBuf| async move {
+            crate::sync::remote::run_once(&db, &config, &root.join("sync"), &root.join("videos")).await
+        };
+        println!("同步：{:?}", sync(db.clone(), config.clone(), dir.path().to_path_buf()).await.unwrap());
+        let port = start(db.clone()).await.unwrap();
+        let mut published = advert().expect("开着共享");
+        if let Ok(extra) = std::env::var("COURSEPILOT_EXTRA_ADDR") {
+            published.addresses.insert(0, extra);
+        }
+        let own = crate::sync::identity::ensure_sync_identity(&db).await.unwrap().device_id;
+        let dav = config.client().unwrap();
+        dav.put(
+            &format!("{}{own}/{ADVERT_FILE}", crate::sync::remote::DEVICES_DIR),
+            serde_json::to_vec(&published).unwrap(),
+        )
+        .await
+        .unwrap();
+        println!("电脑端就绪：端口 {port}，地址 {:?}，视频 {}（{}）", published.addresses, video.title, video.id);
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            let _ = sync(db.clone(), config.clone(), dir.path().to_path_buf()).await;
+        }
     }
 }

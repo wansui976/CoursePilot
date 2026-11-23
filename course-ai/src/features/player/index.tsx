@@ -44,6 +44,7 @@ import { useIosGestures, type TapState } from "./useIosGestures";
 import {
   AudioStage,
   DecodeFailureCard,
+  StreamStalledCard,
   GestureHintOverlay,
   PlayFlash,
   StageActionNotice,
@@ -58,6 +59,9 @@ import {
  */
 const TRANSPARENT_POSTER =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+// 边看边传：开始加载后这么久还没拿到视频信息（时长、尺寸），就当卡住了，说出来。
+const REMOTE_STALL_MS = 20_000;
 
 // 距片尾 15s 内不再续播（视为看完），从头开始。
 const RESUME_TAIL_GUARD = 15;
@@ -74,6 +78,7 @@ export function VideoPlayer({
   immersive = false,
   onFullscreenChange,
   onTranscoded,
+  remote,
 }: {
   src: string;
   videoId: string;
@@ -83,6 +88,9 @@ export function VideoPlayer({
   onFullscreenChange?: (fullscreen: boolean) => void;
   /** 本机转码完成：外层重新取一次 mediaUrl（此刻 data_dir 里已经有 playable.mp4）。 */
   onTranscoded?: () => void | Promise<unknown>;
+  /** 本机没有文件、从局域网里的电脑或网盘边看边传。卡住时给「重新连接」：
+   * 外层重新找一遍来源（拿到新的转发地址），这里再重挂 <video>。 */
+  remote?: { kind: "lan" | "drive"; onReconnect: () => void | Promise<unknown> };
 }) {
   const { t } = useTranslation();
   const regionRef = useRef<HTMLDivElement>(null);
@@ -97,6 +105,10 @@ export function VideoPlayer({
   // 解码不了时把原因说出来。以前这里什么都不做：AV1 之类 WKWebView 解不了的编码
   // （老款 iPad / iPhone）就是一块黑屏，用户不知道是文件坏了还是设备不行。
   const [decodeFailure, setDecodeFailure] = useState<string | null>(null);
+  // 边看边传卡住了（一直没数据、转发断了）：null = 没事；字符串 = 最近一次转发的问题（可能为空）。
+  // 以前这种情况什么都不显示，画面停在封面、时间 00:00 / 00:00，用户不知道是哪一头的问题。
+  const [streamProblem, setStreamProblem] = useState<string | null>(null);
+  const stallTimerRef = useRef(0);
   // 端上转码进度（只 iOS 会真有这个状态）。解码失败后开始轮询：
   // 后端在 cmd_media_url 里已经点火，这里只负责显示进度和转完后的刷新。
   const [transcode, setTranscode] = useState<TranscodeStatus | null>(null);
@@ -111,6 +123,7 @@ export function VideoPlayer({
   useEffect(() => {
     setAudioOnly(false);
     setDecodeFailure(null);
+    setStreamProblem(null);
     setTranscode(null);
   }, [src]);
   useEffect(() => {
@@ -156,6 +169,43 @@ export function VideoPlayer({
       setMediaEpoch((epoch) => epoch + 1);
     });
   }, []);
+  const remoteRef = useRef(remote);
+  remoteRef.current = remote;
+  // 边看边传出了问题：问媒体服务最近一次转发出了什么错，连同说明一起摆出来。
+  const reportStreamProblem = useCallback(() => {
+    void ipc.lanShare
+      .streamProblem(videoId)
+      .catch(() => null)
+      .then((problem) => setStreamProblem(problem ?? ""));
+  }, [videoId]);
+  const reconnect = useCallback(() => {
+    setStreamProblem(null);
+    setDecodeFailure(null);
+    const pending = remoteRef.current?.onReconnect();
+    void Promise.resolve(pending).finally(() => {
+      setMediaEpoch((epoch) => epoch + 1);
+    });
+  }, []);
+  // 开始加载（或者点了播放）后一直拿不到视频信息：多半是转发那头没有数据过来。
+  // 没在加载的不算（preload 没要数据、用户还没点播放时 networkState 是 IDLE）。
+  const watchRemoteLoad = useCallback(
+    (video: HTMLVideoElement) => {
+      if (!remoteRef.current || video.readyState >= HTMLMediaElement.HAVE_METADATA) return;
+      window.clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = window.setTimeout(() => {
+        if (
+          video.isConnected &&
+          video.readyState < HTMLMediaElement.HAVE_METADATA &&
+          video.networkState === HTMLMediaElement.NETWORK_LOADING &&
+          video.error == null
+        ) {
+          reportStreamProblem();
+        }
+      }, REMOTE_STALL_MS);
+    },
+    [reportStreamProblem],
+  );
+  useEffect(() => () => window.clearTimeout(stallTimerRef.current), [src, mediaEpoch]);
   useEffect(() => {
     if (decodeFailure === null) return;
     let cancelled = false;
@@ -697,10 +747,31 @@ export function VideoPlayer({
                 }
               }
             }}
+            onLoadStart={(event) => watchRemoteLoad(event.currentTarget)}
             onError={(event) => {
+              window.clearTimeout(stallTimerRef.current);
               // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED：这类失败九成是编码问题，
               // 问一下后端这条片到底是什么编码，好让提示能落地。
               const code = event.currentTarget.error?.code;
+              if (remote && code !== 1 /* MEDIA_ERR_ABORTED */) {
+                // 边看边传：先看转发有没有出过错（连不上电脑、对方回了错误码）。有的话是连接的问题，
+                // 不是编码；网络错误（code 2）也一样。都不是再按解码失败处理（会请电脑转一份 H.264）。
+                void ipc.lanShare
+                  .streamProblem(videoId)
+                  .catch(() => null)
+                  .then((problem) => {
+                    if (problem || code === 2 /* MEDIA_ERR_NETWORK */) {
+                      setStreamProblem(problem ?? "");
+                      return;
+                    }
+                    setDecodeFailure("");
+                    void ipc.videos
+                      .codec(videoId)
+                      .then((codec) => setDecodeFailure(codec ?? "unknown"))
+                      .catch(() => setDecodeFailure("unknown"));
+                  });
+                return;
+              }
               if (code !== 4 && event.currentTarget.error != null) return;
               setDecodeFailure("");
               void ipc.videos
@@ -710,6 +781,8 @@ export function VideoPlayer({
             }}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
+              window.clearTimeout(stallTimerRef.current);
+              setStreamProblem(null);
               // 记录视频固有比例，去黑边的 stageBox 要靠它做等比缩放。
               markMetadata(video.videoWidth, video.videoHeight);
               setAudioOnly(video.videoWidth === 0 && video.videoHeight === 0);
@@ -768,9 +841,10 @@ export function VideoPlayer({
             }}
             // 缓冲够起播了才放黑边探测进场：那一趟解码不该和首帧抢磁盘。
             onCanPlay={markPlayable}
-            onPlay={() => {
+            onPlay={(event) => {
               setPlaying(true);
               scheduleHideControls();
+              watchRemoteLoad(event.currentTarget);
             }}
             onPause={(event) => {
               setPlaying(false);
@@ -818,6 +892,9 @@ export function VideoPlayer({
             />
           )}
           {gestureHint && <GestureHintOverlay hint={gestureHint} />}
+          {remote && streamProblem !== null && decodeFailure === null && (
+            <StreamStalledCard kind={remote.kind} problem={streamProblem} onReconnect={reconnect} />
+          )}
           {decodeFailure !== null && (
             <DecodeFailureCard
               codec={decodeFailure}

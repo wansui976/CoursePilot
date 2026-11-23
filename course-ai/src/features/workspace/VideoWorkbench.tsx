@@ -170,6 +170,7 @@ export function VideoWorkbench({
                     immersive={isIOS()}
                     onFullscreenChange={onFullscreenChange}
                     onTranscoded={() => remoteStream.refetch()}
+                    remote={{ kind: remoteStream.data.kind, onReconnect: () => remoteStream.refetch() }}
                   />
                 ) : (
                   <RemoteMediaStage

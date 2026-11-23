@@ -76,6 +76,13 @@ pub async fn cmd_lan_stream_url(
     )))
 }
 
+/// 边看边传（局域网或网盘）的播放器迟迟没有画面时问一声：最近一次转发出了什么问题。
+/// 手机上看不到日志，这句话就是给用户看的诊断。
+#[tauri::command]
+pub async fn cmd_remote_stream_problem(video_id: String) -> AppResult<Option<String>> {
+    Ok(crate::media_server::remote_problem(&video_id))
+}
+
 /// 把这个视频整段下到本机（从正连着的那台电脑）。下完以后离线也能看，也不再占网盘上传额度。
 /// 进度走 DOWNLOAD_EVENT；返回更新过 file_path 的视频条目。
 #[tauri::command]
