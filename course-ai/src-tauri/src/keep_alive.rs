@@ -323,11 +323,21 @@ mod tests {
     #[test]
     fn is_active_follows_holds_of_that_kind() {
         let key = "is-active-test";
-        assert!(!registry().lock().unwrap().entries.values().any(|e| e.key == key));
+        assert!(!registry()
+            .lock()
+            .unwrap()
+            .entries
+            .values()
+            .any(|e| e.key == key));
         let hold = hold(Kind::ModelDownload, key, "测试");
         assert!(is_active(Kind::ModelDownload));
         drop(hold);
-        assert!(!registry().lock().unwrap().entries.values().any(|e| e.key == key));
+        assert!(!registry()
+            .lock()
+            .unwrap()
+            .entries
+            .values()
+            .any(|e| e.key == key));
     }
     use std::sync::mpsc::channel;
     use std::sync::Arc;

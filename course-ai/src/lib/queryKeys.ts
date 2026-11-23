@@ -68,6 +68,7 @@ export const qk = {
     cardMarks: (videoId: string) => ["srs-card-marks", videoId] as const,
     cardHistory: (cardId: string) => ["srs-card-history", cardId] as const,
     mistakes: (courseId: string | null) => ["srs-mistakes", courseId] as const,
+    conceptMastery: (courseId: string) => ["srs-concept-mastery", courseId] as const,
     conceptDue: {
       all: () => ["srs-concept-due"] as const,
       course: (courseId: string) => ["srs-concept-due", courseId] as const,

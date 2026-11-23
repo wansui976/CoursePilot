@@ -123,7 +123,10 @@ pub fn cluster_text_hits(scored: Vec<(f64, Citation)>) -> Vec<ExplanationHit> {
 }
 
 /// 画面命中排在最前（截的就是课件时它最准）；与之重叠的文字命中去掉，免得同一处出现两次。
-pub fn merge_hits(pictures: Vec<CourseSlideMatch>, texts: Vec<ExplanationHit>) -> Vec<ExplanationHit> {
+pub fn merge_hits(
+    pictures: Vec<CourseSlideMatch>,
+    texts: Vec<ExplanationHit>,
+) -> Vec<ExplanationHit> {
     let mut hits: Vec<ExplanationHit> = pictures
         .into_iter()
         .map(|page| ExplanationHit {
@@ -140,8 +143,7 @@ pub fn merge_hits(pictures: Vec<CourseSlideMatch>, texts: Vec<ExplanationHit>) -
         .collect();
     for text in texts {
         let duplicate = hits.iter().any(|hit| {
-            hit.video_id == text.video_id
-                && (hit.start_ms - text.start_ms).abs() <= MERGE_WINDOW_MS
+            hit.video_id == text.video_id && (hit.start_ms - text.start_ms).abs() <= MERGE_WINDOW_MS
         });
         if !duplicate {
             hits.push(text);
@@ -151,7 +153,10 @@ pub fn merge_hits(pictures: Vec<CourseSlideMatch>, texts: Vec<ExplanationHit>) -
 }
 
 /// 题目文字里出现的知识点名（长名字优先，免得「梯度」抢了「梯度下降」）。
-pub fn concepts_in_text<'a>(text: &str, concepts: &'a [(String, String)]) -> Vec<&'a (String, String)> {
+pub fn concepts_in_text<'a>(
+    text: &str,
+    concepts: &'a [(String, String)],
+) -> Vec<&'a (String, String)> {
     let lower = text.to_lowercase();
     let mut found: Vec<&(String, String)> = concepts
         .iter()
@@ -160,7 +165,10 @@ pub fn concepts_in_text<'a>(text: &str, concepts: &'a [(String, String)]) -> Vec
     found.sort_by_key(|(_, name)| std::cmp::Reverse(name.chars().count()));
     let mut kept: Vec<&(String, String)> = Vec::new();
     for concept in found {
-        if kept.iter().any(|(_, longer)| longer.contains(concept.1.as_str())) {
+        if kept
+            .iter()
+            .any(|(_, longer)| longer.contains(concept.1.as_str()))
+        {
             continue;
         }
         kept.push(concept);
@@ -196,7 +204,9 @@ pub async fn find_explanations(
     let texts = if query.trim().is_empty() {
         Vec::new()
     } else {
-        cluster_text_hits(rag::keyword_search_scope_scored(db, &videos, &query, SEARCH_LIMIT).await?)
+        cluster_text_hits(
+            rag::keyword_search_scope_scored(db, &videos, &query, SEARCH_LIMIT).await?,
+        )
     };
 
     let concepts: Vec<(String, String)> =
@@ -284,7 +294,10 @@ mod tests {
             image_path: "/p.png".into(),
             confident: true,
         }];
-        let texts = cluster_text_hits(vec![(9.0, cite("v1", 130_000, "重叠")), (8.0, cite("v2", 0, "别处"))]);
+        let texts = cluster_text_hits(vec![
+            (9.0, cite("v1", 130_000, "重叠")),
+            (8.0, cite("v2", 0, "别处")),
+        ]);
         let merged = merge_hits(pictures, texts);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].matched_by, MatchedBy::Picture);

@@ -261,9 +261,9 @@ async fn apply_save(
         "StudyEvent" => save_event(tx, envelope).await,
         "NoteImage" => save_note_image(tx, envelope).await,
         "VideoProgress" => save_progress(tx, own_device, envelope).await,
-        other if crate::sync::content::is_content(other) => {
-            Ok(content_outcome(crate::sync::content::save(tx, envelope).await?))
-        }
+        other if crate::sync::content::is_content(other) => Ok(content_outcome(
+            crate::sync::content::save(tx, envelope).await?,
+        )),
         other => Err(AppError::Config(format!("unsupported sync record {other}"))),
     }
 }
@@ -289,7 +289,9 @@ async fn apply_delete(
         match envelope.record_type.as_str() {
             // 生成内容整条后写胜，删除同样按戳比较。
             other if crate::sync::content::is_content(other) => {
-                return Ok(content_outcome(crate::sync::content::delete(tx, envelope).await?));
+                return Ok(content_outcome(
+                    crate::sync::content::delete(tx, envelope).await?,
+                ));
             }
             // 事件是不可变事实，任何删除都不接受。
             "StudyEvent" => return Ok(Outcome::Skipped),
@@ -414,7 +416,15 @@ async fn save_course(
             .map(str::to_string)
     });
 
-    type LocalCourse = (String, i64, i64, Option<i64>, i64, Option<i64>, Option<String>);
+    type LocalCourse = (
+        String,
+        i64,
+        i64,
+        Option<i64>,
+        i64,
+        Option<i64>,
+        Option<String>,
+    );
     let local: Option<LocalCourse> = sqlx::query_as(
         "SELECT name, created_at, updated_at, deleted_at,
                 COALESCE(trash_changed_at, deleted_at, created_at), sort_order, color
@@ -1684,7 +1694,9 @@ mod tests {
         let (db_a, _dir_a, incoming_a) = device().await;
         let (course, video) = seed_video(&db_b, dir_b.path()).await;
         let ch = create_folder(&db_b, &course, None, "第1章").await.unwrap();
-        let sub = create_folder(&db_b, &course, Some(ch.id.clone()), "1.1").await.unwrap();
+        let sub = create_folder(&db_b, &course, Some(ch.id.clone()), "1.1")
+            .await
+            .unwrap();
         move_items(
             &db_b,
             &course,
@@ -1736,11 +1748,12 @@ mod tests {
         delete_folder(&db_a, &ch.id).await.unwrap();
         ship(&db_a, &db_b, &incoming_b).await;
         assert!(list_folders(&db_b, &course).await.unwrap().is_empty());
-        let trashed: bool = sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM videos WHERE id=?")
-            .bind(&video)
-            .fetch_one(&db_b.pool)
-            .await
-            .unwrap();
+        let trashed: bool =
+            sqlx::query_scalar("SELECT deleted_at IS NOT NULL FROM videos WHERE id=?")
+                .bind(&video)
+                .fetch_one(&db_b.pool)
+                .await
+                .unwrap();
         assert!(trashed);
     }
 

@@ -233,7 +233,16 @@ pub(crate) async fn payload_for(
             .fetch_optional(&mut **tx)
             .await?;
             row.map(
-                |(id, name, created_at, updated_at, deleted_at, trash_changed_at, sort_order, color)| {
+                |(
+                    id,
+                    name,
+                    created_at,
+                    updated_at,
+                    deleted_at,
+                    trash_changed_at,
+                    sort_order,
+                    color,
+                )| {
                     json!({
                         "id": id,
                         "name": name,
@@ -250,7 +259,16 @@ pub(crate) async fn payload_for(
             )
         }
         "Folder" => {
-            type FolderSyncRow = (String, String, Option<String>, String, Option<String>, i64, i64, i64);
+            type FolderSyncRow = (
+                String,
+                String,
+                Option<String>,
+                String,
+                Option<String>,
+                i64,
+                i64,
+                i64,
+            );
             let row: Option<FolderSyncRow> = sqlx::query_as(
                 "SELECT id,course_id,parent_id,name,color,order_index,created_at,updated_at
                  FROM folders WHERE id=?",

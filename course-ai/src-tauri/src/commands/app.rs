@@ -28,9 +28,18 @@ pub async fn cmd_updater_check(app: tauri::AppHandle) -> AppResult<Option<AppUpd
     #[cfg(desktop)]
     {
         use tauri_plugin_updater::UpdaterExt;
-        let failed = |error: tauri_plugin_updater::Error| AppError::Other(format!("检查更新失败：{error}"));
-        let update = app.updater().map_err(failed)?.check().await.map_err(failed)?;
-        Ok(update.map(|update| AppUpdate { version: update.version, current: update.current_version }))
+        let failed =
+            |error: tauri_plugin_updater::Error| AppError::Other(format!("检查更新失败：{error}"));
+        let update = app
+            .updater()
+            .map_err(failed)?
+            .check()
+            .await
+            .map_err(failed)?;
+        Ok(update.map(|update| AppUpdate {
+            version: update.version,
+            current: update.current_version,
+        }))
     }
     #[cfg(mobile)]
     {
@@ -47,7 +56,8 @@ pub async fn cmd_updater_install(app: tauri::AppHandle) -> AppResult<()> {
     {
         use tauri::Emitter;
         use tauri_plugin_updater::UpdaterExt;
-        let failed = |error: tauri_plugin_updater::Error| AppError::Other(format!("更新失败：{error}"));
+        let failed =
+            |error: tauri_plugin_updater::Error| AppError::Other(format!("更新失败：{error}"));
         let update = app
             .updater()
             .map_err(failed)?

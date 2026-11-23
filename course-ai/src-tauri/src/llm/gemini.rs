@@ -18,7 +18,11 @@ pub const DEFAULT_BASE: &str = "https://generativelanguage.googleapis.com";
 
 fn api_base(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
-    let base = if trimmed.is_empty() { DEFAULT_BASE } else { trimmed };
+    let base = if trimmed.is_empty() {
+        DEFAULT_BASE
+    } else {
+        trimmed
+    };
     if base.ends_with("/v1beta") || base.ends_with("/v1") {
         base.to_string()
     } else {
@@ -106,7 +110,11 @@ fn build_contents(req: &ChatRequest) -> Vec<Value> {
             }
             push(&mut contents, "model", parts);
         } else {
-            let role = if message.role == "assistant" { "model" } else { "user" };
+            let role = if message.role == "assistant" {
+                "model"
+            } else {
+                "user"
+            };
             let mut parts = Vec::new();
             if !message.content.is_empty() {
                 parts.push(text_part(&message.content));
@@ -156,7 +164,10 @@ pub fn build_body(req: &ChatRequest, max_tokens: Option<u32>) -> Value {
 
 fn usage_of(metadata: Option<&Value>) -> Option<Usage> {
     let metadata = metadata?;
-    let prompt = metadata.get("promptTokenCount").and_then(Value::as_i64).unwrap_or(0);
+    let prompt = metadata
+        .get("promptTokenCount")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let completion = metadata
         .get("candidatesTokenCount")
         .and_then(Value::as_i64)
@@ -215,7 +226,9 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
             .get("finishReason")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        return Err(AppError::Other(format!("Gemini 没有返回内容（finishReason={reason}）")));
+        return Err(AppError::Other(format!(
+            "Gemini 没有返回内容（finishReason={reason}）"
+        )));
     }
     Ok(ChatResponse {
         content,
@@ -355,7 +368,8 @@ pub async fn complete_stream(
                     canceled = true;
                     break;
                 }
-                let bytes = chunk.map_err(|error| AppError::Other(format!("Gemini 流中断：{error}")))?;
+                let bytes =
+                    chunk.map_err(|error| AppError::Other(format!("Gemini 流中断：{error}")))?;
                 buffer.extend_from_slice(&bytes);
                 while let Some(line) = crate::llm::take_sse_line(&mut buffer) {
                     if state.feed_line(&line, on_piece) {
@@ -391,10 +405,7 @@ mod tests {
         let mut req = ChatRequest::text("gemini-2.5-pro", Some("你是助手".into()), vec![]);
         req.cacheable_context = Some("讲稿".into());
         req.messages = vec![
-            ChatMessage::user_with_images(
-                "看图",
-                vec!["data:image/jpeg;base64,BB==".into()],
-            ),
+            ChatMessage::user_with_images("看图", vec!["data:image/jpeg;base64,BB==".into()]),
             ChatMessage::tool_calls(
                 "",
                 vec![ToolCall {
@@ -416,10 +427,16 @@ mod tests {
     #[test]
     fn maps_system_images_tools_and_results() {
         let body = build_body(&sample_request(), Some(2048));
-        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "讲稿\n\n你是助手");
+        assert_eq!(
+            body["systemInstruction"]["parts"][0]["text"],
+            "讲稿\n\n你是助手"
+        );
         let contents = body["contents"].as_array().unwrap();
         assert_eq!(contents[0]["role"], "user");
-        assert_eq!(contents[0]["parts"][1]["inlineData"]["mimeType"], "image/jpeg");
+        assert_eq!(
+            contents[0]["parts"][1]["inlineData"]["mimeType"],
+            "image/jpeg"
+        );
         assert_eq!(contents[1]["role"], "model");
         assert_eq!(contents[1]["parts"][0]["functionCall"]["name"], "seek");
         assert_eq!(contents[2]["role"], "user");

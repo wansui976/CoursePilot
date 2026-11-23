@@ -30,12 +30,16 @@ pub async fn cmd_remote_sync_status(state: State<'_, AppState>) -> AppResult<Rem
     let identity = crate::sync::identity::ensure_sync_identity(db).await?;
     Ok(RemoteSyncStatus {
         enabled: remote::is_enabled(db).await?,
-        url: get_setting(db, remote::SETTING_URL).await?.unwrap_or_default(),
+        url: get_setting(db, remote::SETTING_URL)
+            .await?
+            .unwrap_or_default(),
         folder: get_setting(db, remote::SETTING_FOLDER)
             .await?
             .filter(|folder| !folder.trim().is_empty())
             .unwrap_or_else(|| remote::DEFAULT_FOLDER.into()),
-        user: get_setting(db, remote::SETTING_USER).await?.unwrap_or_default(),
+        user: get_setting(db, remote::SETTING_USER)
+            .await?
+            .unwrap_or_default(),
         has_password: crate::llm::keychain::get_secret(db, remote::SECRET_PASSWORD)
             .await?
             .is_some_and(|password| !password.is_empty()),
@@ -44,7 +48,10 @@ pub async fn cmd_remote_sync_status(state: State<'_, AppState>) -> AppResult<Rem
         pending: crate::sync::outbox::pending_count(db).await?,
         devices: remote::known_devices(db).await?,
         state: remote::state(),
-        upload_media: get_setting(db, remote::SETTING_UPLOAD_MEDIA).await?.as_deref() == Some("true"),
+        upload_media: get_setting(db, remote::SETTING_UPLOAD_MEDIA)
+            .await?
+            .as_deref()
+            == Some("true"),
         media: remote::media_state(),
     })
 }
@@ -66,8 +73,17 @@ async fn draft_config(
     if url.trim().is_empty() || user.trim().is_empty() || password.is_empty() {
         return Err(AppError::Config("地址、账号、密码都要填".into()));
     }
-    let folder = if folder.trim().is_empty() { remote::DEFAULT_FOLDER.to_string() } else { folder.trim().to_string() };
-    Ok(RemoteConfig { url: url.trim().to_string(), folder, user: user.trim().to_string(), password })
+    let folder = if folder.trim().is_empty() {
+        remote::DEFAULT_FOLDER.to_string()
+    } else {
+        folder.trim().to_string()
+    };
+    Ok(RemoteConfig {
+        url: url.trim().to_string(),
+        folder,
+        user: user.trim().to_string(),
+        password,
+    })
 }
 
 /// 测连接：能连上、账号对、时钟没歪、能建文件夹。返回网盘上已有几台设备（含本机之前留下的）。
@@ -104,11 +120,19 @@ pub async fn cmd_remote_sync_save(
 }
 
 #[tauri::command]
-pub async fn cmd_remote_sync_set_enabled(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
+pub async fn cmd_remote_sync_set_enabled(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> AppResult<()> {
     if enabled && remote::saved_config(&state.db).await?.is_none() {
         return Err(AppError::Config("先填好并保存网盘地址和账号".into()));
     }
-    set_setting(&state.db, remote::SETTING_ENABLED, if enabled { "true" } else { "false" }).await?;
+    set_setting(
+        &state.db,
+        remote::SETTING_ENABLED,
+        if enabled { "true" } else { "false" },
+    )
+    .await?;
     if enabled {
         remote::nudge();
     }
@@ -130,8 +154,16 @@ pub async fn cmd_remote_sync_nudge() -> AppResult<()> {
 
 /// 开 / 关「上传这台设备上的视频文件」。关掉时正在传的视频传完当前这一块就停。
 #[tauri::command]
-pub async fn cmd_remote_sync_set_upload_media(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
-    set_setting(&state.db, remote::SETTING_UPLOAD_MEDIA, if enabled { "true" } else { "false" }).await?;
+pub async fn cmd_remote_sync_set_upload_media(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> AppResult<()> {
+    set_setting(
+        &state.db,
+        remote::SETTING_UPLOAD_MEDIA,
+        if enabled { "true" } else { "false" },
+    )
+    .await?;
     if enabled {
         remote::nudge_media();
     } else {
@@ -142,7 +174,10 @@ pub async fn cmd_remote_sync_set_upload_media(state: State<'_, AppState>, enable
 
 /// 网盘上有没有这个视频的文件（有的话多大）。没配网盘时报配置错误。
 #[tauri::command]
-pub async fn cmd_remote_sync_media_size(state: State<'_, AppState>, video_id: String) -> AppResult<Option<u64>> {
+pub async fn cmd_remote_sync_media_size(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<Option<u64>> {
     let config = remote::saved_config(&state.db)
         .await?
         .ok_or_else(|| AppError::Config("还没设置多设备同步（设置 → 多设备同步）".into()))?;
@@ -152,7 +187,10 @@ pub async fn cmd_remote_sync_media_size(state: State<'_, AppState>, video_id: St
 /// 从网盘下载这个视频到本机。进度走 remote-sync:download 事件。返回本机文件路径。
 #[tauri::command]
 pub async fn cmd_remote_sync_download_video(video_id: String) -> AppResult<String> {
-    Ok(remote::download_now(&video_id).await?.to_string_lossy().into_owned())
+    Ok(remote::download_now(&video_id)
+        .await?
+        .to_string_lossy()
+        .into_owned())
 }
 
 /// 移除网盘上的另一台设备（不再用的旧手机、重装前的自己）。它写过的数据留在网盘上，

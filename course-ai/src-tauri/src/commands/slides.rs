@@ -116,9 +116,17 @@ async fn slide_source(
     if let Some(target) = crate::commands::transcode::plan(&original, &video.data_dir) {
         use crate::commands::transcode::{ensure_transcode, transcoded_ready, TranscodeJobs};
         use tauri::Manager;
-        let jobs = app.try_state::<std::sync::Arc<TranscodeJobs>>().map(|jobs| jobs.inner().clone());
+        let jobs = app
+            .try_state::<std::sync::Arc<TranscodeJobs>>()
+            .map(|jobs| jobs.inner().clone());
         if let Some(jobs) = &jobs {
-            let _ = ensure_transcode(jobs.clone(), &video.id, &video.file_path, &video.data_dir, false);
+            let _ = ensure_transcode(
+                jobs.clone(),
+                &video.id,
+                &video.file_path,
+                &video.data_dir,
+                false,
+            );
         }
         loop {
             if transcoded_ready(&target) {
@@ -226,8 +234,15 @@ pub async fn cmd_extract_slides(
             );
         }
     };
-    let result =
-        extract_slides_for_video(&app, &state, &video_id, threshold, &cancel, &mut on_progress).await;
+    let result = extract_slides_for_video(
+        &app,
+        &state,
+        &video_id,
+        threshold,
+        &cancel,
+        &mut on_progress,
+    )
+    .await;
     if let Some(id) = &request_id {
         state.unregister_cancel(id, &cancel);
     }
@@ -364,7 +379,8 @@ pub async fn ocr_slides_for_video(
                             Err(error) => Err(AppError::Io(error)),
                         }
                     } else {
-                        crate::commands::tools::run_local_ocr(&state.db, Path::new(path), langs).await
+                        crate::commands::tools::run_local_ocr(&state.db, Path::new(path), langs)
+                            .await
                     }
                 };
                 let text = tokio::time::timeout(OCR_PAGE_TIMEOUT, recognize)

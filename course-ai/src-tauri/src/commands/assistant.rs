@@ -196,7 +196,8 @@ fn context_line(context: &AssistantContext, names: &ContextNames) -> Option<Stri
 /// 系统提示第 4 条要求「课程内容只依据工具读到的东西」；不说一声，模型会无视已经在
 /// 上下文里的讲稿，照旧先调工具去搜——白走一轮。说明放在这条上下文消息里而不是系统
 /// 提示里：系统提示要保持逐字节不变，才命得中缓存。
-const LECTURE_ATTACHED_NOTE: &str = "\n（system 开头附了当前视频的讲稿，和工具读到的同样算课程内容：\
+const LECTURE_ATTACHED_NOTE: &str =
+    "\n（system 开头附了当前视频的讲稿，和工具读到的同样算课程内容：\
 问这节课讲了什么、某个概念怎么讲的，直接据此回答，照抄行首的 [mm:ss]。讲稿是几十秒合并成一段的，\
 要精确到某句话的时间、看课件画面，或讲稿里找不到时，再用工具。）";
 
@@ -287,7 +288,10 @@ fn is_context_message(message: &ChatMessage) -> bool {
 
 /// 一组 = 若干条界面状态（可以没有）+ 一条用户提问 + 之后的回答与工具往返。
 fn valid_history_group(messages: &[ChatMessage]) -> bool {
-    let leading_context = messages.iter().take_while(|m| is_context_message(m)).count();
+    let leading_context = messages
+        .iter()
+        .take_while(|m| is_context_message(m))
+        .count();
     let messages = &messages[leading_context..];
     if messages.len() < 2
         || messages
@@ -386,7 +390,11 @@ async fn prepare_history(
     for group in groups.into_iter().rev() {
         let group_chars: usize = group.iter().map(message_chars).sum();
         // 最近一轮只受总上限约束：它往往就是用户正在追问的那一轮，别因为留余量把它压掉。
-        let cap = if kept.is_empty() { MAX_HISTORY_CHARS } else { char_cap };
+        let cap = if kept.is_empty() {
+            MAX_HISTORY_CHARS
+        } else {
+            char_cap
+        };
         if !overflow.is_empty() || kept.len() >= turn_cap || kept_chars + group_chars > cap {
             overflow.push(group);
             continue;
@@ -399,7 +407,11 @@ async fn prepare_history(
     let mut prepared: Vec<ChatMessage> = Vec::new();
     if !overflow.is_empty() {
         overflow.reverse(); // 恢复时间正序再交给模型
-        let text: String = overflow.iter().flatten().map(format_history_message).collect();
+        let text: String = overflow
+            .iter()
+            .flatten()
+            .map(format_history_message)
+            .collect();
         let text: String = text.chars().take(MAX_DIGEST_INPUT_CHARS).collect();
         if let Some(digest) = digest_history(provider, model, &text).await {
             // 摘要组必须是一条合法的 user 轮（user + assistant），才能和后面的正常组
@@ -419,7 +431,10 @@ async fn prepare_history(
 fn format_history_message(message: &ChatMessage) -> String {
     let mut line = format!("{}: {}", message.role, message.content);
     for call in &message.tool_calls {
-        line.push_str(&format!("\n  要求调用工具 {} {}", call.name, call.arguments));
+        line.push_str(&format!(
+            "\n  要求调用工具 {} {}",
+            call.name, call.arguments
+        ));
     }
     if let Some(id) = &message.tool_call_id {
         line.push_str(&format!("（工具调用 {id} 的结果）"));
@@ -571,9 +586,7 @@ pub async fn cmd_assistant_ask(
         Some(id) => crate::commands::ai::provider_for_profile(&state.db, id).await?,
         None => crate::commands::ai::provider_for_db(&state.db, AiTask::Assistant)
             .await?
-            .ok_or_else(|| {
-                AppError::Config("尚未配置可用的大模型（设置 → 大模型）".into())
-            })?,
+            .ok_or_else(|| AppError::Config("尚未配置可用的大模型（设置 → 大模型）".into()))?,
     };
 
     let db = state.db.clone();
@@ -633,8 +646,13 @@ pub async fn cmd_assistant_ask(
                 }
                 _ => None,
             };
-            let line = context_line(&context, &names)
-                .map(|line| if lecture_prefix.is_some() { format!("{line}{LECTURE_ATTACHED_NOTE}") } else { line });
+            let line = context_line(&context, &names).map(|line| {
+                if lecture_prefix.is_some() {
+                    format!("{line}{LECTURE_ATTACHED_NOTE}")
+                } else {
+                    line
+                }
+            });
             if let Some(line) = context_message(line, slide_matches) {
                 messages.push(ChatMessage::user(line));
             }
@@ -856,8 +874,13 @@ mod tests {
         assert!(guided.starts_with(ASSISTANT_SYSTEM), "通用规矩照样要守");
         assert!(guided.contains("不要直接给出最终答案"));
         assert!(guided.contains("```socratic"));
-        for field in ["step", "total", "options", "hints", "answer", "done", "summary"] {
-            assert!(guided.contains(&format!("\"{field}\"")), "结构块缺字段 {field}");
+        for field in [
+            "step", "total", "options", "hints", "answer", "done", "summary",
+        ] {
+            assert!(
+                guided.contains(&format!("\"{field}\"")),
+                "结构块缺字段 {field}"
+            );
         }
     }
 
@@ -976,7 +999,10 @@ mod tests {
             assert_eq!(kept.role, original.role);
             assert_eq!(kept.content, original.content);
         }
-        assert!(valid_history_group(&prepared), "界面状态 + 提问 + 回答是一组合法的历史");
+        assert!(
+            valid_history_group(&prepared),
+            "界面状态 + 提问 + 回答是一组合法的历史"
+        );
         assert!(ASSISTANT_SYSTEM.contains("以离当前提问最近的那条为准"));
     }
 
@@ -1071,7 +1097,12 @@ mod tests {
             history.push(ChatMessage::assistant(format!("回答 {index}")));
         }
 
-        let prepared = prepare_history(history, &mock_provider("更早的对话要点：用户问过 0 到 5"), "m").await;
+        let prepared = prepare_history(
+            history,
+            &mock_provider("更早的对话要点：用户问过 0 到 5"),
+            "m",
+        )
+        .await;
         // 超限后压到留出余量：溢出的老组压成一条摘要组（user + assistant）留在最前，
         // 后面是完整的最近 COMPACT_KEEP_TURNS 组——user 轮数 = KEEP + 1（摘要组算一轮）。
         assert_eq!(
@@ -1202,8 +1233,16 @@ mod tests {
 
     #[test]
     fn a_reply_without_reported_usage_keeps_usage_absent() {
-        let reply = build_reply(outcome(vec![ChatMessage::assistant("答复")]), Vec::new(), Vec::new(), 0);
-        assert!(reply.usage.is_none(), "没报用量就保持缺失，前端不得当零处理");
+        let reply = build_reply(
+            outcome(vec![ChatMessage::assistant("答复")]),
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        assert!(
+            reply.usage.is_none(),
+            "没报用量就保持缺失，前端不得当零处理"
+        );
     }
 
     #[test]
@@ -1367,7 +1406,10 @@ mod tests {
         assert!(validate_images(vec![png.clone(); MAX_IMAGES_PER_QUESTION + 1]).is_err());
         assert!(validate_images(vec!["https://example.com/a.png".into()]).is_err());
         assert!(validate_images(vec!["data:image/svg+xml;base64,AA==".into()]).is_err());
-        let huge = format!("data:image/png;base64,{}", "A".repeat(MAX_IMAGE_DATA_URL_CHARS));
+        let huge = format!(
+            "data:image/png;base64,{}",
+            "A".repeat(MAX_IMAGE_DATA_URL_CHARS)
+        );
         assert!(validate_images(vec![huge]).is_err());
     }
 }

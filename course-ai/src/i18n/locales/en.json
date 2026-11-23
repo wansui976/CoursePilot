@@ -2535,5 +2535,41 @@
     "mistakes": "Mistakes",
     "filler": "Small talk",
     "jump": "Jump to {{time}}"
+  },
+  "memoryCurve": {
+    "toggle": "Memory curve",
+    "empty": "No reviews for this card yet.",
+    "summary": "You still remember about {{now}}%. Next review in {{days}} days.",
+    "day_one": "{{count}} day",
+    "day_other": "{{count}} days",
+    "rating1": "Rated Again",
+    "rating2": "Rated Hard",
+    "rating3": "Rated Good",
+    "rating4": "Rated Easy"
+  },
+  "mistakes": {
+    "title": "Mistakes",
+    "count_one": "{{count}} card",
+    "count_other": "{{count}} cards",
+    "missed": "Missed {{count}}×",
+    "streakLabel": "Streak",
+    "streak": "{{count}} of {{total}} correct in a row",
+    "review": "Review mistakes only"
+  },
+  "collection": {
+    "tab": "Collection",
+    "lit": "lit",
+    "fading": "fading",
+    "locked": "no cards yet",
+    "dueTab": "Review",
+    "noCards": "No cards yet",
+    "notReviewed_one": "{{count}} card to review",
+    "notReviewed_other": "{{count}} cards to review",
+    "state": {
+      "lit": "lit",
+      "fading": "fading, due for review",
+      "pending": "has cards not yet reviewed",
+      "locked": "no cards yet"
+    }
   }
 }

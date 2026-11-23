@@ -24,6 +24,7 @@ import { buildWeeklyReport } from "@/lib/shareCard/weekly";
 import { saveShareCard, useShareCardLabels } from "@/features/workspace/useShareCard";
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
+import { MistakeDeck } from "./MistakeDeck";
 import {
   computeStreak,
   dayMs,
@@ -225,6 +226,7 @@ export function Dashboard({
   const heatmapWeeks = useHeatmapWeeks(heatmapBox);
   const queryClient = useQueryClient();
   const [reviewing, setReviewing] = useState(false);
+  const [reviewingMistakes, setReviewingMistakes] = useState(false);
   const [activeHeatDay, setActiveHeatDay] = useState(today);
   const heatmapRef = useRef<HTMLDivElement>(null);
   // 按薄弱概念复习的目标（打开概念作用域的 ReviewSession）。
@@ -711,6 +713,8 @@ export function Dashboard({
             </section>
           )}
 
+          <MistakeDeck onReview={() => setReviewingMistakes(true)} />
+
           {weakQuery.isError ? (
             <section aria-labelledby="dashboard-weak-title">
               <div
@@ -918,6 +922,17 @@ export function Dashboard({
           onClose={() => setReviewing(false)}
           onJump={(card) => {
             setReviewing(false);
+            onJump(card);
+          }}
+        />
+      )}
+
+      {reviewingMistakes && (
+        <ReviewSession
+          mistakes={{ courseId: null }}
+          onClose={() => setReviewingMistakes(false)}
+          onJump={(card) => {
+            setReviewingMistakes(false);
             onJump(card);
           }}
         />

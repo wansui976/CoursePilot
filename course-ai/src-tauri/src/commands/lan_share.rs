@@ -27,8 +27,16 @@ pub async fn cmd_lan_share_status(state: State<'_, AppState>) -> AppResult<Statu
 
 /// 开 / 关这台电脑的局域网共享。开了以后下一轮同步把地址写到网盘上，别的设备就能找到。
 #[tauri::command]
-pub async fn cmd_lan_share_set_enabled(state: State<'_, AppState>, enabled: bool) -> AppResult<Status> {
-    set_setting(&state.db, lan_share::SETTING_ENABLED, if enabled { "true" } else { "false" }).await?;
+pub async fn cmd_lan_share_set_enabled(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> AppResult<Status> {
+    set_setting(
+        &state.db,
+        lan_share::SETTING_ENABLED,
+        if enabled { "true" } else { "false" },
+    )
+    .await?;
     if enabled {
         lan_share::start(state.db.clone()).await?;
     } else {
@@ -46,7 +54,9 @@ pub async fn cmd_lan_stream_url(
     media: State<'_, crate::media_server::MediaServer>,
     video_id: String,
 ) -> AppResult<Option<String>> {
-    let Some(config) = crate::sync::remote::saved_config(&state.db).await? else { return Ok(None) };
+    let Some(config) = crate::sync::remote::saved_config(&state.db).await? else {
+        return Ok(None);
+    };
     if !crate::sync::remote::is_enabled(&state.db).await? {
         return Ok(None);
     }
@@ -59,7 +69,11 @@ pub async fn cmd_lan_stream_url(
     lan_share::remember_source(&video_id, source.clone());
     media.register_remote(&video_id, source);
     // 每次换个查询串：上次那条转发要是断了，<video> 也会重新连。
-    Ok(Some(format!("{}?lan={}", media.url(&video_id), chrono::Utc::now().timestamp_millis())))
+    Ok(Some(format!(
+        "{}?lan={}",
+        media.url(&video_id),
+        chrono::Utc::now().timestamp_millis()
+    )))
 }
 
 /// 把这个视频整段下到本机（从正连着的那台电脑）。下完以后离线也能看，也不再占网盘上传额度。
@@ -79,10 +93,22 @@ pub async fn cmd_lan_download_video(
     let report = move |downloaded: u64, total: u64| {
         let _ = emitter.emit(
             DOWNLOAD_EVENT,
-            DownloadProgress { video_id: id.clone(), downloaded, total, done: false, error: None },
+            DownloadProgress {
+                video_id: id.clone(),
+                downloaded,
+                total,
+                done: false,
+                error: None,
+            },
         );
     };
-    let result = lan_share::download_video(&state.db, &app_data.join("synced-videos"), &video_id, &report).await;
+    let result = lan_share::download_video(
+        &state.db,
+        &app_data.join("synced-videos"),
+        &video_id,
+        &report,
+    )
+    .await;
     let _ = app.emit(
         DOWNLOAD_EVENT,
         DownloadProgress {

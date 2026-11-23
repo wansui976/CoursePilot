@@ -376,7 +376,16 @@ pub async fn complete(
 ) -> AppResult<ChatResponse> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
     let thinking_off = thinking_off(base_url, thinking, req);
-    complete_at(&url, Auth::Bearer(api_key), client, req, max_tokens, "OpenAI", thinking_off).await
+    complete_at(
+        &url,
+        Auth::Bearer(api_key),
+        client,
+        req,
+        max_tokens,
+        "OpenAI",
+        thinking_off,
+    )
+    .await
 }
 
 /// 这次请求要不要带上「关掉思考」。
@@ -391,7 +400,11 @@ pub fn thinking_off(base_url: &str, thinking: bool, req: &ChatRequest) -> bool {
 }
 
 /// 非流式请求体。`thinking_off` 时带上 DeepSeek 的 `thinking: {type: disabled}`。
-pub fn build_complete_body(req: &ChatRequest, max_tokens: Option<u32>, thinking_off: bool) -> Value {
+pub fn build_complete_body(
+    req: &ChatRequest,
+    max_tokens: Option<u32>,
+    thinking_off: bool,
+) -> Value {
     let mut body = build_openai_body_with(req, max_tokens);
     if thinking_off {
         body["thinking"] = json!({"type": "disabled"});
@@ -607,8 +620,18 @@ pub async fn complete_stream(
 ) -> AppResult<StreamOutcome> {
     let url = format!("{}/chat/completions", normalize_openai_base_url(base_url));
     let thinking_off = thinking_off(base_url, thinking, req);
-    complete_stream_at(&url, Auth::Bearer(api_key), client, req, cancel, on_piece, max_tokens, "OpenAI", thinking_off)
-        .await
+    complete_stream_at(
+        &url,
+        Auth::Bearer(api_key),
+        client,
+        req,
+        cancel,
+        on_piece,
+        max_tokens,
+        "OpenAI",
+        thinking_off,
+    )
+    .await
 }
 
 /// 流式请求的 URL/鉴权可替换版本：Azure 的 deployment 地址也走这里。
@@ -683,7 +706,10 @@ pub(crate) enum StreamWait<T> {
 /// 等下一块网络数据时也定期看取消标志。
 ///
 /// 只在拿到 chunk 后检查会漏掉最需要取消的情况：连接已经建立，但服务端一直不再发送数据。
-pub(crate) async fn next_stream_item_or_cancel<S>(stream: &mut S, cancel: &AtomicBool) -> StreamWait<S::Item>
+pub(crate) async fn next_stream_item_or_cancel<S>(
+    stream: &mut S,
+    cancel: &AtomicBool,
+) -> StreamWait<S::Item>
 where
     S: futures_util::Stream + Unpin,
 {
@@ -795,10 +821,20 @@ mod tests {
         assert!(!thinking_off(deepseek, true, &plain));
         assert!(thinking_off(deepseek, true, &with_tools));
         assert!(!thinking_off("https://api.openai.com/v1", false, &plain));
-        assert!(!thinking_off("https://api.siliconflow.cn/v1", false, &plain));
+        assert!(!thinking_off(
+            "https://api.siliconflow.cn/v1",
+            false,
+            &plain
+        ));
 
-        assert_eq!(build_complete_body(&plain, None, true)["thinking"], json!({"type": "disabled"}));
-        assert_eq!(build_complete_body(&plain, None, false), build_openai_body_with(&plain, None));
+        assert_eq!(
+            build_complete_body(&plain, None, true)["thinking"],
+            json!({"type": "disabled"})
+        );
+        assert_eq!(
+            build_complete_body(&plain, None, false),
+            build_openai_body_with(&plain, None)
+        );
     }
 
     #[test]
@@ -1032,7 +1068,10 @@ mod tests {
         let mut req = sample_req();
         req.messages = vec![ChatMessage::user_with_images(
             "这道题怎么做",
-            vec!["data:image/png;base64,AA==".into(), "data:image/jpeg;base64,BB==".into()],
+            vec![
+                "data:image/png;base64,AA==".into(),
+                "data:image/jpeg;base64,BB==".into(),
+            ],
         )];
         let body = build_openai_body(&req);
         let parts = body["messages"][1]["content"].as_array().unwrap();

@@ -165,12 +165,15 @@ pub async fn rebase_ios_container_paths(
 mod tests {
     use super::*;
 
-    const OLD: &str = "/private/var/mobile/Containers/Data/Application/ED356AE8-4EBD-4E2F-A992-404E22A2201C";
-    const NEW: &str = "/var/mobile/Containers/Data/Application/7FEE1FE0-B861-4BBE-AB18-1EF09CF3ABE3";
+    const OLD: &str =
+        "/private/var/mobile/Containers/Data/Application/ED356AE8-4EBD-4E2F-A992-404E22A2201C";
+    const NEW: &str =
+        "/var/mobile/Containers/Data/Application/7FEE1FE0-B861-4BBE-AB18-1EF09CF3ABE3";
 
     #[test]
     fn finds_the_ios_container_root() {
-        let path = format!("{OLD}/Library/Application Support/dev.courseai.app/courses/网课/01.mp4");
+        let path =
+            format!("{OLD}/Library/Application Support/dev.courseai.app/courses/网课/01.mp4");
         assert_eq!(ios_container_root(&path), Some(OLD));
         assert_eq!(ios_container_root(OLD), Some(OLD));
         assert_eq!(ios_container_root("/Users/me/courses/01.mp4"), None);
@@ -182,10 +185,14 @@ mod tests {
 
     #[test]
     fn rebases_paths_from_an_old_container_only() {
-        let path = format!("{OLD}/Library/Application Support/dev.courseai.app/courses/网课/01.mp4");
+        let path =
+            format!("{OLD}/Library/Application Support/dev.courseai.app/courses/网课/01.mp4");
         assert_eq!(
             rebase_into_container(&path, NEW).as_deref(),
-            Some(format!("{NEW}/Library/Application Support/dev.courseai.app/courses/网课/01.mp4").as_str())
+            Some(
+                format!("{NEW}/Library/Application Support/dev.courseai.app/courses/网课/01.mp4")
+                    .as_str()
+            )
         );
         let current = format!("{NEW}/Library/x.mp4");
         assert_eq!(rebase_into_container(&current, NEW), None);
@@ -212,16 +219,17 @@ mod tests {
         .execute(&db.pool)
         .await
         .unwrap();
-        sqlx::query(
-            "INSERT INTO slides(video_id,image_path,start_ms,page_no) VALUES ('v1',?,0,1)",
-        )
-        .bind(format!("{root}/.courseai/v1/slides/0001.jpg"))
-        .execute(&db.pool)
-        .await
-        .unwrap();
+        sqlx::query("INSERT INTO slides(video_id,image_path,start_ms,page_no) VALUES ('v1',?,0,1)")
+            .bind(format!("{root}/.courseai/v1/slides/0001.jpg"))
+            .execute(&db.pool)
+            .await
+            .unwrap();
 
         // 种数据时插入触发器写的同步记录清掉，好看清改路径本身会不会产生同步记录。
-        sqlx::query("DELETE FROM sync_outbox").execute(&db.pool).await.unwrap();
+        sqlx::query("DELETE FROM sync_outbox")
+            .execute(&db.pool)
+            .await
+            .unwrap();
 
         assert_eq!(rebase_ios_container_paths(&db, NEW).await.unwrap(), 4);
         let (file, data_dir): (String, String) =
@@ -229,7 +237,10 @@ mod tests {
                 .fetch_one(&db.pool)
                 .await
                 .unwrap();
-        assert!(file.starts_with(NEW) && file.ends_with("/courses/网课/01.mp4"), "{file}");
+        assert!(
+            file.starts_with(NEW) && file.ends_with("/courses/网课/01.mp4"),
+            "{file}"
+        );
         assert!(data_dir.starts_with(NEW), "{data_dir}");
         let outbox: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_outbox")
             .fetch_one(&db.pool)

@@ -39,8 +39,8 @@ pub const SYNC_SOURCE_ID: &str = "sync";
 pub const SOURCE_TYPE: &str = "url";
 
 const VIDEO_EXTENSIONS: &[&str] = &[
-    "mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "wmv", "ts", "mpg", "mpeg", "3gp", "mp3", "m4a", "aac", "wav",
-    "flac", "ogg", "opus",
+    "mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "wmv", "ts", "mpg", "mpeg", "3gp", "mp3",
+    "m4a", "aac", "wav", "flac", "ogg", "opus",
 ];
 
 fn secret_name(id: &str) -> String {
@@ -105,9 +105,12 @@ pub struct StreamItem {
 
 fn normalize_base(url: &str) -> AppResult<String> {
     let url = url.trim();
-    let parsed = reqwest::Url::parse(url).map_err(|_| AppError::Config(format!("网盘地址不是合法的网址：{url}")))?;
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|_| AppError::Config(format!("网盘地址不是合法的网址：{url}")))?;
     if !matches!(parsed.scheme(), "https" | "http") {
-        return Err(AppError::Config("网盘地址要以 https:// 或 http:// 开头".into()));
+        return Err(AppError::Config(
+            "网盘地址要以 https:// 或 http:// 开头".into(),
+        ));
     }
     Ok(format!("{}/", url.trim_end_matches('/')))
 }
@@ -165,21 +168,42 @@ pub async fn save_source(
     secret: Option<String>,
 ) -> AppResult<Source> {
     if id.as_deref() == Some(SYNC_SOURCE_ID) {
-        return Err(AppError::Config("同步用的网盘账号在「多设备同步」里改".into()));
+        return Err(AppError::Config(
+            "同步用的网盘账号在「多设备同步」里改".into(),
+        ));
     }
     let (kind, url, user) = match kind.as_str() {
-        KIND_QUARK => (KIND_QUARK.to_string(), QUARK_SCHEME.to_string(), String::new()),
-        _ => (KIND_WEBDAV.to_string(), normalize_base(&url)?, user.trim().to_string()),
+        KIND_QUARK => (
+            KIND_QUARK.to_string(),
+            QUARK_SCHEME.to_string(),
+            String::new(),
+        ),
+        _ => (
+            KIND_WEBDAV.to_string(),
+            normalize_base(&url)?,
+            user.trim().to_string(),
+        ),
     };
     let mut sources = stored_sources(db).await?;
-    let id = id.filter(|id| sources.iter().any(|source| &source.id == id)).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let stored = StoredSource { id: id.clone(), kind, name: name.trim().to_string(), url, user };
+    let id = id
+        .filter(|id| sources.iter().any(|source| &source.id == id))
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let stored = StoredSource {
+        id: id.clone(),
+        kind,
+        name: name.trim().to_string(),
+        url,
+        user,
+    };
     match sources.iter_mut().find(|source| source.id == id) {
         Some(existing) => *existing = stored,
         None => sources.push(stored),
     }
     write_sources(db, &sources).await?;
-    if let Some(secret) = secret.map(|secret| secret.trim().to_string()).filter(|secret| !secret.is_empty()) {
+    if let Some(secret) = secret
+        .map(|secret| secret.trim().to_string())
+        .filter(|secret| !secret.is_empty())
+    {
         crate::llm::keychain::set_secret(db, &secret_name(&id), &secret).await?;
     }
     list_sources(db)
@@ -203,14 +227,21 @@ async fn credentials(db: &Db, id: &str) -> AppResult<(String, String, String, St
         let config = crate::sync::remote::saved_config(db)
             .await?
             .ok_or_else(|| AppError::Config("还没设置同步用的网盘".into()))?;
-        return Ok((KIND_WEBDAV.into(), normalize_base(&config.url)?, config.user, config.password));
+        return Ok((
+            KIND_WEBDAV.into(),
+            normalize_base(&config.url)?,
+            config.user,
+            config.password,
+        ));
     }
     let stored = stored_sources(db)
         .await?
         .into_iter()
         .find(|source| source.id == id)
         .ok_or_else(|| AppError::NotFound(format!("网盘来源 {id}")))?;
-    let secret = crate::llm::keychain::get_secret(db, &secret_name(id)).await?.unwrap_or_default();
+    let secret = crate::llm::keychain::get_secret(db, &secret_name(id))
+        .await?
+        .unwrap_or_default();
     Ok((stored.kind, stored.url, stored.user, secret))
 }
 
@@ -225,7 +256,10 @@ async fn keep_quark_cookie(db: &Db, id: &str, before: &str, client: &crate::quar
 /// 测一个（还没保存的）来源能不能连上：能列出根目录就算通。返回根目录下有几项。
 pub async fn test(kind: &str, url: &str, user: &str, secret: &str) -> AppResult<usize> {
     if kind == KIND_QUARK {
-        return Ok(crate::quark::Client::new(secret)?.list(crate::quark::ROOT).await?.len());
+        return Ok(crate::quark::Client::new(secret)?
+            .list(crate::quark::ROOT)
+            .await?
+            .len());
     }
     let dav = WebDav::new(&normalize_base(url)?, "", user, secret)?;
     let entries = dav
@@ -236,20 +270,29 @@ pub async fn test(kind: &str, url: &str, user: &str, secret: &str) -> AppResult<
 }
 
 /// 测已保存的来源（编辑时密码 / Cookie 留空 = 用存着的那个）。
-pub async fn test_saved(db: &Db, id: &str, url: Option<String>, user: Option<String>, secret: Option<String>) -> AppResult<usize> {
+pub async fn test_saved(
+    db: &Db,
+    id: &str,
+    url: Option<String>,
+    user: Option<String>,
+    secret: Option<String>,
+) -> AppResult<usize> {
     let (kind, saved_url, saved_user, saved_secret) = credentials(db, id).await?;
     test(
         &kind,
         &url.unwrap_or(saved_url),
         &user.unwrap_or(saved_user),
-        &secret.filter(|secret| !secret.is_empty()).unwrap_or(saved_secret),
+        &secret
+            .filter(|secret| !secret.is_empty())
+            .unwrap_or(saved_secret),
     )
     .await
 }
 
 fn is_video_name(name: &str) -> bool {
-    name.rsplit_once('.')
-        .is_some_and(|(_, extension)| VIDEO_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str()))
+    name.rsplit_once('.').is_some_and(|(_, extension)| {
+        VIDEO_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+    })
 }
 
 /// 按「人看的顺序」比较文件名：数字按数值比（第 2 讲排在第 10 讲前面）。
@@ -271,8 +314,12 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
                     right.push(c);
                     b.next();
                 }
-                let (left_trim, right_trim) = (left.trim_start_matches('0'), right.trim_start_matches('0'));
-                let order = left_trim.len().cmp(&right_trim.len()).then_with(|| left_trim.cmp(right_trim));
+                let (left_trim, right_trim) =
+                    (left.trim_start_matches('0'), right.trim_start_matches('0'));
+                let order = left_trim
+                    .len()
+                    .cmp(&right_trim.len())
+                    .then_with(|| left_trim.cmp(right_trim));
                 if order != std::cmp::Ordering::Equal {
                     return order;
                 }
@@ -290,7 +337,11 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 fn sort_entries(items: &mut [BrowseEntry]) {
-    items.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| natural_cmp(&a.name, &b.name)));
+    items.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| natural_cmp(&a.name, &b.name))
+    });
 }
 
 /// 列一个文件夹：文件夹在前，其余按文件名的自然顺序。`path` 是上一层给出的那一项的 `path`
@@ -299,7 +350,11 @@ pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<Brows
     let (kind, base, user, secret) = credentials(db, source_id).await?;
     if kind == KIND_QUARK {
         let client = crate::quark::Client::new(&secret)?;
-        let fid = if path.is_empty() { crate::quark::ROOT } else { path };
+        let fid = if path.is_empty() {
+            crate::quark::ROOT
+        } else {
+            path
+        };
         let files = client.list(fid).await;
         keep_quark_cookie(db, source_id, &secret, &client).await;
         let mut items: Vec<BrowseEntry> = files?
@@ -307,7 +362,11 @@ pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<Brows
             .filter(|file| !file.name.starts_with('.'))
             .map(|file| BrowseEntry {
                 is_video: !file.is_dir && (file.is_video || is_video_name(&file.name)),
-                url: if file.is_dir { String::new() } else { format!("{QUARK_SCHEME}{}/{}", file.fid, encode_path(&file.name)) },
+                url: if file.is_dir {
+                    String::new()
+                } else {
+                    format!("{QUARK_SCHEME}{}/{}", file.fid, encode_path(&file.name))
+                },
                 path: if file.is_dir { file.fid } else { String::new() },
                 name: file.name,
                 is_dir: file.is_dir,
@@ -319,7 +378,11 @@ pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<Brows
     }
     let dav = WebDav::new(&base, "", &user, &secret)?;
     let dir = path.trim_matches('/');
-    let prefix = if dir.is_empty() { String::new() } else { format!("{dir}/") };
+    let prefix = if dir.is_empty() {
+        String::new()
+    } else {
+        format!("{dir}/")
+    };
     let entries = dav
         .list(&encode_path(&prefix))
         .await?
@@ -328,10 +391,18 @@ pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<Brows
         .into_iter()
         .filter(|entry| !entry.name.starts_with('.'))
         .map(|entry| {
-            let relative = format!("{prefix}{}{}", entry.name, if entry.is_dir { "/" } else { "" });
+            let relative = format!(
+                "{prefix}{}{}",
+                entry.name,
+                if entry.is_dir { "/" } else { "" }
+            );
             BrowseEntry {
                 is_video: !entry.is_dir && is_video_name(&entry.name),
-                url: if entry.is_dir { String::new() } else { dav.url(&encode_path(&relative)) },
+                url: if entry.is_dir {
+                    String::new()
+                } else {
+                    dav.url(&encode_path(&relative))
+                },
                 name: entry.name,
                 path: relative,
                 is_dir: entry.is_dir,
@@ -352,17 +423,32 @@ pub enum Access {
 /// 哪个来源能访问这个地址：WebDAV 按根地址前缀认（最长的优先）；`quark://` 用第一个夸克来源。
 pub async fn source_for_url(db: &Db, url: &str) -> AppResult<Option<Access>> {
     if url.starts_with(QUARK_SCHEME) {
-        for source in list_sources(db).await?.into_iter().filter(|source| source.kind == KIND_QUARK) {
+        for source in list_sources(db)
+            .await?
+            .into_iter()
+            .filter(|source| source.kind == KIND_QUARK)
+        {
             let (_, _, _, cookie) = credentials(db, &source.id).await?;
             if !cookie.is_empty() {
-                return Ok(Some(Access::Quark { source_id: source.id, cookie }));
+                return Ok(Some(Access::Quark {
+                    source_id: source.id,
+                    cookie,
+                }));
             }
         }
         return Ok(None);
     }
     let mut best: Option<(usize, String, String)> = None;
-    for source in list_sources(db).await?.into_iter().filter(|source| source.kind == KIND_WEBDAV) {
-        if url.starts_with(&source.url) && best.as_ref().is_none_or(|(length, _, _)| source.url.len() > *length) {
+    for source in list_sources(db)
+        .await?
+        .into_iter()
+        .filter(|source| source.kind == KIND_WEBDAV)
+    {
+        if url.starts_with(&source.url)
+            && best
+                .as_ref()
+                .is_none_or(|(length, _, _)| source.url.len() > *length)
+        {
             let (_, _, user, password) = credentials(db, &source.id).await?;
             best = Some((source.url.len(), user, password));
         }
@@ -374,13 +460,23 @@ pub async fn source_for_url(db: &Db, url: &str) -> AppResult<Option<Access>> {
 pub async fn resolve(db: &Db, url: &str) -> AppResult<Option<(String, RemoteAuth)>> {
     match source_for_url(db, url).await? {
         None => Ok(None),
-        Some(Access::Basic { user, password }) => Ok(Some((url.to_string(), RemoteAuth::Basic { user, password }))),
+        Some(Access::Basic { user, password }) => Ok(Some((
+            url.to_string(),
+            RemoteAuth::Basic { user, password },
+        ))),
         Some(Access::Quark { source_id, cookie }) => {
-            let fid = url.trim_start_matches(QUARK_SCHEME).split('/').next().unwrap_or_default();
+            let fid = url
+                .trim_start_matches(QUARK_SCHEME)
+                .split('/')
+                .next()
+                .unwrap_or_default();
             let client = crate::quark::Client::new(&cookie)?;
             let link = client.download_url(fid).await;
             keep_quark_cookie(db, &source_id, &cookie, &client).await;
-            Ok(Some((link?, RemoteAuth::Headers(client.download_headers()))))
+            Ok(Some((
+                link?,
+                RemoteAuth::Headers(client.download_headers()),
+            )))
         }
     }
 }
@@ -396,10 +492,23 @@ fn http_client() -> AppResult<reqwest::Client> {
 }
 
 fn file_name_of(url: &str) -> String {
-    let last = url.trim_end_matches('/').rsplit('/').next().unwrap_or("video");
+    let last = url
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("video");
     let name = crate::sync::webdav::percent_decode(last);
     // 文件名里别带路径分隔符这类东西。
-    let cleaned: String = name.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '\0') { '_' } else { c }).collect();
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '\0') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
     if cleaned.trim().is_empty() {
         "video.mp4".into()
     } else {
@@ -413,7 +522,10 @@ fn free_path(dir: &Path, name: &str) -> PathBuf {
     if !candidate.exists() {
         return candidate;
     }
-    let (stem, extension) = name.rsplit_once('.').map(|(s, e)| (s.to_string(), format!(".{e}"))).unwrap_or((name.to_string(), String::new()));
+    let (stem, extension) = name
+        .rsplit_once('.')
+        .map(|(s, e)| (s.to_string(), format!(".{e}")))
+        .unwrap_or((name.to_string(), String::new()));
     (2..)
         .map(|n| dir.join(format!("{stem} ({n}){extension}")))
         .find(|path| !path.exists())
@@ -434,7 +546,11 @@ const MAX_FRUITLESS_ATTEMPTS: u32 = 6;
 /// 这么久一个字节都没收到，就当连接断了（换个连接接着下）。
 const STALL_TIMEOUT: Duration = Duration::from_secs(60);
 /// 断了以后等多久再连（第 n 次没进展就等 n 倍）。
-const RETRY_BACKOFF: Duration = if cfg!(test) { Duration::from_millis(5) } else { Duration::from_secs(2) };
+const RETRY_BACKOFF: Duration = if cfg!(test) {
+    Duration::from_millis(5)
+} else {
+    Duration::from_secs(2)
+};
 
 enum Transfer {
     /// 下完了。
@@ -461,9 +577,14 @@ fn describe(error: &(dyn std::error::Error + 'static)) -> String {
     }
     let joined = parts.join("：");
     let lower = joined.to_ascii_lowercase();
-    if ["connection closed", "connection reset", "unexpected eof", "end of file before message length"]
-        .iter()
-        .any(|pattern| lower.contains(pattern))
+    if [
+        "connection closed",
+        "connection reset",
+        "unexpected eof",
+        "end of file before message length",
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
     {
         format!("连接被网盘那边断开了（{joined}）")
     } else {
@@ -483,30 +604,47 @@ async fn transfer(
     // 每次连接前现取链接：夸克的下载链接有时效，断开以后旧链接可能已经不认了。
     let (link, auth) = match resolve(db, url).await {
         Ok(Some(found)) => found,
-        Ok(None) => return Err(Interrupted::Fatal(AppError::Config("找不到能访问这个地址的网盘来源（是不是删掉了？）".into()))),
-        Err(AppError::Config(message)) => return Err(Interrupted::Fatal(AppError::Config(message))),
+        Ok(None) => {
+            return Err(Interrupted::Fatal(AppError::Config(
+                "找不到能访问这个地址的网盘来源（是不是删掉了？）".into(),
+            )))
+        }
+        Err(AppError::Config(message)) => {
+            return Err(Interrupted::Fatal(AppError::Config(message)))
+        }
         Err(error) => return Err(Interrupted::Retry(error.to_string())),
     };
     let client = http_client().map_err(Interrupted::Fatal)?;
-    let source = RemoteSource { url: link, auth, client };
+    let source = RemoteSource {
+        url: link,
+        auth,
+        client,
+    };
     let mut request = source.authorize(source.client.get(&source.url));
     if *downloaded > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={downloaded}-"));
     }
-    let mut response = request.send().await.map_err(|error| Interrupted::Retry(format!("连不上网盘：{}", describe(&error))))?;
+    let mut response = request
+        .send()
+        .await
+        .map_err(|error| Interrupted::Retry(format!("连不上网盘：{}", describe(&error))))?;
     let status = response.status();
     if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && *downloaded > 0 {
         // 已经下全了（上次断在最后一刻）。
         return Ok(Transfer::Finished);
     }
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Err(Interrupted::Fatal(AppError::Config("网盘拒绝了：账号、密码或 Cookie 不对，或者没有这个文件的权限".into())));
+        return Err(Interrupted::Fatal(AppError::Config(
+            "网盘拒绝了：账号、密码或 Cookie 不对，或者没有这个文件的权限".into(),
+        )));
     }
     if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err(Interrupted::Retry(format!("网盘那边出错了：HTTP {status}")));
     }
     if !status.is_success() {
-        return Err(Interrupted::Fatal(AppError::Other(format!("从网盘下载失败：HTTP {status}"))));
+        return Err(Interrupted::Fatal(AppError::Other(format!(
+            "从网盘下载失败：HTTP {status}"
+        ))));
     }
     let resumed = status == reqwest::StatusCode::PARTIAL_CONTENT && *downloaded > 0;
     if !resumed {
@@ -519,7 +657,9 @@ async fn transfer(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.rsplit('/').next())
         .and_then(|value| value.parse::<u64>().ok());
-    if let Some(size) = from_range.or_else(|| response.content_length().map(|length| length + *downloaded)) {
+    if let Some(size) =
+        from_range.or_else(|| response.content_length().map(|length| length + *downloaded))
+    {
         *total = Some(size);
     }
     use std::io::Write as _;
@@ -532,16 +672,23 @@ async fn transfer(
         .map_err(|error| Interrupted::Fatal(error.into()))?;
     loop {
         let chunk = match tokio::time::timeout(STALL_TIMEOUT, response.chunk()).await {
-            Err(_) => return Err(Interrupted::Retry(format!("{} 秒没收到数据", STALL_TIMEOUT.as_secs()))),
+            Err(_) => {
+                return Err(Interrupted::Retry(format!(
+                    "{} 秒没收到数据",
+                    STALL_TIMEOUT.as_secs()
+                )))
+            }
             Ok(Err(error)) => return Err(Interrupted::Retry(describe(&error))),
             Ok(Ok(None)) => break,
             Ok(Ok(Some(chunk))) => chunk,
         };
-        file.write_all(&chunk).map_err(|error| Interrupted::Fatal(error.into()))?;
+        file.write_all(&chunk)
+            .map_err(|error| Interrupted::Fatal(error.into()))?;
         *downloaded += chunk.len() as u64;
         progress(*downloaded, *total);
     }
-    file.flush().map_err(|error| Interrupted::Fatal(error.into()))?;
+    file.flush()
+        .map_err(|error| Interrupted::Fatal(error.into()))?;
     match *total {
         Some(total) if *downloaded < total => Err(Interrupted::Retry("连接提前结束了".into())),
         _ => Ok(Transfer::Finished),
@@ -563,7 +710,9 @@ pub async fn download(
     let name = file_name_of(url);
     let partial = staging.join(format!("{name}.part"));
     // 已经下了的部分（上次断在这里、或者重试同一个任务）接着用。
-    let mut downloaded = std::fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
+    let mut downloaded = std::fs::metadata(&partial)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
     let mut total: Option<u64> = None;
     let started = Instant::now();
     let started_at = downloaded;
@@ -574,25 +723,45 @@ pub async fn download(
             break;
         }
         let before = downloaded;
-        let attempt = transfer(db, url, &partial, &mut downloaded, &mut total, &mut |downloaded, total| {
-            if last_report.elapsed() >= Duration::from_millis(400) {
-                last_report = Instant::now();
-                let seconds = started.elapsed().as_secs_f64().max(0.001);
-                let speed = (downloaded - started_at.min(downloaded)) as f64 / seconds;
-                let eta = total.filter(|_| speed > 0.0).map(|total| ((total.saturating_sub(downloaded)) as f64 / speed) as u64);
-                on_event(DownloadEvent::Progress { downloaded, total, speed: Some(speed), eta });
-            }
-        })
+        let attempt = transfer(
+            db,
+            url,
+            &partial,
+            &mut downloaded,
+            &mut total,
+            &mut |downloaded, total| {
+                if last_report.elapsed() >= Duration::from_millis(400) {
+                    last_report = Instant::now();
+                    let seconds = started.elapsed().as_secs_f64().max(0.001);
+                    let speed = (downloaded - started_at.min(downloaded)) as f64 / seconds;
+                    let eta = total
+                        .filter(|_| speed > 0.0)
+                        .map(|total| ((total.saturating_sub(downloaded)) as f64 / speed) as u64);
+                    on_event(DownloadEvent::Progress {
+                        downloaded,
+                        total,
+                        speed: Some(speed),
+                        eta,
+                    });
+                }
+            },
+        )
         .await;
         match attempt {
             Ok(Transfer::Finished) => break,
             Err(Interrupted::Fatal(error)) => return Err(error),
             Err(Interrupted::Retry(reason)) => {
                 // 有进展就接着下；连着好几次一个字节都没拿到才放弃。
-                fruitless = if downloaded > before { 0 } else { fruitless + 1 };
+                fruitless = if downloaded > before {
+                    0
+                } else {
+                    fruitless + 1
+                };
                 if fruitless >= MAX_FRUITLESS_ATTEMPTS {
                     let progress = match total {
-                        Some(total) => format!("已下 {} / {}", human_size(downloaded), human_size(total)),
+                        Some(total) => {
+                            format!("已下 {} / {}", human_size(downloaded), human_size(total))
+                        }
                         None => format!("已下 {}", human_size(downloaded)),
                     };
                     return Err(AppError::Other(format!(
@@ -604,7 +773,12 @@ pub async fn download(
             }
         }
     }
-    on_event(DownloadEvent::Progress { downloaded, total: Some(downloaded), speed: None, eta: Some(0) });
+    on_event(DownloadEvent::Progress {
+        downloaded,
+        total: Some(downloaded),
+        speed: None,
+        eta: Some(0),
+    });
     if !begin_import() {
         let _ = std::fs::remove_dir_all(staging);
         return Err(AppError::Other("已取消".into()));
@@ -620,19 +794,27 @@ pub async fn download(
 }
 
 /// 「在线看」导入：只建视频条目，不下文件。同一门课里已经有这个地址的跳过。返回新建了几条。
-pub async fn import_streaming(db: &Db, video_root: &Path, course_id: &str, items: &[StreamItem]) -> AppResult<Vec<String>> {
+pub async fn import_streaming(
+    db: &Db,
+    video_root: &Path,
+    course_id: &str,
+    items: &[StreamItem],
+) -> AppResult<Vec<String>> {
     let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
-    let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM courses WHERE id=? AND deleted_at IS NULL)")
-        .bind(course_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM courses WHERE id=? AND deleted_at IS NULL)",
+    )
+    .bind(course_id)
+    .fetch_one(&mut *tx)
+    .await?;
     if !active {
         return Err(AppError::NotFound(format!("course {course_id}")));
     }
-    let mut order: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(order_index),0) FROM videos WHERE course_id=?")
-        .bind(course_id)
-        .fetch_one(&mut *tx)
-        .await?;
+    let mut order: i64 =
+        sqlx::query_scalar("SELECT COALESCE(MAX(order_index),0) FROM videos WHERE course_id=?")
+            .bind(course_id)
+            .fetch_one(&mut *tx)
+            .await?;
     let now = chrono::Utc::now().timestamp_millis();
     let mut created = Vec::new();
     for item in items {
@@ -650,7 +832,11 @@ pub async fn import_streaming(db: &Db, video_root: &Path, course_id: &str, items
         let id = uuid::Uuid::new_v4().to_string();
         let data_dir = video_root.join(&id);
         std::fs::create_dir_all(&data_dir)?;
-        let title = if item.title.trim().is_empty() { file_name_of(&item.url) } else { item.title.trim().to_string() };
+        let title = if item.title.trim().is_empty() {
+            file_name_of(&item.url)
+        } else {
+            item.title.trim().to_string()
+        };
         sqlx::query(
             "INSERT INTO videos(id,course_id,title,source_type,source_uri,file_path,order_index,data_dir,created_at)
              VALUES (?,?,?,?,?,'',?,?,?)",
@@ -674,17 +860,26 @@ pub async fn import_streaming(db: &Db, video_root: &Path, course_id: &str, items
 /// 在线看的视频：返回给本机媒体服务转发用的来源。不是网盘视频、本机已经有文件、
 /// 或者没有能访问它的来源时返回 None。
 pub async fn stream_source(db: &Db, video_id: &str) -> AppResult<Option<RemoteSource>> {
-    let row: Option<(String, Option<String>, String)> =
-        sqlx::query_as("SELECT source_type, source_uri, file_path FROM videos WHERE id=? AND deleted_at IS NULL")
-            .bind(video_id)
-            .fetch_optional(&db.pool)
-            .await?;
-    let Some((source_type, Some(url), file_path)) = row else { return Ok(None) };
+    let row: Option<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT source_type, source_uri, file_path FROM videos WHERE id=? AND deleted_at IS NULL",
+    )
+    .bind(video_id)
+    .fetch_optional(&db.pool)
+    .await?;
+    let Some((source_type, Some(url), file_path)) = row else {
+        return Ok(None);
+    };
     if source_type != SOURCE_TYPE || !file_path.is_empty() {
         return Ok(None);
     }
-    let Some((link, auth)) = resolve(db, &url).await? else { return Ok(None) };
-    Ok(Some(RemoteSource { url: link, auth, client: http_client()? }))
+    let Some((link, auth)) = resolve(db, &url).await? else {
+        return Ok(None);
+    };
+    Ok(Some(RemoteSource {
+        url: link,
+        auth,
+        client: http_client()?,
+    }))
 }
 
 /// 在线看的视频下载到本机：下完挂上文件，之后就和本地视频一样（能识别字幕、截封面）。
@@ -709,7 +904,12 @@ pub async fn download_streamed(
         .bind(video_id)
         .execute(&db.pool)
         .await?;
-    Ok(sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id=?").bind(video_id).fetch_one(&db.pool).await?)
+    Ok(
+        sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_one(&db.pool)
+            .await?,
+    )
 }
 
 #[cfg(test)]
@@ -719,27 +919,62 @@ mod tests {
 
     #[test]
     fn lessons_sort_the_way_people_number_them() {
-        let mut names = vec!["第10讲.mp4", "第2讲.mp4", "附录.pdf", "第1讲.mp4", "第09讲.mp4"];
+        let mut names = vec![
+            "第10讲.mp4",
+            "第2讲.mp4",
+            "附录.pdf",
+            "第1讲.mp4",
+            "第09讲.mp4",
+        ];
         names.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(names, ["第1讲.mp4", "第2讲.mp4", "第09讲.mp4", "第10讲.mp4", "附录.pdf"]);
+        assert_eq!(
+            names,
+            [
+                "第1讲.mp4",
+                "第2讲.mp4",
+                "第09讲.mp4",
+                "第10讲.mp4",
+                "附录.pdf"
+            ]
+        );
         assert!(is_video_name("01 概括.MP4"));
         assert!(!is_video_name("讲义.pdf"));
     }
 
     /// 网盘上放好一门课：申论 2027/第1讲.mp4、第10讲.mp4、第2讲.mp4、讲义.pdf、子文件夹。
-    async fn drive_with_a_course() -> (String, std::sync::Arc<std::sync::Mutex<test_server::Store>>) {
+    async fn drive_with_a_course() -> (String, std::sync::Arc<std::sync::Mutex<test_server::Store>>)
+    {
         let (url, store) = test_server::start().await;
         let dav = WebDav::new(&url, "", "u", "p").unwrap();
-        dav.ensure_dir(&encode_path("申论 2027/附加/")).await.unwrap();
-        for (name, bytes) in [("第1讲.mp4", b"one".to_vec()), ("第10讲.mp4", b"ten".to_vec()), ("第2讲.mp4", b"two".to_vec()), ("讲义.pdf", b"pdf".to_vec())] {
-            dav.put(&encode_path(&format!("申论 2027/{name}")), bytes).await.unwrap();
+        dav.ensure_dir(&encode_path("申论 2027/附加/"))
+            .await
+            .unwrap();
+        for (name, bytes) in [
+            ("第1讲.mp4", b"one".to_vec()),
+            ("第10讲.mp4", b"ten".to_vec()),
+            ("第2讲.mp4", b"two".to_vec()),
+            ("讲义.pdf", b"pdf".to_vec()),
+        ] {
+            dav.put(&encode_path(&format!("申论 2027/{name}")), bytes)
+                .await
+                .unwrap();
         }
         (url, store)
     }
 
     async fn db_with_source(dir: &Path, url: &str) -> (Db, Source) {
         let db = Db::connect_and_migrate(&dir.join("t.db")).await.unwrap();
-        let source = save_source(&db, None, KIND_WEBDAV.into(), "家里的 NAS".into(), url.into(), "u".into(), Some("p".into())).await.unwrap();
+        let source = save_source(
+            &db,
+            None,
+            KIND_WEBDAV.into(),
+            "家里的 NAS".into(),
+            url.into(),
+            "u".into(),
+            Some("p".into()),
+        )
+        .await
+        .unwrap();
         (db, source)
     }
 
@@ -750,13 +985,25 @@ mod tests {
         let (db, source) = db_with_source(dir.path(), &url).await;
         assert!(source.has_password);
         let root = browse(&db, &source.id, "").await.unwrap();
-        assert_eq!(root.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["申论 2027"]);
+        assert_eq!(
+            root.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["申论 2027"]
+        );
         let course = browse(&db, &source.id, &root[0].path).await.unwrap();
         let names: Vec<&str> = course.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["附加", "第1讲.mp4", "第2讲.mp4", "第10讲.mp4", "讲义.pdf"]);
+        assert_eq!(
+            names,
+            ["附加", "第1讲.mp4", "第2讲.mp4", "第10讲.mp4", "讲义.pdf"]
+        );
         assert!(course[1].is_video && !course[4].is_video);
         assert_eq!(course[1].path, "申论 2027/第1讲.mp4");
-        assert!(course[1].url.ends_with("/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC1%E8%AE%B2.mp4"), "{}", course[1].url);
+        assert!(
+            course[1]
+                .url
+                .ends_with("/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC1%E8%AE%B2.mp4"),
+            "{}",
+            course[1].url
+        );
         assert!(test_saved(&db, &source.id, None, None, None).await.is_ok());
     }
 
@@ -765,26 +1012,64 @@ mod tests {
         let (url, _store) = drive_with_a_course().await;
         let dir = tempfile::tempdir().unwrap();
         let (db, source) = db_with_source(dir.path(), &url).await;
-        let lesson = browse(&db, &source.id, "申论 2027/").await.unwrap().into_iter().find(|e| e.name == "第2讲.mp4").unwrap();
+        let lesson = browse(&db, &source.id, "申论 2027/")
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == "第2讲.mp4")
+            .unwrap();
         let out = dir.path().join("课程");
         let events = std::sync::Mutex::new(0);
-        let path = download(&db, &lesson.url, &out, &dir.path().join("staging"), &|_| *events.lock().unwrap() += 1, &|| true)
-            .await
-            .unwrap();
+        let path = download(
+            &db,
+            &lesson.url,
+            &out,
+            &dir.path().join("staging"),
+            &|_| *events.lock().unwrap() += 1,
+            &|| true,
+        )
+        .await
+        .unwrap();
         assert_eq!(path, out.join("第2讲.mp4"));
         assert_eq!(std::fs::read(&path).unwrap(), b"two");
         assert!(*events.lock().unwrap() > 0, "报了进度");
         assert!(!dir.path().join("staging").exists(), "半成品目录清掉了");
         // 再下一次同名的：不覆盖，另起名字。
-        let again = download(&db, &lesson.url, &out, &dir.path().join("staging"), &|_| {}, &|| true).await.unwrap();
+        let again = download(
+            &db,
+            &lesson.url,
+            &out,
+            &dir.path().join("staging"),
+            &|_| {},
+            &|| true,
+        )
+        .await
+        .unwrap();
         assert_eq!(again, out.join("第2讲 (2).mp4"));
         // 取消了：不挪进课程目录。
-        let cancelled = download(&db, &lesson.url, &out, &dir.path().join("staging"), &|_| {}, &|| false).await;
+        let cancelled = download(
+            &db,
+            &lesson.url,
+            &out,
+            &dir.path().join("staging"),
+            &|_| {},
+            &|| false,
+        )
+        .await;
         assert!(cancelled.is_err());
         assert!(!out.join("第2讲 (3).mp4").exists());
         // 删掉来源后找不到凭据：说清楚。
         delete_source(&db, &source.id).await.unwrap();
-        let error = download(&db, &lesson.url, &out, &dir.path().join("staging"), &|_| {}, &|| true).await.unwrap_err();
+        let error = download(
+            &db,
+            &lesson.url,
+            &out,
+            &dir.path().join("staging"),
+            &|_| {},
+            &|| true,
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("网盘来源"), "{error}");
     }
 
@@ -793,33 +1078,64 @@ mod tests {
         let (url, _store) = drive_with_a_course().await;
         let dir = tempfile::tempdir().unwrap();
         let (db, source) = db_with_source(dir.path(), &url).await;
-        let course = crate::commands::courses::create_course(&db, "申论".into(), dir.path().to_string_lossy().into()).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "申论".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let lessons: Vec<StreamItem> = browse(&db, &source.id, "申论 2027/")
             .await
             .unwrap()
             .into_iter()
             .filter(|e| e.is_video)
-            .map(|e| StreamItem { title: e.name.trim_end_matches(".mp4").to_string(), url: e.url })
+            .map(|e| StreamItem {
+                title: e.name.trim_end_matches(".mp4").to_string(),
+                url: e.url,
+            })
             .collect();
         let video_root = dir.path().join("remote-videos");
-        let created = import_streaming(&db, &video_root, &course.id, &lessons).await.unwrap();
+        let created = import_streaming(&db, &video_root, &course.id, &lessons)
+            .await
+            .unwrap();
         assert_eq!(created.len(), 3);
-        assert!(import_streaming(&db, &video_root, &course.id, &lessons).await.unwrap().is_empty(), "重复导入跳过");
-        let videos = crate::commands::videos::list_videos(&db, &course.id).await.unwrap();
+        assert!(
+            import_streaming(&db, &video_root, &course.id, &lessons)
+                .await
+                .unwrap()
+                .is_empty(),
+            "重复导入跳过"
+        );
+        let videos = crate::commands::videos::list_videos(&db, &course.id)
+            .await
+            .unwrap();
         let titles: Vec<&str> = videos.iter().map(|v| v.title.as_str()).collect();
         assert_eq!(titles, ["第1讲", "第2讲", "第10讲"]);
-        assert!(videos.iter().all(|v| v.file_path.is_empty() && v.source_type == SOURCE_TYPE));
+        assert!(videos
+            .iter()
+            .all(|v| v.file_path.is_empty() && v.source_type == SOURCE_TYPE));
 
         // 播放：本机媒体服务带着账号密码去网盘拉。
         let second = &videos[1];
-        let remote = stream_source(&db, &second.id).await.unwrap().expect("能在线看");
+        let remote = stream_source(&db, &second.id)
+            .await
+            .unwrap()
+            .expect("能在线看");
         let media = crate::media_server::start().await.unwrap();
         media.register_remote(&second.id, remote);
-        let body = reqwest::get(media.url(&second.id)).await.unwrap().bytes().await.unwrap();
+        let body = reqwest::get(media.url(&second.id))
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
         assert_eq!(body.as_ref(), b"two");
 
         // 下载到本机：挂上文件，之后不再走在线播放。
-        let local = download_streamed(&db, &second.id, &dir.path().join("课程"), &|_| {}).await.unwrap();
+        let local = download_streamed(&db, &second.id, &dir.path().join("课程"), &|_| {})
+            .await
+            .unwrap();
         assert_eq!(std::fs::read(&local.file_path).unwrap(), b"two");
         assert!(stream_source(&db, &second.id).await.unwrap().is_none());
     }
@@ -834,43 +1150,107 @@ mod tests {
     async fn real_webdav_server_browse_stream_and_download() {
         let env = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("要设置 {key}"));
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
-        let source = save_source(&db, None, KIND_WEBDAV.into(), "real".into(), env("COURSEPILOT_DAV_URL"), env("COURSEPILOT_DAV_USER"), Some(env("COURSEPILOT_DAV_PASSWORD")))
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
             .await
             .unwrap();
-        println!("连接测试：根目录 {} 项", test_saved(&db, &source.id, None, None, None).await.unwrap());
+        let source = save_source(
+            &db,
+            None,
+            KIND_WEBDAV.into(),
+            "real".into(),
+            env("COURSEPILOT_DAV_URL"),
+            env("COURSEPILOT_DAV_USER"),
+            Some(env("COURSEPILOT_DAV_PASSWORD")),
+        )
+        .await
+        .unwrap();
+        println!(
+            "连接测试：根目录 {} 项",
+            test_saved(&db, &source.id, None, None, None).await.unwrap()
+        );
 
         // 广度优先找第一个含视频的文件夹。
         let mut queue = vec![String::new()];
         let (folder, entries) = loop {
             let path = queue.remove(0);
             let entries = browse(&db, &source.id, &path).await.unwrap();
-            println!("{:?}: {:?}", if path.is_empty() { "/" } else { &path }, entries.iter().map(|e| &e.name).collect::<Vec<_>>());
+            println!(
+                "{:?}: {:?}",
+                if path.is_empty() { "/" } else { &path },
+                entries.iter().map(|e| &e.name).collect::<Vec<_>>()
+            );
             if entries.iter().any(|e| e.is_video) {
                 break (path, entries);
             }
             queue.extend(entries.iter().filter(|e| e.is_dir).map(|e| e.path.clone()));
             assert!(!queue.is_empty(), "服务器上没找到视频");
         };
-        let lessons: Vec<StreamItem> =
-            entries.iter().filter(|e| e.is_video).map(|e| StreamItem { url: e.url.clone(), title: e.name.clone() }).collect();
-        println!("{folder} 里的视频（按顺序）：{:?}", lessons.iter().map(|l| &l.title).collect::<Vec<_>>());
+        let lessons: Vec<StreamItem> = entries
+            .iter()
+            .filter(|e| e.is_video)
+            .map(|e| StreamItem {
+                url: e.url.clone(),
+                title: e.name.clone(),
+            })
+            .collect();
+        println!(
+            "{folder} 里的视频（按顺序）：{:?}",
+            lessons.iter().map(|l| &l.title).collect::<Vec<_>>()
+        );
 
-        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into()).await.unwrap();
-        import_streaming(&db, &dir.path().join("remote"), &course.id, &lessons[..1]).await.unwrap();
-        let video = crate::commands::videos::list_videos(&db, &course.id).await.unwrap().remove(0);
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        import_streaming(&db, &dir.path().join("remote"), &course.id, &lessons[..1])
+            .await
+            .unwrap();
+        let video = crate::commands::videos::list_videos(&db, &course.id)
+            .await
+            .unwrap()
+            .remove(0);
         let media = crate::media_server::start().await.unwrap();
-        media.register_remote(&video.id, stream_source(&db, &video.id).await.unwrap().expect("能在线看"));
-        let response = reqwest::Client::new().get(media.url(&video.id)).header("Range", "bytes=100-199").send().await.unwrap();
-        println!("在线播放 Range：{} {:?}", response.status(), response.headers().get("content-range"));
+        media.register_remote(
+            &video.id,
+            stream_source(&db, &video.id)
+                .await
+                .unwrap()
+                .expect("能在线看"),
+        );
+        let response = reqwest::Client::new()
+            .get(media.url(&video.id))
+            .header("Range", "bytes=100-199")
+            .send()
+            .await
+            .unwrap();
+        println!(
+            "在线播放 Range：{} {:?}",
+            response.status(),
+            response.headers().get("content-range")
+        );
         assert_eq!(response.status(), 206, "服务器要支持 Range，拖进度条才快");
         assert_eq!(response.bytes().await.unwrap().len(), 100);
 
         let started = std::time::Instant::now();
-        let local = download_streamed(&db, &video.id, &dir.path().join("course"), &|_| {}).await.unwrap();
+        let local = download_streamed(&db, &video.id, &dir.path().join("course"), &|_| {})
+            .await
+            .unwrap();
         let size = std::fs::metadata(&local.file_path).unwrap().len();
-        println!("下载到本机：{} （{size} 字节，{:?}）", local.file_path, started.elapsed());
-        assert_eq!(Some(size), entries.iter().find(|e| e.url == lessons[0].url).and_then(|e| e.size));
+        println!(
+            "下载到本机：{} （{size} 字节，{:?}）",
+            local.file_path,
+            started.elapsed()
+        );
+        assert_eq!(
+            Some(size),
+            entries
+                .iter()
+                .find(|e| e.url == lessons[0].url)
+                .and_then(|e| e.size)
+        );
     }
 
     // 只有这一个测试改夸克接口地址（进程里全局的）。
@@ -885,72 +1265,170 @@ mod tests {
         .await;
         crate::quark::set_api_base_for_tests(&api);
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
 
         // Cookie 不对：说清楚要重新复制。
         let error = test(KIND_QUARK, "", "", "__puus=wrong").await.unwrap_err();
         assert!(error.to_string().contains("Cookie"), "{error}");
 
-        let source = save_source(&db, None, KIND_QUARK.into(), "我的夸克".into(), String::new(), String::new(), Some("b-user=1; __puus=p1".into()))
-            .await
-            .unwrap();
-        assert_eq!((source.kind.as_str(), source.has_password), (KIND_QUARK, true));
+        let source = save_source(
+            &db,
+            None,
+            KIND_QUARK.into(),
+            "我的夸克".into(),
+            String::new(),
+            String::new(),
+            Some("b-user=1; __puus=p1".into()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (source.kind.as_str(), source.has_password),
+            (KIND_QUARK, true)
+        );
         let root = browse(&db, &source.id, "").await.unwrap();
-        assert_eq!(root.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["申论 2027"]);
+        assert_eq!(
+            root.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["申论 2027"]
+        );
         // 接口续了 Cookie：存回去了，下一次请求用新的（旧的已经不认了）。
-        let saved = crate::llm::keychain::get_secret(&db, &secret_name(&source.id)).await.unwrap().unwrap();
+        let saved = crate::llm::keychain::get_secret(&db, &secret_name(&source.id))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(saved, "b-user=1; __puus=p2");
         let lessons = browse(&db, &source.id, &root[0].path).await.unwrap();
         let names: Vec<&str> = lessons.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["第1讲 A&B.mp4", "第10讲.mp4", "讲义.pdf"], "名字里的 &amp; 还原了，按讲数排");
+        assert_eq!(
+            names,
+            ["第1讲 A&B.mp4", "第10讲.mp4", "讲义.pdf"],
+            "名字里的 &amp; 还原了，按讲数排"
+        );
         assert!(lessons[0].is_video && !lessons[2].is_video);
 
         // 在线看：现取下载链接，带着 Cookie / Referer 拉，Range 照转。
-        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into()).await.unwrap();
-        let items: Vec<StreamItem> =
-            lessons.iter().filter(|e| e.is_video).map(|e| StreamItem { url: e.url.clone(), title: e.name.clone() }).collect();
-        import_streaming(&db, &dir.path().join("remote"), &course.id, &items).await.unwrap();
-        let video = crate::commands::videos::list_videos(&db, &course.id).await.unwrap().remove(0);
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let items: Vec<StreamItem> = lessons
+            .iter()
+            .filter(|e| e.is_video)
+            .map(|e| StreamItem {
+                url: e.url.clone(),
+                title: e.name.clone(),
+            })
+            .collect();
+        import_streaming(&db, &dir.path().join("remote"), &course.id, &items)
+            .await
+            .unwrap();
+        let video = crate::commands::videos::list_videos(&db, &course.id)
+            .await
+            .unwrap()
+            .remove(0);
         let media = crate::media_server::start().await.unwrap();
-        media.register_remote(&video.id, stream_source(&db, &video.id).await.unwrap().expect("能在线看"));
-        let response = reqwest::Client::new().get(media.url(&video.id)).header("Range", "bytes=7-9").send().await.unwrap();
+        media.register_remote(
+            &video.id,
+            stream_source(&db, &video.id)
+                .await
+                .unwrap()
+                .expect("能在线看"),
+        );
+        let response = reqwest::Client::new()
+            .get(media.url(&video.id))
+            .header("Range", "bytes=7-9")
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), 206);
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"one");
 
         // 下载到本机：文件名用夸克上的名字。下载连接半路断了两次：自动重取链接、从断点接着下。
         drive.lock().unwrap().drop_next = 2;
         drive.lock().unwrap().ranges.clear();
-        let local = download_streamed(&db, &video.id, &dir.path().join("course"), &|_| {}).await.unwrap();
-        assert!(local.file_path.ends_with("第1讲 A&B.mp4"), "{}", local.file_path);
+        let local = download_streamed(&db, &video.id, &dir.path().join("course"), &|_| {})
+            .await
+            .unwrap();
+        assert!(
+            local.file_path.ends_with("第1讲 A&B.mp4"),
+            "{}",
+            local.file_path
+        );
         assert_eq!(std::fs::read(&local.file_path).unwrap(), b"lesson-one");
         let ranges = drive.lock().unwrap().ranges.clone();
-        assert_eq!(ranges, [None, Some("bytes=5-".to_string()), Some("bytes=7-".to_string())], "接着断点下，不从头来");
+        assert_eq!(
+            ranges,
+            [
+                None,
+                Some("bytes=5-".to_string()),
+                Some("bytes=7-".to_string())
+            ],
+            "接着断点下，不从头来"
+        );
 
         // 一直断、一点进展都没有：放弃，并且说清楚下到哪了、为什么断。
-        let other = crate::commands::videos::list_videos(&db, &course.id).await.unwrap().remove(1);
+        let other = crate::commands::videos::list_videos(&db, &course.id)
+            .await
+            .unwrap()
+            .remove(1);
         drive.lock().unwrap().drop_next = usize::MAX;
         let partial = dir.path().join("stuck");
         std::fs::create_dir_all(&partial).unwrap();
         std::fs::write(partial.join("第10讲.mp4.part"), b"lesson-te").unwrap();
-        let error = download(&db, &other.source_uri.clone().unwrap(), &dir.path().join("course"), &partial, &|_| {}, &|| true)
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = download(
+            &db,
+            &other.source_uri.clone().unwrap(),
+            &dir.path().join("course"),
+            &partial,
+            &|_| {},
+            &|| true,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         println!("{error}");
-        assert!(error.contains("已下 1 KB / 1 KB") && error.contains("连接被网盘那边断开了"), "{error}");
+        assert!(
+            error.contains("已下 1 KB / 1 KB") && error.contains("连接被网盘那边断开了"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
     async fn the_sync_account_is_a_source_that_cannot_be_edited_here() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         assert!(list_sources(&db).await.unwrap().is_empty());
-        set_setting(&db, crate::sync::remote::SETTING_URL, "https://dav.jianguoyun.com/dav").await.unwrap();
-        set_setting(&db, crate::sync::remote::SETTING_USER, "me").await.unwrap();
+        set_setting(
+            &db,
+            crate::sync::remote::SETTING_URL,
+            "https://dav.jianguoyun.com/dav",
+        )
+        .await
+        .unwrap();
+        set_setting(&db, crate::sync::remote::SETTING_USER, "me")
+            .await
+            .unwrap();
         let sources = list_sources(&db).await.unwrap();
         assert_eq!(sources.len(), 1);
         assert!(sources[0].is_sync);
         assert_eq!(sources[0].url, "https://dav.jianguoyun.com/dav/");
-        assert!(save_source(&db, Some(SYNC_SOURCE_ID.into()), KIND_WEBDAV.into(), "x".into(), "https://a/".into(), "u".into(), None).await.is_err());
+        assert!(save_source(
+            &db,
+            Some(SYNC_SOURCE_ID.into()),
+            KIND_WEBDAV.into(),
+            "x".into(),
+            "https://a/".into(),
+            "u".into(),
+            None
+        )
+        .await
+        .is_err());
     }
 }

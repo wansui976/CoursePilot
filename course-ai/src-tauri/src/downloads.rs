@@ -623,7 +623,10 @@ pub async fn cmd_enqueue_downloads(
     // 整批都是网盘（WebDAV）上的文件：不用 yt-dlp，手机上也能下。
     let mut all_webdav = true;
     for item in &items {
-        if crate::webdav_import::source_for_url(&state.db, &item.url).await?.is_none() {
+        if crate::webdav_import::source_for_url(&state.db, &item.url)
+            .await?
+            .is_none()
+        {
             all_webdav = false;
             break;
         }
@@ -648,7 +651,9 @@ pub async fn download_and_wait(
     progress_event: Option<String>,
 ) -> AppResult<Video> {
     let state = app.state::<AppState>();
-    let webdav_only = crate::webdav_import::source_for_url(&state.db, &request.url).await?.is_some();
+    let webdav_only = crate::webdav_import::source_for_url(&state.db, &request.url)
+        .await?
+        .is_some();
     let root_path = download_root(&state, &course_id, webdav_only).await?;
     let queue = app.state::<DownloadQueue>();
     let (tx, rx) = tokio::sync::oneshot::channel();

@@ -21,16 +21,21 @@ fn comment(rpid: &str, parent: Option<&str>, author: &str, text: &str, likes: i6
 #[test]
 fn titles_that_repeat_the_url_match_the_frontend_rule() {
     // 与前端 titleRepeatsUrl 共用一份用例：两边规则不能各改各的。
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("../../../../src/lib/titleRepeatsUrl.cases.json"))
-            .unwrap();
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../src/lib/titleRepeatsUrl.cases.json"
+    ))
+    .unwrap();
     let cases = fixture["cases"].as_array().unwrap();
     assert!(!cases.is_empty());
     for case in cases {
         let title = case["title"].as_str().unwrap();
         let url = case["url"].as_str().unwrap();
         let expected = case["repeats"].as_bool().unwrap();
-        assert_eq!(title_repeats_url(title, url), expected, "title {title:?}, url {url:?}");
+        assert_eq!(
+            title_repeats_url(title, url),
+            expected,
+            "title {title:?}, url {url:?}"
+        );
     }
 }
 
@@ -58,7 +63,6 @@ fn format_comments_nests_replies_under_their_roots() {
     // 匿名作者回退展示。
     assert!(out.contains("匿名（赞 0）：匿名根评论"));
 }
-
 
 #[derive(Debug)]
 struct EvalSnapshot {

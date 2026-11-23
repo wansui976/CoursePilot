@@ -68,10 +68,7 @@ fn snap(start_ms: i64, end_ms: i64, sentences: &[(i64, i64)]) -> Option<(i64, i6
     let first = sentences
         .iter()
         .find(|(s, e)| *e > start_ms || *s >= start_ms)?;
-    let last = sentences
-        .iter()
-        .rev()
-        .find(|(s, _)| *s <= end_ms + 999)?;
+    let last = sentences.iter().rev().find(|(s, _)| *s <= end_ms + 999)?;
     let (start, end) = (first.0.max(0), last.1);
     (end > start).then_some((start, end))
 }
@@ -86,7 +83,11 @@ pub fn parse_highlights(
     let mut segments: Vec<HighlightSegment> = raw
         .into_iter()
         .filter_map(|item| {
-            let (start, end) = snap(parse_clock(&item.start)?, parse_clock(&item.end)?, sentences)?;
+            let (start, end) = snap(
+                parse_clock(&item.start)?,
+                parse_clock(&item.end)?,
+                sentences,
+            )?;
             let end = duration_ms.map_or(end, |duration| end.min(duration));
             if end - start < MIN_SEGMENT_MS {
                 return None;
@@ -95,7 +96,11 @@ pub fn parse_highlights(
             Some(HighlightSegment {
                 start_ms: start,
                 end_ms: end,
-                kind: if KINDS.contains(&kind.as_str()) { kind } else { "filler".into() },
+                kind: if KINDS.contains(&kind.as_str()) {
+                    kind
+                } else {
+                    "filler".into()
+                },
                 level: item.level.unwrap_or(2).clamp(1, 3),
                 reason: item.reason.trim().chars().take(MAX_REASON_CHARS).collect(),
             })
@@ -190,12 +195,11 @@ pub async fn generate_highlights(
         .into_iter()
         .map(|segment| (segment.start_ms, segment.end_ms))
         .collect();
-    let duration: Option<i64> =
-        sqlx::query_scalar("SELECT duration_ms FROM videos WHERE id=?")
-            .bind(video_id)
-            .fetch_optional(&db.pool)
-            .await?
-            .flatten();
+    let duration: Option<i64> = sqlx::query_scalar("SELECT duration_ms FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await?
+        .flatten();
     let segments = parse_highlights(&content, &sentences, duration)?;
     sqlx::query(
         "INSERT INTO video_highlights(video_id,segments_json,generated_at) VALUES (?,?,?)

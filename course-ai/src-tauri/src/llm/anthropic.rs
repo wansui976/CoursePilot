@@ -24,7 +24,11 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// `{base}/v1/messages`；用户把完整地址粘进来时不再重复拼。
 pub fn messages_url(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
-    let base = if trimmed.is_empty() { "https://api.anthropic.com" } else { trimmed };
+    let base = if trimmed.is_empty() {
+        "https://api.anthropic.com"
+    } else {
+        trimmed
+    };
     if base.ends_with("/messages") {
         base.to_string()
     } else if base.ends_with("/v1") {
@@ -134,7 +138,10 @@ fn mark_last_block(messages: &mut [Value]) {
     }
     if let Some(block) = content.as_array_mut().and_then(|blocks| blocks.last_mut()) {
         if block.get("type").and_then(Value::as_str) == Some("text")
-            && block.get("text").and_then(Value::as_str).is_some_and(str::is_empty)
+            && block
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(str::is_empty)
         {
             return;
         }
@@ -153,7 +160,11 @@ fn mark_last_block(messages: &mut [Value]) {
 ///    在那上面打断点只会按 1.25 倍白付一次写入费。
 pub fn build_body(req: &ChatRequest, max_tokens: u32) -> Value {
     let mut system: Vec<Value> = Vec::new();
-    if let Some(context) = req.cacheable_context.as_deref().filter(|text| !text.is_empty()) {
+    if let Some(context) = req
+        .cacheable_context
+        .as_deref()
+        .filter(|text| !text.is_empty())
+    {
         system.push(json!({ "type": "text", "text": context, "cache_control": ephemeral() }));
     }
     if let Some(text) = req.system.as_deref().filter(|text| !text.is_empty()) {
@@ -225,7 +236,9 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
         }
     }
     if content.trim().is_empty() && tool_calls.is_empty() {
-        return Err(AppError::Other(format!("Anthropic 没有返回正文或工具调用：{value}")));
+        return Err(AppError::Other(format!(
+            "Anthropic 没有返回正文或工具调用：{value}"
+        )));
     }
     let usage = usage_of(value.get("usage"));
     let truncated = value.get("stop_reason").and_then(Value::as_str) == Some("max_tokens");
@@ -302,11 +315,7 @@ struct StreamState {
 
 impl StreamState {
     /// 喂一行（可能以 `event:` 开头，也可能是 `data:`）。返回是否应该停止读流。
-    fn feed_line(
-        &mut self,
-        line: &str,
-        on_piece: &mut (dyn FnMut(StreamPiece) + Send),
-    ) -> bool {
+    fn feed_line(&mut self, line: &str, on_piece: &mut (dyn FnMut(StreamPiece) + Send)) -> bool {
         let Some(payload) = line.trim().strip_prefix("data:") else {
             return false;
         };
@@ -330,7 +339,10 @@ impl StreamState {
                     self.tools.push(ToolCallDelta {
                         index,
                         id: block.get("id").and_then(Value::as_str).map(str::to_string),
-                        name: block.get("name").and_then(Value::as_str).map(str::to_string),
+                        name: block
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
                         arguments: String::new(),
                     });
                 }
@@ -422,7 +434,8 @@ pub async fn complete_stream(
                     canceled = true;
                     break;
                 }
-                let bytes = chunk.map_err(|error| AppError::Other(format!("Anthropic 流中断：{error}")))?;
+                let bytes =
+                    chunk.map_err(|error| AppError::Other(format!("Anthropic 流中断：{error}")))?;
                 buffer.extend_from_slice(&bytes);
                 while let Some(line) = crate::llm::take_sse_line(&mut buffer) {
                     if state.feed_line(&line, on_piece) {
@@ -492,7 +505,10 @@ mod tests {
         assert_eq!(messages[0]["role"], "user");
         assert_eq!(messages[0]["content"][0]["type"], "text");
         assert_eq!(messages[0]["content"][1]["type"], "image");
-        assert_eq!(messages[0]["content"][1]["source"]["media_type"], "image/png");
+        assert_eq!(
+            messages[0]["content"][1]["source"]["media_type"],
+            "image/png"
+        );
         assert_eq!(messages[1]["role"], "assistant");
         assert_eq!(messages[1]["content"][0]["type"], "tool_use");
         assert_eq!(messages[1]["content"][0]["input"]["video_id"], "v1");
@@ -548,17 +564,25 @@ mod tests {
         assert_eq!(body["system"][1]["cache_control"]["type"], "ephemeral");
         // 多轮：最后一条（并进 user 轮的工具结果）也打断点，下一轮以它为前缀。
         let messages = body["messages"].as_array().unwrap();
-        assert_eq!(messages[2]["content"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(
+            messages[2]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
         assert!(messages[0]["content"][1].get("cache_control").is_none());
         let breakpoints = body.to_string().matches("cache_control").count();
-        assert!(breakpoints <= 4, "Anthropic 最多 4 个断点，实际 {breakpoints}");
+        assert!(
+            breakpoints <= 4,
+            "Anthropic 最多 4 个断点，实际 {breakpoints}"
+        );
     }
 
     #[test]
     fn single_turn_tasks_do_not_pay_to_cache_their_unique_message() {
-        let mut req = ChatRequest::text("claude-sonnet-4-6", Some("纠错规则".into()), vec![
-            ChatMessage::user("这一批独一无二的字幕"),
-        ]);
+        let mut req = ChatRequest::text(
+            "claude-sonnet-4-6",
+            Some("纠错规则".into()),
+            vec![ChatMessage::user("这一批独一无二的字幕")],
+        );
         req.cacheable_context = None;
         let body = build_body(&req, 4096);
         assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
@@ -567,11 +591,15 @@ mod tests {
 
     #[test]
     fn multi_turn_plain_text_tail_is_wrapped_into_a_block_for_the_breakpoint() {
-        let req = ChatRequest::text("claude-sonnet-4-6", None, vec![
-            ChatMessage::user("问"),
-            ChatMessage::assistant("答"),
-            ChatMessage::user("追问"),
-        ]);
+        let req = ChatRequest::text(
+            "claude-sonnet-4-6",
+            None,
+            vec![
+                ChatMessage::user("问"),
+                ChatMessage::assistant("答"),
+                ChatMessage::user("追问"),
+            ],
+        );
         let body = build_body(&req, 4096);
         assert!(body.get("system").is_none());
         let last = &body["messages"][2]["content"];
@@ -581,9 +609,18 @@ mod tests {
 
     #[test]
     fn builds_urls_without_double_v1() {
-        assert_eq!(messages_url("https://api.anthropic.com"), "https://api.anthropic.com/v1/messages");
-        assert_eq!(messages_url("https://api.anthropic.com/v1"), "https://api.anthropic.com/v1/messages");
-        assert_eq!(messages_url("https://api.anthropic.com/v1/messages"), "https://api.anthropic.com/v1/messages");
+        assert_eq!(
+            messages_url("https://api.anthropic.com"),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            messages_url("https://api.anthropic.com/v1"),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            messages_url("https://api.anthropic.com/v1/messages"),
+            "https://api.anthropic.com/v1/messages"
+        );
         assert_eq!(messages_url(""), "https://api.anthropic.com/v1/messages");
     }
 

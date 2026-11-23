@@ -225,8 +225,10 @@ pub async fn reorder_courses(db: &Db, ordered_ids: Vec<String>) -> AppResult<()>
     if current_ids != requested {
         return Err(AppError::Other("课程列表已变化，请刷新后重试".into()));
     }
-    let old: HashMap<&str, Option<i64>> =
-        current.iter().map(|(id, order)| (id.as_str(), *order)).collect();
+    let old: HashMap<&str, Option<i64>> = current
+        .iter()
+        .map(|(id, order)| (id.as_str(), *order))
+        .collect();
     let now = Utc::now().timestamp_millis();
     for (index, id) in ordered_ids.iter().enumerate() {
         let index = index as i64;
@@ -546,9 +548,16 @@ mod tests {
     async fn course_color_is_validated_and_clearable() {
         let db = fresh_db().await;
         let a = create_course(&db, "A".into(), "/a".into()).await.unwrap();
-        set_course_color(&db, a.id.clone(), Some("blue".into())).await.unwrap();
-        assert_eq!(list_courses(&db).await.unwrap()[0].color.as_deref(), Some("blue"));
-        assert!(set_course_color(&db, a.id.clone(), Some("#fff".into())).await.is_err());
+        set_course_color(&db, a.id.clone(), Some("blue".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            list_courses(&db).await.unwrap()[0].color.as_deref(),
+            Some("blue")
+        );
+        assert!(set_course_color(&db, a.id.clone(), Some("#fff".into()))
+            .await
+            .is_err());
         set_course_color(&db, a.id.clone(), None).await.unwrap();
         assert_eq!(list_courses(&db).await.unwrap()[0].color, None);
         assert!(set_course_color(&db, "missing".into(), None).await.is_err());

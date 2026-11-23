@@ -85,17 +85,18 @@ pub async fn run_aliyun(
         .map_err(|error| AppError::Pipeline(format!("构造 HTTP 客户端失败: {error}")))?;
 
     // ---- 1. 音频传到百炼临时存储，拿 oss:// 地址 ----
-    let (file_url, via_oss) = match upload_to_temp_storage(&client, api_key, model, audio, mime, size).await {
-        Ok(url) => (url, true),
-        Err(error) => {
-            // 临时存储不通（网络、账号没开这个能力……）：放得下的话还走原来的 data URI，
-            // 放不下就把上传失败的原因报出来——那才是要解决的问题。
-            fallback_to_data_uri(&error, size as usize, duration_ms)?;
-            tracing::warn!("阿里云临时存储上传失败：{error}；音频不大，改为随请求直接提交");
-            let bytes = tokio::fs::read(audio).await?;
-            (audio_data_uri(mime, &bytes), false)
-        }
-    };
+    let (file_url, via_oss) =
+        match upload_to_temp_storage(&client, api_key, model, audio, mime, size).await {
+            Ok(url) => (url, true),
+            Err(error) => {
+                // 临时存储不通（网络、账号没开这个能力……）：放得下的话还走原来的 data URI，
+                // 放不下就把上传失败的原因报出来——那才是要解决的问题。
+                fallback_to_data_uri(&error, size as usize, duration_ms)?;
+                tracing::warn!("阿里云临时存储上传失败：{error}；音频不大，改为随请求直接提交");
+                let bytes = tokio::fs::read(audio).await?;
+                (audio_data_uri(mime, &bytes), false)
+            }
+        };
 
     // ---- 2. 提交任务 ----
     let mut request = client
@@ -207,8 +208,8 @@ async fn upload_to_temp_storage(
         .json()
         .await
         .map_err(|error| AppError::Pipeline(format!("dashscope 上传凭证解析: {error}")))?;
-    let policy =
-        parse_upload_policy(&payload).ok_or_else(|| dashscope_error("getPolicy", &payload, http))?;
+    let policy = parse_upload_policy(&payload)
+        .ok_or_else(|| dashscope_error("getPolicy", &payload, http))?;
     if size > policy.max_file_size_mb * 1024 * 1024 {
         return Err(AppError::Permanent(format!(
             "音频有 {:.0} MB，超过阿里云临时存储单个文件 {} MB 的上限；请把视频切成几段再导入",
@@ -217,7 +218,11 @@ async fn upload_to_temp_storage(
         )));
     }
     let ext = audio.extension().and_then(|e| e.to_str()).unwrap_or("bin");
-    let key = format!("{}/{}.{ext}", policy.upload_dir.trim_end_matches('/'), uuid::Uuid::new_v4());
+    let key = format!(
+        "{}/{}.{ext}",
+        policy.upload_dir.trim_end_matches('/'),
+        uuid::Uuid::new_v4()
+    );
     let bytes = tokio::fs::read(audio).await?;
     let file = reqwest::multipart::Part::bytes(bytes)
         .file_name(format!("audio.{ext}"))
@@ -252,13 +257,19 @@ async fn upload_to_temp_storage(
 }
 
 /// 临时存储传不上去时，还能不能退回 data URI：放得下就退，放不下就把两个原因一起报。
-fn fallback_to_data_uri(upload_error: &AppError, size: usize, duration_ms: Option<i64>) -> AppResult<()> {
+fn fallback_to_data_uri(
+    upload_error: &AppError,
+    size: usize,
+    duration_ms: Option<i64>,
+) -> AppResult<()> {
     if let AppError::Permanent(_) = upload_error {
         // 超过临时存储上限之类：data URI 只会更放不下。
         return Err(AppError::Permanent(upload_error.to_string()));
     }
     ensure_fits_data_uri(size, duration_ms).map_err(|too_big| {
-        AppError::Pipeline(format!("上传到阿里云临时存储失败（{upload_error}）；{too_big}"))
+        AppError::Pipeline(format!(
+            "上传到阿里云临时存储失败（{upload_error}）；{too_big}"
+        ))
     })
 }
 
@@ -621,7 +632,10 @@ mod tests {
             }
         });
         let policy = parse_upload_policy(&payload).unwrap();
-        assert_eq!(policy.upload_host, "https://dashscope-file-xxx.oss-cn-beijing.aliyuncs.com");
+        assert_eq!(
+            policy.upload_host,
+            "https://dashscope-file-xxx.oss-cn-beijing.aliyuncs.com"
+        );
         assert_eq!(policy.max_file_size_mb, 1024);
         assert_eq!(policy.oss_access_key_id, "LTAI");
         // Key 不对时没有 data，报 DashScope 原本的错误。
@@ -636,7 +650,11 @@ mod tests {
     async fn live_aliyun_transcribes_a_local_file() {
         let key = std::env::var("DASHSCOPE_API_KEY").expect("DASHSCOPE_API_KEY");
         let audio = std::env::var("ALIYUN_ASR_AUDIO").expect("ALIYUN_ASR_AUDIO");
-        let mime = if audio.ends_with(".wav") { "audio/wav" } else { "audio/mpeg" };
+        let mime = if audio.ends_with(".wav") {
+            "audio/wav"
+        } else {
+            "audio/mpeg"
+        };
         let json = run_aliyun(
             Path::new(&audio),
             mime,
@@ -671,9 +689,16 @@ mod tests {
         let audio = std::env::var("ALIYUN_ASR_AUDIO").expect("ALIYUN_ASR_AUDIO");
         let path = Path::new(&audio);
         let size = std::fs::metadata(path).unwrap().len();
-        let url = upload_to_temp_storage(&reqwest::Client::new(), &key, DEFAULT_MODEL, path, "audio/mpeg", size)
-            .await
-            .expect("upload");
+        let url = upload_to_temp_storage(
+            &reqwest::Client::new(),
+            &key,
+            DEFAULT_MODEL,
+            path,
+            "audio/mpeg",
+            size,
+        )
+        .await
+        .expect("upload");
         eprintln!("uploaded {size} bytes → {url}");
         assert!(url.starts_with("oss://"), "{url}");
     }

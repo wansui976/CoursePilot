@@ -69,7 +69,10 @@ fn dir_of(fingerprint: &str) -> String {
 
 /// 网盘上这个视频传完了没有（有清单 = 每一块都齐了）。
 pub async fn remote_manifest(dav: &WebDav, fingerprint: &str) -> AppResult<Option<Manifest>> {
-    match dav.get_optional(&format!("{}manifest.json", dir_of(fingerprint))).await? {
+    match dav
+        .get_optional(&format!("{}manifest.json", dir_of(fingerprint)))
+        .await?
+    {
         Some(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
         None => Ok(None),
     }
@@ -77,11 +80,12 @@ pub async fn remote_manifest(dav: &WebDav, fingerprint: &str) -> AppResult<Optio
 
 /// 这台设备上有文件、还没算过指纹的视频：算出来写进库（会随视频条目同步出去）。
 pub async fn ensure_fingerprint(db: &Db, video_id: &str, file_path: &str) -> AppResult<String> {
-    let existing: Option<String> = sqlx::query_scalar("SELECT content_fingerprint FROM videos WHERE id=?")
-        .bind(video_id)
-        .fetch_optional(&db.pool)
-        .await?
-        .flatten();
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT content_fingerprint FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?
+            .flatten();
     if let Some(fingerprint) = existing.filter(|value| !value.is_empty()) {
         return Ok(fingerprint);
     }
@@ -89,11 +93,13 @@ pub async fn ensure_fingerprint(db: &Db, video_id: &str, file_path: &str) -> App
     let fingerprint = tokio::task::spawn_blocking(move || quick_fingerprint(&path))
         .await
         .map_err(|error| AppError::Other(error.to_string()))??;
-    sqlx::query("UPDATE videos SET content_fingerprint=? WHERE id=? AND content_fingerprint IS NULL")
-        .bind(&fingerprint)
-        .bind(video_id)
-        .execute(&db.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE videos SET content_fingerprint=? WHERE id=? AND content_fingerprint IS NULL",
+    )
+    .bind(&fingerprint)
+    .bind(video_id)
+    .execute(&db.pool)
+    .await?;
     Ok(fingerprint)
 }
 
@@ -128,7 +134,9 @@ async fn upload_in_chunks(
     for index in 0..chunks {
         let expected = chunk_bytes.min(size - index * chunk_bytes);
         let name = chunk_name(index);
-        let done = existing.iter().any(|entry| entry.name == name && entry.size == Some(expected));
+        let done = existing
+            .iter()
+            .any(|entry| entry.name == name && entry.size == Some(expected));
         if !done {
             if !keep_going() {
                 return Err(AppError::Other("视频上传已暂停".into()));
@@ -149,9 +157,22 @@ async fn upload_in_chunks(
         }
         progress(((index + 1) * chunk_bytes).min(size), size);
     }
-    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("mp4").to_ascii_lowercase();
-    let manifest = Manifest { size, chunk_bytes, chunks, ext };
-    dav.put(&format!("{dir}manifest.json"), serde_json::to_vec(&manifest)?).await?;
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("mp4")
+        .to_ascii_lowercase();
+    let manifest = Manifest {
+        size,
+        chunk_bytes,
+        chunks,
+        ext,
+    };
+    dav.put(
+        &format!("{dir}manifest.json"),
+        serde_json::to_vec(&manifest)?,
+    )
+    .await?;
     Ok(true)
 }
 
@@ -164,20 +185,29 @@ pub async fn download(
     file_stem: &str,
     progress: &(dyn Fn(u64, u64) + Send + Sync),
 ) -> AppResult<PathBuf> {
-    let manifest = remote_manifest(dav, fingerprint)
-        .await?
-        .ok_or_else(|| AppError::Other("网盘上还没有这个视频：在有文件的设备上打开「上传视频文件」，传完再来下载".into()))?;
+    let manifest = remote_manifest(dav, fingerprint).await?.ok_or_else(|| {
+        AppError::Other(
+            "网盘上还没有这个视频：在有文件的设备上打开「上传视频文件」，传完再来下载".into(),
+        )
+    })?;
     tokio::fs::create_dir_all(target_dir).await?;
     let target = target_dir.join(format!("{file_stem}.{}", manifest.ext));
     let partial = target_dir.join(format!("{file_stem}.{}.part", manifest.ext));
-    let have = tokio::fs::metadata(&partial).await.map(|meta| meta.len()).unwrap_or(0);
+    let have = tokio::fs::metadata(&partial)
+        .await
+        .map(|meta| meta.len())
+        .unwrap_or(0);
     // 只信整块：最后半块可能是断网时写了一半的。
     let start_chunk = (have / manifest.chunk_bytes).min(manifest.chunks);
     {
         let partial = partial.clone();
         let keep = start_chunk * manifest.chunk_bytes;
         tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-            let file = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(&partial)?;
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(&partial)?;
             file.set_len(keep)
         })
         .await
@@ -185,8 +215,12 @@ pub async fn download(
     }
     progress(start_chunk * manifest.chunk_bytes, manifest.size);
     for index in start_chunk..manifest.chunks {
-        let bytes = dav.get_large(&format!("{}{}", dir_of(fingerprint), chunk_name(index))).await?;
-        let expected = manifest.chunk_bytes.min(manifest.size - index * manifest.chunk_bytes);
+        let bytes = dav
+            .get_large(&format!("{}{}", dir_of(fingerprint), chunk_name(index)))
+            .await?;
+        let expected = manifest
+            .chunk_bytes
+            .min(manifest.size - index * manifest.chunk_bytes);
         if bytes.len() as u64 != expected {
             return Err(AppError::Other("网盘上的视频分块不完整，稍后再试".into()));
         }
@@ -198,7 +232,10 @@ pub async fn download(
         })
         .await
         .map_err(|error| AppError::Other(error.to_string()))??;
-        progress(((index + 1) * manifest.chunk_bytes).min(manifest.size), manifest.size);
+        progress(
+            ((index + 1) * manifest.chunk_bytes).min(manifest.size),
+            manifest.size,
+        );
     }
     let check_path = partial.clone();
     let actual = tokio::task::spawn_blocking(move || quick_fingerprint(&check_path))
@@ -206,7 +243,9 @@ pub async fn download(
         .map_err(|error| AppError::Other(error.to_string()))??;
     if actual != fingerprint {
         let _ = tokio::fs::remove_file(&partial).await;
-        return Err(AppError::Other("下载下来的视频和原文件对不上，已删掉，请重试".into()));
+        return Err(AppError::Other(
+            "下载下来的视频和原文件对不上，已删掉，请重试".into(),
+        ));
     }
     tokio::fs::rename(&partial, &target).await?;
     Ok(target)
@@ -216,11 +255,22 @@ pub async fn download(
 pub fn safe_file_stem(title: &str) -> String {
     let cleaned: String = title
         .chars()
-        .map(|ch| if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || ch.is_control() { '_' } else { ch })
+        .map(|ch| {
+            if matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || ch.is_control()
+            {
+                '_'
+            } else {
+                ch
+            }
+        })
         .collect();
     let trimmed = cleaned.trim().trim_matches('.');
     let stem: String = trimmed.chars().take(80).collect();
-    if stem.is_empty() { "video".into() } else { stem }
+    if stem.is_empty() {
+        "video".into()
+    } else {
+        stem
+    }
 }
 
 #[cfg(test)]
@@ -244,7 +294,10 @@ mod tests {
 
     #[test]
     fn titles_become_safe_file_names() {
-        assert_eq!(safe_file_stem("01. 申论: 概括/对策?"), "01. 申论_ 概括_对策_");
+        assert_eq!(
+            safe_file_stem("01. 申论: 概括/对策?"),
+            "01. 申论_ 概括_对策_"
+        );
         assert_eq!(safe_file_stem("..."), "video");
     }
 
@@ -262,25 +315,53 @@ mod tests {
         // 传完第一块就停（模拟用户关掉上传 / 断网）。
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let stop_after_one = || calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1;
-        assert!(upload_in_chunks(&dav, &fingerprint, &file, 100_000, &|_, _| {}, &stop_after_one).await.is_err());
+        assert!(upload_in_chunks(
+            &dav,
+            &fingerprint,
+            &file,
+            100_000,
+            &|_, _| {},
+            &stop_after_one
+        )
+        .await
+        .is_err());
         let chunks_on_drive = |store: &crate::sync::remote::test_server::Store| {
-            store.files.keys().filter(|path| path.ends_with(".part")).count()
+            store
+                .files
+                .keys()
+                .filter(|path| path.ends_with(".part"))
+                .count()
         };
         assert_eq!(chunks_on_drive(&store.lock().unwrap()), 1);
-        assert!(remote_manifest(&dav, &fingerprint).await.unwrap().is_none(), "没传完就没有清单");
+        assert!(
+            remote_manifest(&dav, &fingerprint).await.unwrap().is_none(),
+            "没传完就没有清单"
+        );
 
         // 续传只补缺的两块。
         let puts_before = store.lock().unwrap().files.len();
-        assert!(upload_in_chunks(&dav, &fingerprint, &file, 100_000, &|_, _| {}, &|| true).await.unwrap());
+        assert!(
+            upload_in_chunks(&dav, &fingerprint, &file, 100_000, &|_, _| {}, &|| true)
+                .await
+                .unwrap()
+        );
         assert_eq!(chunks_on_drive(&store.lock().unwrap()), 3);
-        assert_eq!(store.lock().unwrap().files.len(), puts_before + 3, "两块 + 清单");
+        assert_eq!(
+            store.lock().unwrap().files.len(),
+            puts_before + 3,
+            "两块 + 清单"
+        );
 
         // 下载：本地已有一块半，只信整块，从第二块接着下。
         let target = dir.path().join("phone");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("lecture.mkv.part"), &content[..150_000]).unwrap();
         let progress = std::sync::Mutex::new(Vec::new());
-        let path = download(&dav, &fingerprint, &target, "lecture", &|done, _| progress.lock().unwrap().push(done)).await.unwrap();
+        let path = download(&dav, &fingerprint, &target, "lecture", &|done, _| {
+            progress.lock().unwrap().push(done)
+        })
+        .await
+        .unwrap();
         assert_eq!(progress.lock().unwrap().first(), Some(&100_000));
         assert_eq!(std::fs::read(&path).unwrap(), content);
         assert!(!target.join("lecture.mkv.part").exists());

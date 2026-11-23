@@ -117,8 +117,8 @@ pub fn quiz_to_anki(questions_json: &str) -> AppResult<String> {
 pub fn display_title(title: &str) -> String {
     let lower = title.to_ascii_lowercase();
     for ext in [
-        ".mp4", ".m4v", ".mkv", ".mov", ".webm", ".avi", ".flv", ".mp3", ".m4a", ".wav", ".aac", ".flac",
-        ".ogg", ".opus",
+        ".mp4", ".m4v", ".mkv", ".mov", ".webm", ".avi", ".flv", ".mp3", ".m4a", ".wav", ".aac",
+        ".flac", ".ogg", ".opus",
     ] {
         if lower.ends_with(ext) && title.len() > ext.len() {
             return title[..title.len() - ext.len()].to_string();

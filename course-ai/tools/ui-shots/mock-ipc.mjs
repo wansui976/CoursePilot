@@ -393,6 +393,30 @@ export function installMockIpc({ theme, safeArea }) {
       { card_id: "k3", source_ms: 640_000, lapses: 0 },
       { card_id: "k4", source_ms: 1_120_000, lapses: 2 },
     ],
+    cmd_mistake_cards: () => [
+      { card_id: "k2", video_id: "v3", course_id: "c1", front: "学习率太大时，损失曲线会出现什么现象？", back: "在谷底两侧来回震荡，甚至发散。", source_ms: 420_000, lapses: 2, streak: 1 },
+      { card_id: "k4", video_id: "v3", course_id: "c1", front: "小批量梯度下降相比全量有什么好处？", back: "每步更便宜，噪声还有助于跳出鞍点。", source_ms: 1_120_000, lapses: 1, streak: 0 },
+    ],
+    cmd_card_history: () => {
+      const day = 86_400_000;
+      const t0 = Date.now() - 21 * day;
+      return {
+        card_id: "k1", front: "Q", created_at: t0,
+        reviews: [
+          { ts: t0, rating: 3, stability: 2.3 },
+          { ts: t0 + 3 * day, rating: 3, stability: 7.1 },
+          { ts: t0 + 9 * day, rating: 2, stability: 9.4 },
+          { ts: t0 + 13 * day, rating: 3, stability: 21.5 },
+        ],
+        due_at: t0 + 34 * day, factor: 19 / 81, decay: -0.5,
+      };
+    },
+    // 收集册的四种卡面：点亮、褪色、待点亮，k4 没有卡（剪影）。
+    cmd_concept_mastery: () => [
+      { concept_id: "k1", cards: 3, reviewed: 3, retention: 0.94 },
+      { concept_id: "k2", cards: 2, reviewed: 2, retention: 0.62 },
+      { concept_id: "k3", cards: 1, reviewed: 0, retention: null },
+    ],
     cmd_list_courses: () => {
       try {
         if (localStorage.getItem("__shot-empty") === "1") return [];

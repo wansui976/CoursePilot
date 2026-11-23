@@ -47,7 +47,11 @@ const PEERS_TTL: Duration = Duration::from_secs(120);
 
 /// 只有电脑能开共享（手机切到后台就被系统挂起，当不了服务器）。
 pub fn supported() -> bool {
-    cfg!(any(target_os = "macos", target_os = "windows", target_os = "linux"))
+    cfg!(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux"
+    ))
 }
 
 /// 公布在网盘上的「怎么连到我」。
@@ -90,7 +94,12 @@ fn last_error() -> &'static Mutex<Option<String>> {
 }
 
 pub async fn is_enabled(db: &Db) -> bool {
-    get_setting(db, SETTING_ENABLED).await.ok().flatten().as_deref() == Some("true")
+    get_setting(db, SETTING_ENABLED)
+        .await
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
 }
 
 pub async fn status(db: &Db) -> Status {
@@ -101,7 +110,11 @@ pub async fn status(db: &Db) -> Status {
         enabled,
         running: guard.is_some(),
         port: guard.as_ref().map(|running| running.port),
-        addresses: if guard.is_some() { local_addresses() } else { Vec::new() },
+        addresses: if guard.is_some() {
+            local_addresses()
+        } else {
+            Vec::new()
+        },
         error: last_error().lock().unwrap().clone(),
     }
 }
@@ -133,14 +146,18 @@ fn local_addresses() -> Vec<String> {
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
-        let Ok(interfaces) = if_addrs::get_if_addrs() else { return Vec::new() };
+        let Ok(interfaces) = if_addrs::get_if_addrs() else {
+            return Vec::new();
+        };
         let mut found: Vec<String> = interfaces
             .into_iter()
             .filter_map(|interface| match interface.addr {
                 if_addrs::IfAddr::V4(v4) => Some((interface.name, interface.is_p2p, v4.ip)),
                 if_addrs::IfAddr::V6(_) => None,
             })
-            .filter(|(name, point_to_point, ip)| shareable_ipv4(*ip) && !is_tunnel(name, *point_to_point))
+            .filter(|(name, point_to_point, ip)| {
+                shareable_ipv4(*ip) && !is_tunnel(name, *point_to_point)
+            })
             .map(|(_, _, ip)| ip.to_string())
             .collect();
         // 固定顺序：网卡枚举顺序变了，写进网盘的内容（以及界面上的显示）不跟着跳。
@@ -173,9 +190,11 @@ fn is_tunnel(name: &str, point_to_point: bool) -> bool {
         return true;
     }
     let name = name.to_ascii_lowercase();
-    ["utun", "ipsec", "gif", "stf", "awdl", "llw", "ppp", "tun", "tap", "wg"]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+    [
+        "utun", "ipsec", "gif", "stf", "awdl", "llw", "ppp", "tun", "tap", "wg",
+    ]
+    .iter()
+    .any(|prefix| name.starts_with(prefix))
 }
 
 struct Keys {
@@ -185,26 +204,43 @@ struct Keys {
 }
 
 fn fingerprint(cert_der: &[u8]) -> String {
-    Sha256::digest(cert_der).iter().map(|byte| format!("{byte:02x}")).collect()
+    Sha256::digest(cert_der)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// 证书、私钥、口令：第一次打开时生成，之后一直用同一套（换了的话手机要等重新读到 lan.json）。
 async fn keys(db: &Db) -> AppResult<Keys> {
     let b64 = base64::engine::general_purpose::STANDARD;
     let stored = (
-        get_setting(db, SETTING_CERT).await?.and_then(|value| b64.decode(value).ok()),
-        get_setting(db, SETTING_KEY).await?.and_then(|value| b64.decode(value).ok()),
-        get_setting(db, SETTING_TOKEN).await?.filter(|value| value.len() >= 32),
+        get_setting(db, SETTING_CERT)
+            .await?
+            .and_then(|value| b64.decode(value).ok()),
+        get_setting(db, SETTING_KEY)
+            .await?
+            .and_then(|value| b64.decode(value).ok()),
+        get_setting(db, SETTING_TOKEN)
+            .await?
+            .filter(|value| value.len() >= 32),
     );
     if let (Some(cert_der), Some(key_der), Some(token)) = stored {
-        return Ok(Keys { cert_der, key_der, token });
+        return Ok(Keys {
+            cert_der,
+            key_der,
+            token,
+        });
     }
     let generated = rcgen::generate_simple_self_signed(vec!["coursepilot.local".to_string()])
         .map_err(|error| AppError::Other(format!("生成证书失败：{error}")))?;
     let keys = Keys {
         cert_der: generated.cert.der().to_vec(),
         key_der: generated.signing_key.serialize_der(),
-        token: format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()),
+        token: format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        ),
     };
     set_setting(db, SETTING_CERT, &b64.encode(&keys.cert_der)).await?;
     set_setting(db, SETTING_KEY, &b64.encode(&keys.key_der)).await?;
@@ -236,13 +272,18 @@ async fn start_inner(db: Db) -> AppResult<u16> {
         .map_err(|error| AppError::Other(error.to_string()))?
         .with_no_client_auth()
         .with_single_cert(
-            vec![rustls::pki_types::CertificateDer::from(keys.cert_der.clone())],
+            vec![rustls::pki_types::CertificateDer::from(
+                keys.cert_der.clone(),
+            )],
             rustls::pki_types::PrivateKeyDer::Pkcs8(keys.key_der.clone().into()),
         )
         .map_err(|error| AppError::Other(format!("证书不能用：{error}")))?;
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
 
-    let saved: u16 = get_setting(&db, SETTING_PORT).await?.and_then(|value| value.parse().ok()).unwrap_or(0);
+    let saved: u16 = get_setting(&db, SETTING_PORT)
+        .await?
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
     let listener = match TcpListener::bind(("0.0.0.0", saved)).await {
         Ok(listener) => listener,
         // 上次的端口被别的程序占了：换一个。
@@ -263,7 +304,9 @@ async fn start_inner(db: Db) -> AppResult<u16> {
             let token = token.clone();
             tokio::spawn(async move {
                 // 握手卡住的连接（不是我们的客户端）十秒后放弃。
-                let Ok(Ok(stream)) = tokio::time::timeout(Duration::from_secs(10), acceptor.accept(stream)).await else {
+                let Ok(Ok(stream)) =
+                    tokio::time::timeout(Duration::from_secs(10), acceptor.accept(stream)).await
+                else {
                     return;
                 };
                 let _ = handle(stream, &db, &token).await;
@@ -289,18 +332,29 @@ pub fn stop() {
 
 /// 比较口令不因为前几位对上了就早早返回（防止按耗时一位一位猜）。
 fn same_secret(given: &str, expected: &str) -> bool {
-    given.len() == expected.len() && given.bytes().zip(expected.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+    given.len() == expected.len()
+        && given
+            .bytes()
+            .zip(expected.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
 }
 
 fn valid_video_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 64 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
 async fn handle<S>(mut stream: S, db: &Db, token: &str) -> std::io::Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let Some(request) = read_head(&mut stream).await? else { return Ok(()) };
+    let Some(request) = read_head(&mut stream).await? else {
+        return Ok(());
+    };
     let authorized = request
         .authorization
         .as_deref()
@@ -320,7 +374,10 @@ where
     if let Some(id) = target.strip_prefix("/i/").filter(|id| valid_video_id(id)) {
         match server_video_info(db, id).await {
             Some((file_path, data_dir)) => {
-                let path = crate::pipeline::playable::cached_playable(Path::new(&file_path), Path::new(&data_dir));
+                let path = crate::pipeline::playable::cached_playable(
+                    Path::new(&file_path),
+                    Path::new(&data_dir),
+                );
                 let info = VideoFileInfo {
                     size: std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0),
                     ext: path
@@ -363,8 +420,15 @@ where
         respond_empty(&mut stream, "404 Not Found").await;
         return Ok(());
     };
-    let path = crate::pipeline::playable::cached_playable(Path::new(&file_path), Path::new(&data_dir));
-    serve_file(&mut stream, &path, &request.method, request.range.as_deref()).await
+    let path =
+        crate::pipeline::playable::cached_playable(Path::new(&file_path), Path::new(&data_dir));
+    serve_file(
+        &mut stream,
+        &path,
+        &request.method,
+        request.range.as_deref(),
+    )
+    .await
 }
 
 async fn respond_json<S: AsyncWrite + Unpin>(stream: &mut S, status: &str, body: &[u8]) {
@@ -400,19 +464,31 @@ pub struct TranscodeState {
 
 impl TranscodeState {
     fn idle() -> Self {
-        Self { state: "idle".into(), percent: 0 }
+        Self {
+            state: "idle".into(),
+            percent: 0,
+        }
     }
 
     fn running(percent: u32) -> Self {
-        Self { state: "running".into(), percent }
+        Self {
+            state: "running".into(),
+            percent,
+        }
     }
 
     fn done() -> Self {
-        Self { state: "done".into(), percent: 100 }
+        Self {
+            state: "done".into(),
+            percent: 100,
+        }
     }
 
     fn failed() -> Self {
-        Self { state: "failed".into(), percent: 0 }
+        Self {
+            state: "failed".into(),
+            percent: 0,
+        }
     }
 }
 
@@ -453,7 +529,9 @@ fn playable_target(data_dir: &str) -> PathBuf {
 /// 转好的成品：非空、而且真的是 H.264。0 字节或别的编码（比如以前只做了 faststart
 /// 转封装留下的 AV1 副本）都不算数。
 fn converted_ready(target: &Path) -> bool {
-    std::fs::metadata(target).map(|meta| meta.len() > 0).unwrap_or(false)
+    std::fs::metadata(target)
+        .map(|meta| meta.len() > 0)
+        .unwrap_or(false)
         && matches!(
             crate::pipeline::playable::video_codec(target),
             Some(codec) if &codec == b"avc1" || &codec == b"avc3"
@@ -481,7 +559,9 @@ async fn server_transcode_status(db: &Db, id: &str) -> TranscodeState {
     }
     // 进程重启过：任务表空了，但转好的成品还在磁盘上。
     match server_video_info(db, id).await {
-        Some((_, data_dir)) if !data_dir.is_empty() && converted_ready(&playable_target(&data_dir)) => {
+        Some((_, data_dir))
+            if !data_dir.is_empty() && converted_ready(&playable_target(&data_dir)) =>
+        {
             TranscodeState::done()
         }
         _ => TranscodeState::idle(),
@@ -516,7 +596,13 @@ async fn server_start_transcode(db: &Db, id: &str, retry: bool) -> TranscodeStat
             }
         }
         let percent = Arc::new(AtomicU32::new(1));
-        jobs.insert(id.to_string(), FfmpegJob { percent: percent.clone(), failed: false });
+        jobs.insert(
+            id.to_string(),
+            FfmpegJob {
+                percent: percent.clone(),
+                failed: false,
+            },
+        );
         percent
     };
     let video_id = id.to_string();
@@ -543,7 +629,9 @@ async fn server_start_transcode(db: &Db, id: &str, retry: bool) -> TranscodeStat
 async fn run_ffmpeg(source: &Path, target: &Path, percent: &AtomicU32) -> Result<(), String> {
     let ffmpeg = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None)
         .map_err(|error| format!("找不到 ffmpeg：{error}"))?;
-    let parent = target.parent().ok_or_else(|| "转码目录不存在".to_string())?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| "转码目录不存在".to_string())?;
     tokio::fs::create_dir_all(parent)
         .await
         .map_err(|error| format!("转码目录创建失败：{error}"))?;
@@ -552,11 +640,20 @@ async fn run_ffmpeg(source: &Path, target: &Path, percent: &AtomicU32) -> Result
 
     let mut child = crate::sidecar::command(&ffmpeg)
         .arg("-y")
-        .args(["-hide_banner", "-nostats", "-progress", "pipe:1", "-loglevel", "info"])
+        .args([
+            "-hide_banner",
+            "-nostats",
+            "-progress",
+            "pipe:1",
+            "-loglevel",
+            "info",
+        ])
         .arg("-i")
         .arg(source)
         .args(["-map", "0:v:0", "-map", "0:a:0?"])
-        .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p"])
+        .args([
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+        ])
         .args(["-c:a", "aac", "-b:a", "160k"])
         .args(["-movflags", "+faststart"])
         .arg(&partial)
@@ -568,7 +665,10 @@ async fn run_ffmpeg(source: &Path, target: &Path, percent: &AtomicU32) -> Result
 
     // 总时长只在 stderr 的 `Duration:` 里；`duration_ms` 这一列在库里大多是空的。
     let total_us = Arc::new(AtomicU64::new(0));
-    let stderr = child.stderr.take().ok_or_else(|| "ffmpeg 没有 stderr".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "ffmpeg 没有 stderr".to_string())?;
     let total_for_stderr = total_us.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
@@ -582,17 +682,25 @@ async fn run_ffmpeg(source: &Path, target: &Path, percent: &AtomicU32) -> Result
         }
     });
 
-    let stdout = child.stdout.take().ok_or_else(|| "ffmpeg 没有 stdout".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "ffmpeg 没有 stdout".to_string())?;
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        let Some(done_us) = parse_out_time_us(&line) else { continue };
+        let Some(done_us) = parse_out_time_us(&line) else {
+            continue;
+        };
         let total = total_us.load(Ordering::Acquire);
         if total > 0 {
             percent.store(transcode_percent(done_us, total), Ordering::Release);
         }
     }
 
-    let status = child.wait().await.map_err(|error| format!("ffmpeg 退出状态读不到：{error}"))?;
+    let status = child
+        .wait()
+        .await
+        .map_err(|error| format!("ffmpeg 退出状态读不到：{error}"))?;
     let _ = stderr_task.await;
     if !status.success() {
         let _ = tokio::fs::remove_file(&partial).await;
@@ -672,7 +780,9 @@ impl rustls::client::danger::ServerCertVerifier for PinnedCert {
         if same_secret(&fingerprint(end_entity.as_ref()), &self.fingerprint) {
             Ok(rustls::client::danger::ServerCertVerified::assertion())
         } else {
-            Err(rustls::Error::General("局域网里那台设备的证书和网盘上公布的对不上".into()))
+            Err(rustls::Error::General(
+                "局域网里那台设备的证书和网盘上公布的对不上".into(),
+            ))
         }
     }
 
@@ -682,7 +792,12 @@ impl rustls::client::danger::ServerCertVerifier for PinnedCert {
         cert: &rustls::pki_types::CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.provider.signature_verification_algorithms)
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
     }
 
     fn verify_tls13_signature(
@@ -691,11 +806,18 @@ impl rustls::client::danger::ServerCertVerifier for PinnedCert {
         cert: &rustls::pki_types::CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.provider.signature_verification_algorithms)
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
     }
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.provider.signature_verification_algorithms.supported_schemes()
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
@@ -706,7 +828,10 @@ pub fn pinned_client(cert_sha256: &str) -> AppResult<reqwest::Client> {
         .with_safe_default_protocol_versions()
         .map_err(|error| AppError::Other(error.to_string()))?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(PinnedCert { fingerprint: cert_sha256.to_ascii_lowercase(), provider }))
+        .with_custom_certificate_verifier(Arc::new(PinnedCert {
+            fingerprint: cert_sha256.to_ascii_lowercase(),
+            provider,
+        }))
         .with_no_client_auth();
     reqwest::Client::builder()
         .use_preconfigured_tls(config)
@@ -735,15 +860,33 @@ async fn peer_adverts(config: &RemoteConfig, own_device: &str) -> AppResult<Vec<
         }
     }
     let dav = config.client()?;
-    let devices = dav.list(crate::sync::remote::DEVICES_DIR).await?.unwrap_or_default();
+    let devices = dav
+        .list(crate::sync::remote::DEVICES_DIR)
+        .await?
+        .unwrap_or_default();
     let mut adverts = Vec::new();
-    for device in devices.iter().filter(|entry| entry.is_dir && entry.name != own_device) {
-        let path = format!("{}{}/{ADVERT_FILE}", crate::sync::remote::DEVICES_DIR, device.name);
-        if let Some(advert) = dav.get_optional(&path).await?.and_then(|bytes| serde_json::from_slice::<Advert>(&bytes).ok()) {
+    for device in devices
+        .iter()
+        .filter(|entry| entry.is_dir && entry.name != own_device)
+    {
+        let path = format!(
+            "{}{}/{ADVERT_FILE}",
+            crate::sync::remote::DEVICES_DIR,
+            device.name
+        );
+        if let Some(advert) = dav
+            .get_optional(&path)
+            .await?
+            .and_then(|bytes| serde_json::from_slice::<Advert>(&bytes).ok())
+        {
             adverts.push(advert);
         }
     }
-    *peers_cache().lock().unwrap() = Some(Peers { key, at: Instant::now(), adverts: adverts.clone() });
+    *peers_cache().lock().unwrap() = Some(Peers {
+        key,
+        at: Instant::now(),
+        adverts: adverts.clone(),
+    });
     Ok(adverts)
 }
 
@@ -761,11 +904,17 @@ fn video_url(address: &str, port: u16, video_id: &str) -> String {
 }
 
 /// 在局域网里找一台有这个视频的设备。都连不上（不在同一个 Wi‑Fi、电脑没开）返回 None。
-pub async fn find(db: &Db, config: &RemoteConfig, video_id: &str) -> AppResult<Option<RemoteSource>> {
+pub async fn find(
+    db: &Db,
+    config: &RemoteConfig,
+    video_id: &str,
+) -> AppResult<Option<RemoteSource>> {
     if !valid_video_id(video_id) {
         return Ok(None);
     }
-    let own = crate::sync::identity::ensure_sync_identity(db).await?.device_id;
+    let own = crate::sync::identity::ensure_sync_identity(db)
+        .await?
+        .device_id;
     let adverts = peer_adverts(config, &own).await?;
     let found = probe(&adverts, video_id).await;
     if found.is_none() {
@@ -779,14 +928,26 @@ pub async fn find(db: &Db, config: &RemoteConfig, video_id: &str) -> AppResult<O
 pub async fn probe(adverts: &[Advert], video_id: &str) -> Option<RemoteSource> {
     let mut attempts = tokio::task::JoinSet::new();
     for advert in adverts {
-        let Ok(client) = pinned_client(&advert.cert_sha256) else { continue };
+        let Ok(client) = pinned_client(&advert.cert_sha256) else {
+            continue;
+        };
         for address in &advert.addresses {
             let url = video_url(address, advert.port, video_id);
             let client = client.clone();
             let token = advert.token.clone();
             attempts.spawn(async move {
-                let response = client.head(&url).bearer_auth(&token).timeout(PROBE_TIMEOUT).send().await.ok()?;
-                response.status().is_success().then_some(RemoteSource { url, auth: RemoteAuth::Bearer(token), client })
+                let response = client
+                    .head(&url)
+                    .bearer_auth(&token)
+                    .timeout(PROBE_TIMEOUT)
+                    .send()
+                    .await
+                    .ok()?;
+                response.status().is_success().then_some(RemoteSource {
+                    url,
+                    auth: RemoteAuth::Bearer(token),
+                    client,
+                })
             });
         }
     }
@@ -806,7 +967,10 @@ fn sources() -> &'static Mutex<HashMap<String, RemoteSource>> {
 }
 
 pub fn remember_source(video_id: &str, source: RemoteSource) {
-    sources().lock().unwrap().insert(video_id.to_string(), source);
+    sources()
+        .lock()
+        .unwrap()
+        .insert(video_id.to_string(), source);
     // 重新打开这条视频等于重新开始：电脑那头进程重启过、任务表空了的话，还能再自动点一次。
     transcode_requested().lock().unwrap().remove(video_id);
 }
@@ -848,8 +1012,14 @@ async fn fetch_transcode_state(source: &RemoteSource, url: &str) -> Option<Trans
     response.json::<TranscodeState>().await.ok()
 }
 
-async fn request_transcode(source: &RemoteSource, url: &str, retry: bool) -> Option<TranscodeState> {
-    let mut request = source.authorize(source.client.post(url)).timeout(TRANSCODE_TIMEOUT);
+async fn request_transcode(
+    source: &RemoteSource,
+    url: &str,
+    retry: bool,
+) -> Option<TranscodeState> {
+    let mut request = source
+        .authorize(source.client.post(url))
+        .timeout(TRANSCODE_TIMEOUT);
     if retry {
         request = request.query(&[("retry", "1")]);
     }
@@ -869,7 +1039,10 @@ pub async fn phone_transcode_status(video_id: &str) -> Option<TranscodeState> {
     if state.state != "idle" {
         return Some(state);
     }
-    let first = transcode_requested().lock().unwrap().insert(video_id.to_string());
+    let first = transcode_requested()
+        .lock()
+        .unwrap()
+        .insert(video_id.to_string());
     if !first {
         return Some(state);
     }
@@ -888,7 +1061,10 @@ pub async fn phone_start_transcode(video_id: &str, retry: bool) -> Option<Transc
     let source = source_for(video_id)?;
     let url = transcode_url(&source)?;
     let state = request_transcode(&source, &url, retry).await?;
-    transcode_requested().lock().unwrap().insert(video_id.to_string());
+    transcode_requested()
+        .lock()
+        .unwrap()
+        .insert(video_id.to_string());
     Some(state)
 }
 
@@ -902,7 +1078,10 @@ async fn remote_source(db: &Db, video_id: &str) -> AppResult<RemoteSource> {
         .await?
         .ok_or_else(|| AppError::Config("还没连上网盘，找不到那台电脑".into()))?;
     let source = find(db, &config, video_id).await?.ok_or_else(|| {
-        AppError::Other("连不上局域网里那台电脑：确认它开着「局域网直连播放」，而且和这台设备在同一个 Wi‑Fi".into())
+        AppError::Other(
+            "连不上局域网里那台电脑：确认它开着「局域网直连播放」，而且和这台设备在同一个 Wi‑Fi"
+                .into(),
+        )
     })?;
     remember_source(video_id, source.clone());
     Ok(source)
@@ -910,7 +1089,9 @@ async fn remote_source(db: &Db, video_id: &str) -> AppResult<RemoteSource> {
 
 /// 问电脑 `/i/<id>`：整段下载会是多大的文件、什么扩展名。老版本的电脑没有这个接口时给 None。
 async fn fetch_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInfo>> {
-    let Some((base, id)) = source.url.rsplit_once("/v/") else { return Ok(None) };
+    let Some((base, id)) = source.url.rsplit_once("/v/") else {
+        return Ok(None);
+    };
     let response = source
         .authorize(source.client.get(format!("{base}/i/{id}")))
         .timeout(TRANSCODE_TIMEOUT)
@@ -921,7 +1102,10 @@ async fn fetch_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInf
         return Ok(None);
     }
     if !response.status().is_success() {
-        return Err(AppError::Other(format!("电脑回了个 {}，暂时不能下载", response.status())));
+        return Err(AppError::Other(format!(
+            "电脑回了个 {}，暂时不能下载",
+            response.status()
+        )));
     }
     Ok(response.json::<VideoFileInfo>().await.ok())
 }
@@ -951,10 +1135,13 @@ async fn head_file_info(source: &RemoteSource) -> AppResult<Option<VideoFileInfo
         "audio/mpeg" => "mp3",
         _ => "mp4",
     };
-    Ok(response.content_length().filter(|size| *size > 0).map(|size| VideoFileInfo {
-        size,
-        ext: ext.into(),
-    }))
+    Ok(response
+        .content_length()
+        .filter(|size| *size > 0)
+        .map(|size| VideoFileInfo {
+            size,
+            ext: ext.into(),
+        }))
 }
 
 /// 手机把整段视频存到本机，返回文件路径。下到的就是刚在播的那一份：电脑转过码时
@@ -968,11 +1155,12 @@ pub async fn download_video(
     video_id: &str,
     progress: &(dyn Fn(u64, u64) + Send + Sync),
 ) -> AppResult<PathBuf> {
-    let title: String = sqlx::query_scalar("SELECT title FROM videos WHERE id=? AND deleted_at IS NULL")
-        .bind(video_id)
-        .fetch_optional(&db.pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let title: String =
+        sqlx::query_scalar("SELECT title FROM videos WHERE id=? AND deleted_at IS NULL")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
     // 手机上整段下载动辄几分钟：iOS 申请后台继续跑，Android 起前台服务 + 唤醒锁，
     // 免得锁屏后系统把 App 挂起，下到一半停了。
     let _keep_alive = crate::keep_alive::hold(crate::keep_alive::Kind::Download, video_id, &title);
@@ -990,7 +1178,9 @@ pub async fn download_video(
         if let Some(state) = fetch_transcode_state(&source, &url).await {
             match state.state.as_str() {
                 "running" => {
-                    return Err(AppError::Other("电脑正在把这个视频转成这台设备能播的格式，转完再存".into()))
+                    return Err(AppError::Other(
+                        "电脑正在把这个视频转成这台设备能播的格式，转完再存".into(),
+                    ))
                 }
                 "failed" => {
                     return Err(AppError::Other(
@@ -1003,9 +1193,9 @@ pub async fn download_video(
     }
     let info = match fetch_file_info(&source).await? {
         Some(info) => info,
-        None => head_file_info(&source)
-            .await?
-            .ok_or_else(|| AppError::Other("电脑上找不到这个视频的文件，可能被移走或删掉了".into()))?,
+        None => head_file_info(&source).await?.ok_or_else(|| {
+            AppError::Other("电脑上找不到这个视频的文件，可能被移走或删掉了".into())
+        })?,
     };
     if info.size == 0 {
         return Err(AppError::Other("电脑上这个视频的文件是空的".into()));
@@ -1021,13 +1211,21 @@ pub async fn download_video(
     let stem = crate::sync::media::safe_file_stem(base);
     let target = dir.join(format!("{stem}.{}", info.ext));
     // 已经下完了（比如上次成功但没刷新到界面）：直接算数。
-    if tokio::fs::metadata(&target).await.map(|meta| meta.len()).unwrap_or(0) == info.size {
+    if tokio::fs::metadata(&target)
+        .await
+        .map(|meta| meta.len())
+        .unwrap_or(0)
+        == info.size
+    {
         record_local_path(db, video_id, &target).await?;
         report(info.size, info.size);
         return Ok(target);
     }
     let partial = dir.join(format!("{stem}.{}.part", info.ext));
-    let existing = tokio::fs::metadata(&partial).await.map(|meta| meta.len()).unwrap_or(0);
+    let existing = tokio::fs::metadata(&partial)
+        .await
+        .map(|meta| meta.len())
+        .unwrap_or(0);
     // 半截比整份还大：上次下的是另一份文件（比如电脑转完码换了源），从头来。
     let have = if existing <= info.size { existing } else { 0 };
     if have == info.size {
@@ -1042,7 +1240,10 @@ pub async fn download_video(
     if have > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={have}-"));
     }
-    let mut response = request.send().await.map_err(|error| AppError::Other(error.to_string()))?;
+    let mut response = request
+        .send()
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?;
     let resumed = have > 0 && response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
     if !resumed && !response.status().is_success() {
         return Err(AppError::Other(format!(
@@ -1052,9 +1253,17 @@ pub async fn download_video(
     }
     let mut written = if resumed { have } else { 0 };
     let mut file = if resumed {
-        tokio::fs::OpenOptions::new().append(true).open(&partial).await?
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(&partial)
+            .await?
     } else {
-        tokio::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&partial).await?
+        tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&partial)
+            .await?
     };
     report(written, info.size);
     let mut last_report = Instant::now();
@@ -1072,7 +1281,10 @@ pub async fn download_video(
             Err(error) => {
                 // 已经写进 .part 的那截留着，下次接着下。
                 report(written, info.size);
-                return Err(AppError::Other(format!("下载中断了（已下 {written} / {} 字节）：{error}", info.size)));
+                return Err(AppError::Other(format!(
+                    "下载中断了（已下 {written} / {} 字节）：{error}",
+                    info.size
+                )));
             }
         }
     }
@@ -1104,15 +1316,25 @@ mod tests {
 
     async fn shared_video(dir: &std::path::Path) -> (Db, String) {
         let db = Db::connect_and_migrate(&dir.join("pc.db")).await.unwrap();
-        let course = crate::commands::courses::create_course(&db, "c".into(), dir.to_string_lossy().into()).await.unwrap();
+        let course =
+            crate::commands::courses::create_course(&db, "c".into(), dir.to_string_lossy().into())
+                .await
+                .unwrap();
         let file = dir.join("01.mp4");
         std::fs::write(&file, b"0123456789abcdef").unwrap();
-        let video = crate::commands::videos::add_local_video(&db, &course.id, file, None).await.unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, file, None)
+            .await
+            .unwrap();
         (db, video.id)
     }
 
     fn advert_for(port: u16, token: String, cert_sha256: String) -> Advert {
-        Advert { addresses: vec!["127.0.0.1".into()], port, token, cert_sha256 }
+        Advert {
+            addresses: vec!["127.0.0.1".into()],
+            port,
+            token,
+            cert_sha256,
+        }
     }
 
     /// 拼一个只带一条视频轨的最小 MP4：ftyp + moov/trak/mdia(hdlr)/minf/stbl/stsd。
@@ -1142,11 +1364,21 @@ mod tests {
     /// 没打包 ffmpeg（或这台的 ffmpeg 没带 libx264）就跳过，别让这条依赖变成环境检查。
     #[tokio::test(flavor = "multi_thread")]
     async fn ffmpeg_transcode_writes_a_playable_h264_copy() {
-        let Ok(ffmpeg) = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None) else { return };
+        let Ok(ffmpeg) = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None) else {
+            return;
+        };
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source.mp4");
         let generated = crate::sidecar::command(&ffmpeg)
-            .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10"])
+            .args([
+                "-y",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=160x120:rate=10",
+            ])
             .args(["-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
             .arg(&source)
             .status()
@@ -1159,12 +1391,16 @@ mod tests {
         run_ffmpeg(&source, &target, &percent).await.unwrap();
         assert_eq!(percent.load(Ordering::Acquire), 100);
         assert!(converted_ready(&target));
-        assert_eq!(crate::pipeline::playable::video_codec(&target), Some(*b"avc1"));
+        assert_eq!(
+            crate::pipeline::playable::video_codec(&target),
+            Some(*b"avc1")
+        );
         assert!(!dir.path().join("playable.partial.mp4").exists());
     }
 
     #[test]
-    fn transcode_progress_is_parsed_from_ffmpeg_output() {        assert_eq!(
+    fn transcode_progress_is_parsed_from_ffmpeg_output() {
+        assert_eq!(
             parse_ffmpeg_duration("  Duration: 00:42:17.12, start: 0.000000, bitrate: 123 kb/s"),
             Some((42 * 60 + 17) * 1_000_000 + 120_000)
         );
@@ -1225,7 +1461,9 @@ mod tests {
         let local = advert_for(port, published.token.clone(), published.cert_sha256.clone());
 
         // 口令和证书都对：找得到，Range 请求原样转回来。
-        let source = probe(std::slice::from_ref(&local), &video_id).await.expect("找到了");
+        let source = probe(std::slice::from_ref(&local), &video_id)
+            .await
+            .expect("找到了");
         let media = crate::media_server::start().await.unwrap();
         media.register_remote(&video_id, source.clone());
         let response = reqwest::Client::new()
@@ -1246,19 +1484,32 @@ mod tests {
             .await
             .unwrap();
         let stem = crate::sync::media::safe_file_stem(
-            std::path::Path::new(&title).file_stem().unwrap().to_str().unwrap(),
+            std::path::Path::new(&title)
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap(),
         );
         let phone_root = dir.path().join("phone");
         let phone_dir = phone_root.join(&video_id);
         std::fs::create_dir_all(&phone_dir).unwrap();
         std::fs::write(phone_dir.join(format!("{stem}.mp4.part")), b"0123456789").unwrap();
         let seen = std::sync::Mutex::new(Vec::new());
-        let downloaded = download_video(&db, &phone_root, &video_id, &|done, _| seen.lock().unwrap().push(done))
-            .await
-            .unwrap();
-        assert_eq!(downloaded.file_name().unwrap().to_string_lossy(), format!("{stem}.mp4"));
+        let downloaded = download_video(&db, &phone_root, &video_id, &|done, _| {
+            seen.lock().unwrap().push(done)
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            downloaded.file_name().unwrap().to_string_lossy(),
+            format!("{stem}.mp4")
+        );
         assert_eq!(std::fs::read(&downloaded).unwrap(), b"0123456789abcdef");
-        assert_eq!(seen.lock().unwrap().first(), Some(&10), "从已有的半截接着下，不从头再来");
+        assert_eq!(
+            seen.lock().unwrap().first(),
+            Some(&10),
+            "从已有的半截接着下，不从头再来"
+        );
         assert!(!phone_dir.join(format!("{stem}.mp4.part")).exists());
         let stored: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
             .bind(&video_id)
@@ -1280,11 +1531,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(state["state"], "idle");
-        let (_, data_dir): (String, String) = sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
-            .bind(&video_id)
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let (_, data_dir): (String, String) =
+            sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+                .bind(&video_id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         write_mp4_with_codec(&playable_target(&data_dir), b"avc1");
         let state: serde_json::Value = client
             .post(&transcode)
@@ -1299,23 +1551,39 @@ mod tests {
         assert_eq!(state["percent"], 100);
 
         // 没有这个视频、口令不对、证书指纹不对：都找不到。
-        assert!(probe(std::slice::from_ref(&local), "no-such-video").await.is_none());
+        assert!(probe(std::slice::from_ref(&local), "no-such-video")
+            .await
+            .is_none());
         let wrong_token = advert_for(port, "x".repeat(64), published.cert_sha256.clone());
         assert!(probe(&[wrong_token], &video_id).await.is_none());
         let wrong_cert = advert_for(port, published.token.clone(), "0".repeat(64));
         assert!(probe(&[wrong_cert], &video_id).await.is_none());
 
         // 进了回收站的不给。
-        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?").bind(&video_id).execute(&db.pool).await.unwrap();
-        assert!(probe(std::slice::from_ref(&local), &video_id).await.is_none());
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert!(probe(std::slice::from_ref(&local), &video_id)
+            .await
+            .is_none());
 
         // 关掉之后连不上，也不再公布；再打开沿用同一个端口和证书。
         stop();
         assert!(advert().is_none());
-        assert!(probe(std::slice::from_ref(&local), &video_id).await.is_none());
-        sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?").bind(&video_id).execute(&db.pool).await.unwrap();
+        assert!(probe(std::slice::from_ref(&local), &video_id)
+            .await
+            .is_none());
+        sqlx::query("UPDATE videos SET deleted_at=NULL WHERE id=?")
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(start(db.clone()).await.unwrap(), port);
-        assert!(probe(std::slice::from_ref(&local), &video_id).await.is_some());
+        assert!(probe(std::slice::from_ref(&local), &video_id)
+            .await
+            .is_some());
         stop();
     }
 }

@@ -58,8 +58,16 @@ fn catalog() -> &'static HashMap<String, CatalogEntry> {
 fn candidates(model_id: &str) -> Vec<String> {
     let mut base = model_id.trim().to_string();
     for prefix in [
-        "openai/", "anthropic/", "gemini/", "deepseek/", "ollama/", "moonshot/", "zhipu/",
-        "dashscope/", "openrouter/", "models/",
+        "openai/",
+        "anthropic/",
+        "gemini/",
+        "deepseek/",
+        "ollama/",
+        "moonshot/",
+        "zhipu/",
+        "dashscope/",
+        "openrouter/",
+        "models/",
     ] {
         if let Some(rest) = base.strip_prefix(prefix) {
             base = rest.to_string();

@@ -197,7 +197,10 @@ impl<'a> AssistantTools<'a> {
     }
 
     /// 工具内部模型调用的 provider 解析：测试注入优先，生产按任务路由到 profile 配置。
-    async fn llm_for(&self, task: AiTask) -> Option<(std::sync::Arc<crate::llm::Provider>, String)> {
+    async fn llm_for(
+        &self,
+        task: AiTask,
+    ) -> Option<(std::sync::Arc<crate::llm::Provider>, String)> {
         if let Some(pair) = &self.llm_override {
             return Some(pair.clone());
         }
@@ -1196,12 +1199,11 @@ impl AssistantTools<'_> {
         let req = crate::llm::prompts::query_expansion_request(&model, query);
         // 没有可用的取消标志可传：整轮取消会由 agent 循环在工具这一级把 future 丢弃，
         // 底层 HTTP 请求随之断开；这里传一个永不置位的标志即可。
-        let reply = match crate::llm::complete_or_cancel(&provider, &req, &AtomicBool::new(false))
-            .await
-        {
-            Ok(Some(reply)) => reply,
-            _ => return None,
-        };
+        let reply =
+            match crate::llm::complete_or_cancel(&provider, &req, &AtomicBool::new(false)).await {
+                Ok(Some(reply)) => reply,
+                _ => return None,
+            };
         // 与课程级问答的兜底同一个截断：模型偶尔不听话写一段话，最多只取前 100 字。
         let expanded: String = reply.trim().chars().take(100).collect();
         (!expanded.is_empty()).then_some(expanded)
@@ -1376,7 +1378,9 @@ impl AssistantTools<'_> {
                 .fetch_optional(&self.db.pool)
                 .await
                 .map_err(ToolOutcome::failed)?;
-        let notes = row.and_then(|(json, md)| json.or(md)).filter(|text| !text.trim().is_empty());
+        let notes = row
+            .and_then(|(json, md)| json.or(md))
+            .filter(|text| !text.trim().is_empty());
         match notes {
             Some(text) => Ok(ToolOutcome::ok(cap_tool_output(
                 format!("《{}》的笔记：\n\n{}", video.title, text),

@@ -53,7 +53,11 @@ pub struct CleanupReport {
 
 impl CleanupReport {
     pub fn changed(&self) -> bool {
-        self.loop_segments + self.collapsed_repeats + self.silent_segments + self.boilerplate_segments > 0
+        self.loop_segments
+            + self.collapsed_repeats
+            + self.silent_segments
+            + self.boilerplate_segments
+            > 0
     }
 }
 
@@ -65,7 +69,30 @@ fn normalized(text: &str) -> String {
 }
 
 fn is_cjk_punctuation(c: char) -> bool {
-    matches!(c, '，' | '。' | '、' | '；' | '：' | '？' | '！' | '…' | '—' | '·' | '“' | '”' | '‘' | '’' | '（' | '）' | '《' | '》' | '「' | '」' | '『' | '』')
+    matches!(
+        c,
+        '，' | '。'
+            | '、'
+            | '；'
+            | '：'
+            | '？'
+            | '！'
+            | '…'
+            | '—'
+            | '·'
+            | '“'
+            | '”'
+            | '‘'
+            | '’'
+            | '（'
+            | '）'
+            | '《'
+            | '》'
+            | '「'
+            | '」'
+            | '『'
+            | '』'
+    )
 }
 
 /// 整段是同一个单元重复 n 遍时返回那个单元。
@@ -104,7 +131,10 @@ fn collapse_repeat(segment: &mut WhisperSegment) -> bool {
 }
 
 fn is_boilerplate(text: &str) -> bool {
-    let compact: String = text.chars().filter(|c| !c.is_whitespace() && !is_cjk_punctuation(*c)).collect();
+    let compact: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && !is_cjk_punctuation(*c))
+        .collect();
     NEVER_SPOKEN.iter().any(|phrase| compact.contains(phrase))
 }
 
@@ -121,7 +151,10 @@ fn silence_share(silences: &[Silence], total_ms: i64) -> f64 {
     if total_ms <= 0 {
         return 0.0;
     }
-    let silent: i64 = silences.iter().map(|(start, end)| (end - start).max(0)).sum();
+    let silent: i64 = silences
+        .iter()
+        .map(|(start, end)| (end - start).max(0))
+        .sum();
     silent as f64 / total_ms as f64
 }
 
@@ -214,7 +247,10 @@ mod tests {
             ],
         };
         let report = clean(&mut json, &[]);
-        assert_eq!(texts(&json), ["我们来看梯度下降。", "学习率决定步长。", "下面看例题。"]);
+        assert_eq!(
+            texts(&json),
+            ["我们来看梯度下降。", "学习率决定步长。", "下面看例题。"]
+        );
         assert_eq!(json.transcription[1].offsets.to, 10_000);
         assert_eq!(report.loop_segments, 3);
     }
@@ -241,10 +277,22 @@ mod tests {
                     text: "谢谢谢谢谢谢谢谢谢谢".into(),
                     offsets: Offsets { from: 0, to: 3_000 },
                     tokens: vec![
-                        TokenObj { text: "[_BEG_]".into(), offsets: Offsets { from: 0, to: 0 } },
-                        TokenObj { text: "谢".into(), offsets: Offsets { from: 0, to: 300 } },
-                        TokenObj { text: "谢".into(), offsets: Offsets { from: 300, to: 600 } },
-                        TokenObj { text: "谢".into(), offsets: Offsets { from: 600, to: 900 } },
+                        TokenObj {
+                            text: "[_BEG_]".into(),
+                            offsets: Offsets { from: 0, to: 0 },
+                        },
+                        TokenObj {
+                            text: "谢".into(),
+                            offsets: Offsets { from: 0, to: 300 },
+                        },
+                        TokenObj {
+                            text: "谢".into(),
+                            offsets: Offsets { from: 300, to: 600 },
+                        },
+                        TokenObj {
+                            text: "谢".into(),
+                            offsets: Offsets { from: 600, to: 900 },
+                        },
                     ],
                 },
                 seg("我们来看看我们来看看我们来看看我们来看看", 3_000, 6_000),
@@ -253,7 +301,11 @@ mod tests {
         };
         let report = clean(&mut json, &[]);
         assert_eq!(texts(&json), ["谢", "我们来看看", "对对对对"]);
-        assert_eq!(json.transcription[0].tokens.len(), 2, "只留拼得出一遍的 token");
+        assert_eq!(
+            json.transcription[0].tokens.len(),
+            2,
+            "只留拼得出一遍的 token"
+        );
         assert_eq!(report.collapsed_repeats, 2);
     }
 
@@ -269,7 +321,10 @@ mod tests {
         };
         let silences = [(4_200, 20_000), (30_000, 31_000)];
         let report = clean(&mut json, &silences);
-        assert_eq!(texts(&json), ["这一步写在黑板上。", "好，写完了。", "我们接着往下推。"]);
+        assert_eq!(
+            texts(&json),
+            ["这一步写在黑板上。", "好，写完了。", "我们接着往下推。"]
+        );
         assert_eq!(report.silent_segments, 1);
     }
 
@@ -287,7 +342,10 @@ mod tests {
     fn a_mostly_silent_recording_means_the_threshold_is_wrong_so_silences_are_ignored() {
         // 录音音量太小：静音段盖住了大半，不能拿它删字。
         let mut json = WhisperJson {
-            transcription: vec![seg("老师声音很小", 1_000, 5_000), seg("但确实在讲", 6_000, 9_000)],
+            transcription: vec![
+                seg("老师声音很小", 1_000, 5_000),
+                seg("但确实在讲", 6_000, 9_000),
+            ],
         };
         let report = clean(&mut json, &[(0, 10_000)]);
         assert_eq!(json.transcription.len(), 2);

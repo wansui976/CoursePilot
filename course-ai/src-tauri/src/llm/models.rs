@@ -108,7 +108,11 @@ fn base(profile: &LlmProfile, fallback: &str) -> String {
 }
 
 fn join(base: &str, path: &str) -> String {
-    format!("{}/{}", base.trim_end_matches('/'), path.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
 }
 
 /// 列模型地址：允许填完整 URL（例如各家网关的自定义路径），否则拼在 base 后面。
@@ -133,7 +137,9 @@ fn http_error(protocol: &str, status: reqwest::StatusCode, body: &str) -> AppErr
     } else {
         "请求失败"
     };
-    AppError::Other(format!("{protocol} 获取模型列表{kind}（HTTP {status}）：{snippet}"))
+    AppError::Other(format!(
+        "{protocol} 获取模型列表{kind}（HTTP {status}）：{snippet}"
+    ))
 }
 
 /// 拉取模型列表（或用缓存）。`api_key` 是设置页里刚输入、还没保存的 Key。
@@ -160,14 +166,19 @@ pub async fn list(
     // Key 只在协议真的需要时从钥匙串读。不再「先读出来再判断」：
     // 对 Ollama 这类免 Key 协议，读出来既没必要，也让「草稿 id 撞上已存配置」
     // 多了一条把 Key 取出来的路径。
-    let key = match api_key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()) {
+    let key = match api_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
         Some(key) => Some(key),
         None if profile.requires_key() => keychain::get_api_key(db, &profile.id).await?,
         None => None,
     }
     .filter(|key| !key.is_empty());
     if profile.requires_key() && key.is_none() {
-        return Err(AppError::Config("还没有填 API Key；获取模型列表需要先填 Key（Ollama 不需要）".into()));
+        return Err(AppError::Config(
+            "还没有填 API Key；获取模型列表需要先填 Key（Ollama 不需要）".into(),
+        ));
     }
 
     let (provided, note) = fetch(profile, key.as_deref()).await?;
@@ -227,13 +238,7 @@ pub fn resolve_for_listing(
 /// 两份配置是否会向同一个地址、按同一种协议发请求。
 /// 模型名和展示名不算连接信息：改模型不该逼用户重新输一遍 Key。
 pub fn same_connection(a: &LlmProfile, b: &LlmProfile) -> bool {
-    let url = |profile: &LlmProfile| {
-        profile
-            .base_url
-            .trim()
-            .trim_end_matches('/')
-            .to_string()
-    };
+    let url = |profile: &LlmProfile| profile.base_url.trim().trim_end_matches('/').to_string();
     let opt = |value: &Option<String>| {
         value
             .as_deref()
@@ -273,12 +278,17 @@ async fn write_cache(db: &Db, key: &str, cached: &CachedModels) -> AppResult<()>
 }
 
 /// 按协议拉取。返回接口原始条目 + 一段给界面看的说明。
-async fn fetch(profile: &LlmProfile, key: Option<&str>) -> AppResult<(Vec<Provided>, Option<String>)> {
+async fn fetch(
+    profile: &LlmProfile,
+    key: Option<&str>,
+) -> AppResult<(Vec<Provided>, Option<String>)> {
     let http = client()?;
     let (mut models, note) = match profile.kind {
-        ProviderKind::Openai if is_aliyun(&profile.base_url) => {
-            with_aliyun_known_models(fetch_openai(&http, profile, key).await, &profile.base_url, key)?
-        }
+        ProviderKind::Openai if is_aliyun(&profile.base_url) => with_aliyun_known_models(
+            fetch_openai(&http, profile, key).await,
+            &profile.base_url,
+            key,
+        )?,
         ProviderKind::Openai => (fetch_openai(&http, profile, key).await?, None),
         ProviderKind::Anthropic => (fetch_anthropic(&http, profile, key).await?, None),
         ProviderKind::Gemini => (fetch_gemini(&http, profile, key).await?, None),
@@ -309,12 +319,22 @@ const ALIYUN_HOSTED_MODELS: &[&str] = &[
 ];
 
 /// 接口不给列表时（Token Plan）再补上的千问模型（同一批官方文档里出现的）。
-const ALIYUN_QWEN_FALLBACK: &[&str] = &["qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"];
+const ALIYUN_QWEN_FALLBACK: &[&str] = &[
+    "qwen3.8-max",
+    "qwen3.8-flash",
+    "qwen3.7-max",
+    "qwen3.7-plus",
+    "qwen3.6-flash",
+];
 
 /// 是不是阿里云的大模型接口：百炼（dashscope / maas.aliyuncs.com）或千问AI平台（qianwenaiapi.com）。
 fn is_aliyun(base_url: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(base_url.trim()) else { return false };
-    let Some(host) = url.host_str() else { return false };
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
     let host = host.to_ascii_lowercase();
     let under = |domain: &str| host == domain || host.ends_with(&format!(".{domain}"));
     under("dashscope.aliyuncs.com")
@@ -415,7 +435,9 @@ async fn fetch_openai(
         profile.base_url.trim()
     };
     let base = crate::llm::openai::normalize_openai_base_url(input);
-    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || join(&base, "models"));
+    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || {
+        join(&base, "models")
+    });
     let mut request = http.get(url);
     if let Some(key) = key {
         request = request.bearer_auth(key);
@@ -430,8 +452,15 @@ async fn fetch_anthropic(
     key: Option<&str>,
 ) -> AppResult<Vec<Provided>> {
     let base = base(profile, "https://api.anthropic.com");
-    let base = base.trim_end_matches("/messages").trim_end_matches('/').to_string();
-    let base = if base.ends_with("/v1") { base } else { format!("{base}/v1") };
+    let base = base
+        .trim_end_matches("/messages")
+        .trim_end_matches('/')
+        .to_string();
+    let base = if base.ends_with("/v1") {
+        base
+    } else {
+        format!("{base}/v1")
+    };
     let url = resolve_endpoint(&base, path_override(profile).as_deref(), || {
         format!("{base}/models?limit=1000")
     });
@@ -467,7 +496,9 @@ async fn fetch_gemini(
 
 async fn fetch_ollama(http: &reqwest::Client, profile: &LlmProfile) -> AppResult<Vec<Provided>> {
     let base = base(profile, "http://127.0.0.1:11434");
-    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || join(&base, "api/tags"));
+    let url = resolve_endpoint(&base, path_override(profile).as_deref(), || {
+        join(&base, "api/tags")
+    });
     let value = get_json(http.get(url), "Ollama").await?;
     Ok(parse_ollama_models(&value))
 }
@@ -489,10 +520,17 @@ async fn detect_ollama_at(base: &str) -> Option<Vec<String>> {
         .no_proxy()
         .build()
         .ok()?;
-    let value = get_json(http.get(format!("{base}/api/tags")), "Ollama").await.ok()?;
+    let value = get_json(http.get(format!("{base}/api/tags")), "Ollama")
+        .await
+        .ok()?;
     // 不是 Ollama 的服务碰巧占了这个端口：没有 models 数组就当没检测到。
     value.get("models")?.as_array()?;
-    Some(parse_ollama_models(&value).into_iter().map(|model| model.id).collect())
+    Some(
+        parse_ollama_models(&value)
+            .into_iter()
+            .map(|model| model.id)
+            .collect(),
+    )
 }
 
 pub const LOCAL_OLLAMA: &str = "http://127.0.0.1:11434";
@@ -504,7 +542,9 @@ async fn fetch_azure(
 ) -> AppResult<(Vec<Provided>, Option<String>)> {
     let endpoint = base(profile, "");
     if endpoint.is_empty() {
-        return Err(AppError::Config("Azure OpenAI 需要填资源端点，例如 https://xxx.openai.azure.com".into()));
+        return Err(AppError::Config(
+            "Azure OpenAI 需要填资源端点，例如 https://xxx.openai.azure.com".into(),
+        ));
     }
     let version = profile
         .api_version
@@ -526,8 +566,9 @@ async fn fetch_azure(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if status.is_success() {
-        let value: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|error| AppError::Other(format!("Azure OpenAI 模型列表不是合法 JSON：{error}")))?;
+        let value: serde_json::Value = serde_json::from_str(&body).map_err(|error| {
+            AppError::Other(format!("Azure OpenAI 模型列表不是合法 JSON：{error}"))
+        })?;
         return Ok((parse_openai_models(&value), None));
     }
     // 只有「这个接口/版本不存在」才退化成手填；401、网络错误必须原样报出去，
@@ -535,7 +576,10 @@ async fn fetch_azure(
     if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::BAD_REQUEST {
         return Ok((
             vec![Provided {
-                id: profile.deployment.clone().unwrap_or_else(|| profile.model.clone()),
+                id: profile
+                    .deployment
+                    .clone()
+                    .unwrap_or_else(|| profile.model.clone()),
                 display_name: None,
                 context: None,
                 max_output: None,
@@ -543,7 +587,10 @@ async fn fetch_azure(
                 output: None,
                 capabilities: None,
             }],
-            Some("Azure 不提供 deployment 列表，下面显示的是当前部署名；部署名请按 Azure 门户里填。".into()),
+            Some(
+                "Azure 不提供 deployment 列表，下面显示的是当前部署名；部署名请按 Azure 门户里填。"
+                    .into(),
+            ),
         ));
     }
     Err(http_error("Azure OpenAI", status, &body))
@@ -599,13 +646,17 @@ pub(crate) fn parse_openai_models(value: &serde_json::Value) -> Vec<Provided> {
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .map(str::to_string),
-                context: u32_of(&item["context_length"]).or_else(|| u32_of(&item["context_window"])),
-                max_output: u32_of(&item["max_output_tokens"]).or_else(|| u32_of(&item["top_provider"]["max_completion_tokens"])),
+                context: u32_of(&item["context_length"])
+                    .or_else(|| u32_of(&item["context_window"])),
+                max_output: u32_of(&item["max_output_tokens"])
+                    .or_else(|| u32_of(&item["top_provider"]["max_completion_tokens"])),
                 input: price_per_million(&item["pricing"]["prompt"]),
                 output: price_per_million(&item["pricing"]["completion"]),
                 capabilities: has_capability_data.then(|| ModelCapabilities {
                     vision: modalities.iter().any(|m| m == "image"),
-                    tools: parameters.iter().any(|p| p == "tools" || p == "tool_choice"),
+                    tools: parameters
+                        .iter()
+                        .any(|p| p == "tools" || p == "tool_choice"),
                     json: parameters
                         .iter()
                         .any(|p| p == "response_format" || p == "structured_outputs"),
@@ -712,9 +763,8 @@ pub(crate) fn parse_ollama_models(value: &serde_json::Value) -> Vec<Provided> {
 /// 把接口条目与内置目录合并：接口有的优先，缺的用目录补。
 pub(crate) fn enrich(profile: &LlmProfile, provided: Provided) -> ModelInfo {
     let entry = catalog::lookup(&provided.id);
-    let from_provider = provided.context.is_some()
-        || provided.input.is_some()
-        || provided.capabilities.is_some();
+    let from_provider =
+        provided.context.is_some() || provided.input.is_some() || provided.capabilities.is_some();
     let mut capabilities = provided.capabilities.unwrap_or_default();
     if provided.capabilities.is_none() {
         capabilities = ModelCapabilities {
@@ -785,7 +835,10 @@ mod tests {
         .await;
         assert_eq!(
             detect_ollama_at(&base).await,
-            Some(vec!["qwen2.5:7b".to_string(), "nomic-embed-text:latest".to_string()])
+            Some(vec![
+                "qwen2.5:7b".to_string(),
+                "nomic-embed-text:latest".to_string()
+            ])
         );
     }
 
@@ -838,7 +891,10 @@ mod tests {
         let anthropic = serde_json::json!({
             "data": [{ "id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6" }]
         });
-        assert_eq!(parse_anthropic_models(&anthropic)[0].id, "claude-sonnet-4-6");
+        assert_eq!(
+            parse_anthropic_models(&anthropic)[0].id,
+            "claude-sonnet-4-6"
+        );
 
         let gemini = serde_json::json!({
             "models": [
@@ -849,11 +905,16 @@ mod tests {
             ]
         });
         let gemini_models = parse_gemini_models(&gemini);
-        assert_eq!(gemini_models.len(), 1, "embedding 模型不该出现在对话模型列表里");
+        assert_eq!(
+            gemini_models.len(),
+            1,
+            "embedding 模型不该出现在对话模型列表里"
+        );
         assert_eq!(gemini_models[0].id, "gemini-2.5-pro");
         assert_eq!(gemini_models[0].context, Some(1_048_576));
 
-        let ollama = serde_json::json!({ "models": [{ "name": "llama3.1:8b" }, { "model": "qwen3:8b" }] });
+        let ollama =
+            serde_json::json!({ "models": [{ "name": "llama3.1:8b" }, { "model": "qwen3:8b" }] });
         assert_eq!(parse_ollama_models(&ollama).len(), 2);
     }
 
@@ -901,15 +962,22 @@ mod tests {
     #[test]
     fn models_path_accepts_relative_or_full_url() {
         assert_eq!(
-            resolve_endpoint("https://api.example.com/v1", Some("models"), || "unused".into()),
+            resolve_endpoint("https://api.example.com/v1", Some("models"), || "unused"
+                .into()),
             "https://api.example.com/v1/models"
         );
         assert_eq!(
-            resolve_endpoint("https://api.example.com/v1", Some("https://gw.example.com/models"), || "unused".into()),
+            resolve_endpoint(
+                "https://api.example.com/v1",
+                Some("https://gw.example.com/models"),
+                || "unused".into()
+            ),
             "https://gw.example.com/models"
         );
         assert_eq!(
-            resolve_endpoint("https://api.example.com/v1", None, || "https://api.example.com/v1/models".into()),
+            resolve_endpoint("https://api.example.com/v1", None, || {
+                "https://api.example.com/v1/models".into()
+            }),
             "https://api.example.com/v1/models"
         );
     }
@@ -993,26 +1061,50 @@ mod tests {
         ] {
             assert!(is_aliyun(url), "{url}");
         }
-        for url in ["https://api.deepseek.com", "https://evil.example/dashscope.aliyuncs.com", "https://aliyuncs.com.evil.example/v1", "not a url"] {
+        for url in [
+            "https://api.deepseek.com",
+            "https://evil.example/dashscope.aliyuncs.com",
+            "https://aliyuncs.com.evil.example/v1",
+            "not a url",
+        ] {
             assert!(!is_aliyun(url), "{url}");
         }
     }
 
     #[test]
     fn aliyun_listing_gets_hosted_deepseek_added_and_says_so() {
-        let (models, note) =
-            with_aliyun_known_models(Ok(vec![known_model("qwen3.8-flash"), known_model("deepseek-v4-pro")]), "https://dashscope.aliyuncs.com/compatible-mode/v1", None)
-                .unwrap();
+        let (models, note) = with_aliyun_known_models(
+            Ok(vec![
+                known_model("qwen3.8-flash"),
+                known_model("deepseek-v4-pro"),
+            ]),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            None,
+        )
+        .unwrap();
         let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
         assert!(ids.contains(&"qwen3.8-flash") && ids.contains(&"deepseek-v4.1-flash"));
-        assert_eq!(ids.iter().filter(|id| **id == "deepseek-v4-pro").count(), 1, "已列出的不重复补");
+        assert_eq!(
+            ids.iter().filter(|id| **id == "deepseek-v4-pro").count(),
+            1,
+            "已列出的不重复补"
+        );
         assert!(note.unwrap().contains("DeepSeek"));
     }
 
     #[test]
     fn token_plan_without_a_model_list_falls_back_to_the_documented_models() {
-        let missing = Err(http_error("OpenAI 兼容", reqwest::StatusCode::NOT_FOUND, "no such route"));
-        let (models, note) = with_aliyun_known_models(missing, "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1", Some("sk-sp-x")).unwrap();
+        let missing = Err(http_error(
+            "OpenAI 兼容",
+            reqwest::StatusCode::NOT_FOUND,
+            "no such route",
+        ));
+        let (models, note) = with_aliyun_known_models(
+            missing,
+            "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+            Some("sk-sp-x"),
+        )
+        .unwrap();
         assert!(models.iter().any(|model| model.id == "deepseek-v4.1-flash"));
         assert!(models.iter().any(|model| model.id == "qwen3.8-max"));
         assert!(note.unwrap().contains("直接输入模型名"));
@@ -1020,10 +1112,26 @@ mod tests {
 
     #[test]
     fn auth_errors_are_not_hidden_and_a_token_plan_key_on_the_wrong_address_is_explained() {
-        let denied = || Err(http_error("OpenAI 兼容", reqwest::StatusCode::UNAUTHORIZED, "invalid key"));
-        let error = with_aliyun_known_models(denied(), "https://dashscope.aliyuncs.com/compatible-mode/v1", Some("sk-sp-abc")).unwrap_err();
+        let denied = || {
+            Err(http_error(
+                "OpenAI 兼容",
+                reqwest::StatusCode::UNAUTHORIZED,
+                "invalid key",
+            ))
+        };
+        let error = with_aliyun_known_models(
+            denied(),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            Some("sk-sp-abc"),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("token-plan"), "{error}");
-        let error = with_aliyun_known_models(denied(), "https://dashscope.aliyuncs.com/compatible-mode/v1", Some("sk-abc")).unwrap_err();
+        let error = with_aliyun_known_models(
+            denied(),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            Some("sk-abc"),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("鉴权失败"), "{error}");
     }
 }

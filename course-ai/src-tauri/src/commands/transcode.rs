@@ -205,7 +205,9 @@ mod ffi {
 
     fn progress_fn() -> Option<ProgressFn> {
         static FN: OnceLock<Option<ProgressFn>> = OnceLock::new();
-        *FN.get_or_init(|| registered_progress().or_else(|| lookup(b"courseai_transcode_progress\0")))
+        *FN.get_or_init(|| {
+            registered_progress().or_else(|| lookup(b"courseai_transcode_progress\0"))
+        })
     }
 
     pub fn run(source: &str, destination: &str) -> Result<(), String> {
@@ -307,7 +309,9 @@ pub fn plan(path: &std::path::Path, data_dir: &str) -> Option<std::path::PathBuf
 
 /// 转码产物在、非空、而且读得出这台设备放得了的编码，才算转好了。
 pub fn transcoded_ready(target: &std::path::Path) -> bool {
-    std::fs::metadata(target).map(|meta| meta.len() > 0).unwrap_or(false)
+    std::fs::metadata(target)
+        .map(|meta| meta.len() > 0)
+        .unwrap_or(false)
         && crate::pipeline::playable::video_codec(target)
             .map(crate::pipeline::playable::codec_playable_here)
             .unwrap_or(false)

@@ -181,7 +181,12 @@ impl CourseTree {
 
     /// 文件夹自己加上它下面所有层级的文件夹。
     fn subtree_folders(&self, root: &str) -> HashSet<String> {
-        subtree_of(root, self.folder_parent.iter().map(|(id, parent)| (id.as_str(), parent.as_deref())))
+        subtree_of(
+            root,
+            self.folder_parent
+                .iter()
+                .map(|(id, parent)| (id.as_str(), parent.as_deref())),
+        )
     }
 
     /// 先序编号：`keys` 覆盖兄弟之间的排序键（移动 / 拖动排序时用）。
@@ -285,7 +290,13 @@ pub async fn create_folder(
     let id = Uuid::new_v4().to_string();
     // 排序键取全课最大 + 1：在它那一层里自然排最后，重编号再把后面的让开。
     let tree = CourseTree::load(&mut tx, course_id).await?;
-    let key = tree.order.values().map(|(index, _)| *index).max().unwrap_or(-1) + 1;
+    let key = tree
+        .order
+        .values()
+        .map(|(index, _)| *index)
+        .max()
+        .unwrap_or(-1)
+        + 1;
     sqlx::query(
         "INSERT INTO folders(id,course_id,parent_id,name,order_index,created_at,updated_at)
          VALUES (?,?,?,?,?,?,?)",
@@ -410,9 +421,9 @@ pub async fn move_items(
     for item in &items {
         let course: Option<String> = match item.kind {
             ItemKind::Folder => sqlx::query_scalar("SELECT course_id FROM folders WHERE id=?"),
-            ItemKind::Video => sqlx::query_scalar(
-                "SELECT course_id FROM videos WHERE id=? AND deleted_at IS NULL",
-            ),
+            ItemKind::Video => {
+                sqlx::query_scalar("SELECT course_id FROM videos WHERE id=? AND deleted_at IS NULL")
+            }
         }
         .bind(&item.id)
         .fetch_optional(&mut *tx)
@@ -578,7 +589,10 @@ async fn detach_course_knowledge(
 }
 
 /// 文件夹自己加上它下面所有层级的文件夹。`edges` 是（文件夹，上级）；成环的部分不会无限展开。
-pub(crate) fn subtree_of<'a>(root: &str, edges: impl Iterator<Item = (&'a str, Option<&'a str>)>) -> HashSet<String> {
+pub(crate) fn subtree_of<'a>(
+    root: &str,
+    edges: impl Iterator<Item = (&'a str, Option<&'a str>)>,
+) -> HashSet<String> {
     let edges: Vec<(&str, Option<&str>)> = edges.collect();
     let mut out = HashSet::from([root.to_string()]);
     loop {
@@ -767,7 +781,15 @@ mod tests {
         let videos = list_videos_for_ui(db, course).await.unwrap();
         let mut items: Vec<(i64, Option<String>, String, bool, String)> = folders
             .iter()
-            .map(|x| (x.order_index, x.parent_id.clone(), x.name.clone(), true, x.id.clone()))
+            .map(|x| {
+                (
+                    x.order_index,
+                    x.parent_id.clone(),
+                    x.name.clone(),
+                    true,
+                    x.id.clone(),
+                )
+            })
             .chain(videos.iter().map(|x| {
                 (
                     x.video.order_index,
@@ -783,7 +805,12 @@ mod tests {
             let mut d = 0;
             while let Some(p) = parent {
                 d += 1;
-                parent = folders.iter().find(|x| x.id == p).unwrap().parent_id.clone();
+                parent = folders
+                    .iter()
+                    .find(|x| x.id == p)
+                    .unwrap()
+                    .parent_id
+                    .clone();
             }
             d
         };
@@ -807,7 +834,10 @@ mod tests {
     #[tokio::test]
     async fn folders_and_videos_share_one_preorder_sequence() {
         let db = fresh_db().await;
-        let course = create_course(&db, "模拟电路".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "模拟电路".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let intro = video(&db, &course, "课程介绍").await;
         let pn = video(&db, &course, "1.1 PN结").await;
         let diode = video(&db, &course, "1.2 二极管").await;
@@ -817,9 +847,13 @@ mod tests {
         move_items(&db, &course, Some(ch1.id.clone()), vec![v(&pn), v(&diode)])
             .await
             .unwrap();
-        let sub = create_folder(&db, &course, Some(ch2.id.clone()), "2.1 共射放大").await.unwrap();
+        let sub = create_folder(&db, &course, Some(ch2.id.clone()), "2.1 共射放大")
+            .await
+            .unwrap();
         let amp = video(&db, &course, "共射电路").await;
-        move_items(&db, &course, Some(sub.id.clone()), vec![v(&amp)]).await.unwrap();
+        move_items(&db, &course, Some(sub.id.clone()), vec![v(&amp)])
+            .await
+            .unwrap();
         assert_eq!(
             outline(&db, &course).await,
             [
@@ -833,13 +867,12 @@ mod tests {
             ]
         );
         // 全课程按视频号排就是教材顺序。
-        let flat: Vec<String> = sqlx::query_scalar(
-            "SELECT title FROM videos WHERE course_id=? ORDER BY order_index",
-        )
-        .bind(&course)
-        .fetch_all(&db.pool)
-        .await
-        .unwrap();
+        let flat: Vec<String> =
+            sqlx::query_scalar("SELECT title FROM videos WHERE course_id=? ORDER BY order_index")
+                .bind(&course)
+                .fetch_all(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(flat, ["课程介绍", "1.1 PN结", "1.2 二极管", "共射电路"]);
         let _ = intro;
     }
@@ -847,11 +880,16 @@ mod tests {
     #[tokio::test]
     async fn reorder_moves_folders_and_videos_together() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let a = video(&db, &course, "a").await;
         let ch = create_folder(&db, &course, None, "ch").await.unwrap();
         let b = video(&db, &course, "b").await;
-        move_items(&db, &course, Some(ch.id.clone()), vec![v(&b)]).await.unwrap();
+        move_items(&db, &course, Some(ch.id.clone()), vec![v(&b)])
+            .await
+            .unwrap();
         let z = video(&db, &course, "z").await;
         // 根目录：a, ch/, z → z, ch/, a
         reorder_container(&db, &course, None, vec![v(&z), f(&ch.id), v(&a)])
@@ -869,9 +907,14 @@ mod tests {
     #[tokio::test]
     async fn cannot_move_a_folder_into_itself() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let outer = create_folder(&db, &course, None, "outer").await.unwrap();
-        let inner = create_folder(&db, &course, Some(outer.id.clone()), "inner").await.unwrap();
+        let inner = create_folder(&db, &course, Some(outer.id.clone()), "inner")
+            .await
+            .unwrap();
         for target in [&outer.id, &inner.id] {
             let err = move_items(&db, &course, Some(target.clone()), vec![f(&outer.id)])
                 .await
@@ -879,36 +922,60 @@ mod tests {
             assert!(err.to_string().contains("自己里面"), "{err}");
         }
         // 反过来把内层提到根目录可以。
-        move_items(&db, &course, None, vec![f(&inner.id)]).await.unwrap();
+        move_items(&db, &course, None, vec![f(&inner.id)])
+            .await
+            .unwrap();
         assert_eq!(outline(&db, &course).await, ["outer/", "inner/"]);
     }
 
     #[tokio::test]
     async fn moving_a_folder_with_a_selected_child_keeps_the_child_inside() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let ch = create_folder(&db, &course, None, "ch").await.unwrap();
         let target = create_folder(&db, &course, None, "target").await.unwrap();
         let x = video(&db, &course, "x").await;
-        move_items(&db, &course, Some(ch.id.clone()), vec![v(&x)]).await.unwrap();
-        move_items(&db, &course, Some(target.id.clone()), vec![v(&x), f(&ch.id)])
+        move_items(&db, &course, Some(ch.id.clone()), vec![v(&x)])
             .await
             .unwrap();
+        move_items(
+            &db,
+            &course,
+            Some(target.id.clone()),
+            vec![v(&x), f(&ch.id)],
+        )
+        .await
+        .unwrap();
         assert_eq!(outline(&db, &course).await, ["target/", "  ch/", "    x"]);
     }
 
     #[tokio::test]
     async fn moving_across_courses_carries_the_whole_subtree() {
         let db = fresh_db().await;
-        let src = create_course(&db, "src".into(), "/s".into()).await.unwrap().id;
-        let dst = create_course(&db, "dst".into(), "/d".into()).await.unwrap().id;
+        let src = create_course(&db, "src".into(), "/s".into())
+            .await
+            .unwrap()
+            .id;
+        let dst = create_course(&db, "dst".into(), "/d".into())
+            .await
+            .unwrap()
+            .id;
         let keep = video(&db, &src, "keep").await;
         let ch = create_folder(&db, &src, None, "ch").await.unwrap();
-        let sub = create_folder(&db, &src, Some(ch.id.clone()), "sub").await.unwrap();
+        let sub = create_folder(&db, &src, Some(ch.id.clone()), "sub")
+            .await
+            .unwrap();
         let a = video(&db, &src, "a").await;
         let b = video(&db, &src, "b").await;
-        move_items(&db, &src, Some(ch.id.clone()), vec![v(&a)]).await.unwrap();
-        move_items(&db, &src, Some(sub.id.clone()), vec![v(&b)]).await.unwrap();
+        move_items(&db, &src, Some(ch.id.clone()), vec![v(&a)])
+            .await
+            .unwrap();
+        move_items(&db, &src, Some(sub.id.clone()), vec![v(&b)])
+            .await
+            .unwrap();
         video(&db, &dst, "already").await;
 
         move_items(&db, &dst, None, vec![f(&ch.id)]).await.unwrap();
@@ -924,8 +991,14 @@ mod tests {
     #[tokio::test]
     async fn moving_a_video_to_another_course_takes_its_review_and_concepts_along() {
         let db = fresh_db().await;
-        let src = create_course(&db, "src".into(), "/s".into()).await.unwrap().id;
-        let dst = create_course(&db, "dst".into(), "/d".into()).await.unwrap().id;
+        let src = create_course(&db, "src".into(), "/s".into())
+            .await
+            .unwrap()
+            .id;
+        let dst = create_course(&db, "dst".into(), "/d".into())
+            .await
+            .unwrap()
+            .id;
         let moved = video(&db, &src, "moved").await;
         let stays = video(&db, &src, "stays").await;
         for (id, vid) in [("card-moved", &moved), ("card-stays", &stays)] {
@@ -935,49 +1008,89 @@ mod tests {
         // 「梯度」两个视频都讲到；「卷积」只有要移走的视频讲到。
         for (cid, name) in [("k-grad", "梯度"), ("k-conv", "卷积")] {
             sqlx::query("INSERT INTO concepts(id,course_id,name) VALUES (?,?,?)")
-                .bind(cid).bind(&src).bind(name).execute(&db.pool).await.unwrap();
+                .bind(cid)
+                .bind(&src)
+                .bind(name)
+                .execute(&db.pool)
+                .await
+                .unwrap();
         }
         for (cid, vid) in [("k-grad", &moved), ("k-grad", &stays), ("k-conv", &moved)] {
-            sqlx::query("INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES (?,?,0)")
-                .bind(cid).bind(vid).execute(&db.pool).await.unwrap();
+            sqlx::query(
+                "INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES (?,?,0)",
+            )
+            .bind(cid)
+            .bind(vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
         }
         sqlx::query("INSERT INTO course_knowledge_overviews(course_id,content_json,source_fingerprint,generated_at) VALUES (?,'{}','x',0)")
             .bind(&src).execute(&db.pool).await.unwrap();
 
         move_items(&db, &dst, None, vec![v(&moved)]).await.unwrap();
 
-        let card_course: String = sqlx::query_scalar("SELECT course_id FROM cards WHERE id='card-moved'")
-            .fetch_one(&db.pool).await.unwrap();
+        let card_course: String =
+            sqlx::query_scalar("SELECT course_id FROM cards WHERE id='card-moved'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(card_course, dst);
         let concepts: Vec<String> = sqlx::query_scalar("SELECT name FROM concepts ORDER BY name")
-            .fetch_all(&db.pool).await.unwrap();
+            .fetch_all(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(concepts, ["梯度"], "只剩移走的视频讲到的知识点删掉了");
-        let occ: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM concept_occurrences WHERE video_id=?")
-            .bind(&moved).fetch_one(&db.pool).await.unwrap();
+        let occ: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM concept_occurrences WHERE video_id=?")
+                .bind(&moved)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(occ, 0);
         let overviews: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM course_knowledge_overviews")
-            .fetch_one(&db.pool).await.unwrap();
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(overviews, 0);
         // 别的设备同步来的卡片还带着原课程：复习队列仍按视频现在的课程归类。
-        sqlx::query("UPDATE cards SET course_id=? WHERE id='card-moved'").bind(&src).execute(&db.pool).await.unwrap();
+        sqlx::query("UPDATE cards SET course_id=? WHERE id='card-moved'")
+            .bind(&src)
+            .execute(&db.pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO card_schedule(card_id,due_at,ease,interval_days,reps,lapses) VALUES ('card-moved',0,0,0,0,0)")
             .execute(&db.pool).await.unwrap();
-        let due = crate::commands::srs::due_cards_for_course(&db, 1, &dst, 10).await.unwrap();
+        let due = crate::commands::srs::due_cards_for_course(&db, 1, &dst, 10)
+            .await
+            .unwrap();
         assert_eq!(due.len(), 1);
-        assert!(crate::commands::srs::due_cards_for_course(&db, 1, &src, 10).await.unwrap().is_empty());
+        assert!(crate::commands::srs::due_cards_for_course(&db, 1, &src, 10)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
     async fn deleting_a_folder_trashes_its_videos_and_drops_subfolders() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let ch = create_folder(&db, &course, None, "ch").await.unwrap();
-        let sub = create_folder(&db, &course, Some(ch.id.clone()), "sub").await.unwrap();
+        let sub = create_folder(&db, &course, Some(ch.id.clone()), "sub")
+            .await
+            .unwrap();
         let a = video(&db, &course, "a").await;
         let b = video(&db, &course, "b").await;
         let c = video(&db, &course, "c").await;
-        move_items(&db, &course, Some(ch.id.clone()), vec![v(&a)]).await.unwrap();
-        move_items(&db, &course, Some(sub.id.clone()), vec![v(&b)]).await.unwrap();
+        move_items(&db, &course, Some(ch.id.clone()), vec![v(&a)])
+            .await
+            .unwrap();
+        move_items(&db, &course, Some(sub.id.clone()), vec![v(&b)])
+            .await
+            .unwrap();
         assert_eq!(folder_video_ids(&db, &ch.id).await.unwrap().len(), 2);
 
         delete_folder(&db, &ch.id).await.unwrap();
@@ -1006,7 +1119,10 @@ mod tests {
     #[tokio::test]
     async fn dangling_parents_and_cycles_read_as_root() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let p = create_folder(&db, &course, None, "p").await.unwrap();
         let q = create_folder(&db, &course, None, "q").await.unwrap();
         // 并发移动在两台设备上各做一半：p 进 q、q 进 p。
@@ -1049,17 +1165,32 @@ mod tests {
     #[tokio::test]
     async fn folder_names_and_colors_are_validated() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         assert!(create_folder(&db, &course, None, "  ").await.is_err());
         let folder = create_folder(&db, &course, None, "a").await.unwrap();
         rename_folder(&db, &folder.id, "b").await.unwrap();
         assert!(rename_folder(&db, &folder.id, " ").await.is_err());
-        set_folder_color(&db, &folder.id, Some("green".into())).await.unwrap();
-        assert!(set_folder_color(&db, &folder.id, Some("#000".into())).await.is_err());
+        set_folder_color(&db, &folder.id, Some("green".into()))
+            .await
+            .unwrap();
+        assert!(set_folder_color(&db, &folder.id, Some("#000".into()))
+            .await
+            .is_err());
         let listed = list_folders(&db, &course).await.unwrap();
-        assert_eq!((listed[0].name.as_str(), listed[0].color.as_deref()), ("b", Some("green")));
+        assert_eq!(
+            (listed[0].name.as_str(), listed[0].color.as_deref()),
+            ("b", Some("green"))
+        );
         // 上级文件夹必须在同一门课。
-        let other = create_course(&db, "D".into(), "/d".into()).await.unwrap().id;
-        assert!(create_folder(&db, &other, Some(folder.id.clone()), "x").await.is_err());
+        let other = create_course(&db, "D".into(), "/d".into())
+            .await
+            .unwrap()
+            .id;
+        assert!(create_folder(&db, &other, Some(folder.id.clone()), "x")
+            .await
+            .is_err());
     }
 }

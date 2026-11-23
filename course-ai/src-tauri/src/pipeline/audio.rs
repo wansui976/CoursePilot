@@ -133,7 +133,11 @@ async fn prepare_whisper_audio(
     )
     .await
     .map_err(AppError::Pipeline)?;
-    Ok(PreparedAudio::new(exported.path, exported.mime, exported.format))
+    Ok(PreparedAudio::new(
+        exported.path,
+        exported.mime,
+        exported.format,
+    ))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

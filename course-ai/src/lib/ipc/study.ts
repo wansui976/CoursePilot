@@ -26,6 +26,7 @@ import type {
   CardMark,
   CardHistory,
   MistakeCard,
+  ConceptMastery,
 } from "./types";
 
 export const srs = {
@@ -68,6 +69,12 @@ export const srs = {
   // 错题本：答错过、还没连对三次的卡；不传课程就是全部。
   mistakes: (courseId: string | null): Promise<MistakeCard[]> =>
     invoke("cmd_mistake_cards", { courseId }),
+  // 复习错题本里的一张卡（可提前复习，走同一套 FSRS）。
+  reviewMistake: (cardId: string, rating: number): Promise<void> =>
+    invoke("cmd_review_mistake", { cardId, rating }),
+  // 每个知识点现在还记得多少（收集册里卡片的亮度）。
+  conceptMastery: (courseId: string): Promise<ConceptMastery[]> =>
+    invoke("cmd_concept_mastery", { courseId }),
 };
 
 export const stats = {

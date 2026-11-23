@@ -988,8 +988,14 @@ mod tests {
         let live = database_with_marker(&live_path, "current").await;
         let source_path = dir.path().join("copied-from-elsewhere.db");
         let source = Db::connect_and_migrate(&source_path).await.unwrap();
-        sqlx::query("PRAGMA journal_mode=WAL").execute(&source.pool).await.unwrap();
-        sqlx::query("PRAGMA wal_autocheckpoint=0").execute(&source.pool).await.unwrap();
+        sqlx::query("PRAGMA journal_mode=WAL")
+            .execute(&source.pool)
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA wal_autocheckpoint=0")
+            .execute(&source.pool)
+            .await
+            .unwrap();
         sqlx::query("INSERT INTO settings(key,value) VALUES('restore-marker','only-in-wal')")
             .execute(&source.pool)
             .await
@@ -997,10 +1003,15 @@ mod tests {
         let wal = PathBuf::from(format!("{}-wal", source_path.to_string_lossy()));
         assert!(wal.metadata().unwrap().len() > 0, "前提：提交还在 -wal 里");
 
-        stage_database_restore(&live, &source_path, dir.path()).await.unwrap();
+        stage_database_restore(&live, &source_path, dir.path())
+            .await
+            .unwrap();
         live.pool.close().await;
         assert!(apply_pending_restore(dir.path(), &live_path).await.unwrap());
-        assert_eq!(read_setting(&live_path, "restore-marker").await, Some("only-in-wal".into()));
+        assert_eq!(
+            read_setting(&live_path, "restore-marker").await,
+            Some("only-in-wal".into())
+        );
         source.pool.close().await;
     }
 

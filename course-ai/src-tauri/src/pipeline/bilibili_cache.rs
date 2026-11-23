@@ -243,7 +243,9 @@ pub fn sanitize(name: &str) -> String {
         .collect();
     let cleaned = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let cleaned: String = cleaned.chars().take(MAX_TITLE_CHARS).collect();
-    let cleaned = cleaned.trim_matches(|c: char| c == '.' || c.is_whitespace()).to_string();
+    let cleaned = cleaned
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .to_string();
     if cleaned.is_empty() {
         "bilibili".into()
     } else {
@@ -415,7 +417,10 @@ mod tests {
             write(&dir.join(format!("{cid}-{page}-30280.m4s")), b"a");
         }
         // 没有 m4s 的目录（还没缓存完）不算。
-        write(&root.path().join("333/videoInfo.json"), r#"{"title":"空"}"#.as_bytes());
+        write(
+            &root.path().join("333/videoInfo.json"),
+            r#"{"title":"空"}"#.as_bytes(),
+        );
 
         let entries = find_entries(root.path());
         let titles: Vec<&str> = entries.iter().map(|e| e.title.as_str()).collect();
@@ -469,11 +474,16 @@ mod tests {
 
     #[test]
     fn classifies_streams_from_ffmpeg_output() {
-        let video = "  Stream #0:0[0x1](und): Video: hevc (Main) (hev1 / 0x31766568), yuv420p, 1920x1080\n";
-        let audio = "  Stream #0:0[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo\n";
+        let video =
+            "  Stream #0:0[0x1](und): Video: hevc (Main) (hev1 / 0x31766568), yuv420p, 1920x1080\n";
+        let audio =
+            "  Stream #0:0[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo\n";
         assert_eq!(stream_kind(video), Some(StreamKind::Video));
         assert_eq!(stream_kind(audio), Some(StreamKind::Audio));
-        assert_eq!(stream_kind("Invalid data found when processing input"), None);
+        assert_eq!(
+            stream_kind("Invalid data found when processing input"),
+            None
+        );
     }
 
     /// 真跑一遍 ffmpeg：造一对带 9 字节前缀的 DASH 分片流，合成出来要有画面和声音。
@@ -489,7 +499,12 @@ mod tests {
             let status = std::process::Command::new(&ffmpeg)
                 .args(["-v", "error", "-y"])
                 .args(args)
-                .args(["-movflags", "+frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"])
+                .args([
+                    "-movflags",
+                    "+frag_keyframe+empty_moov+default_base_moof",
+                    "-f",
+                    "mp4",
+                ])
                 .arg(out)
                 .status()
                 .unwrap();
@@ -497,8 +512,22 @@ mod tests {
         };
         let raw_video = work.path().join("v.mp4");
         let raw_audio = work.path().join("a.mp4");
-        make(&["-f", "lavfi", "-i", "testsrc=size=160x120:rate=10", "-t", "2", "-an"], &raw_video);
-        make(&["-f", "lavfi", "-i", "sine=f=440:r=44100", "-t", "2", "-vn"], &raw_audio);
+        make(
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=160x120:rate=10",
+                "-t",
+                "2",
+                "-an",
+            ],
+            &raw_video,
+        );
+        make(
+            &["-f", "lavfi", "-i", "sine=f=440:r=44100", "-t", "2", "-vn"],
+            &raw_audio,
+        );
 
         let cache = work.path().join("cache/555");
         std::fs::create_dir_all(&cache).unwrap();
@@ -507,7 +536,10 @@ mod tests {
             r#"{"title":"测试课","groupTitle":"测试课","p":1,"cid":555}"#,
         )
         .unwrap();
-        for (raw, name) in [(&raw_video, "555-1-30016.m4s"), (&raw_audio, "555-1-30280.m4s")] {
+        for (raw, name) in [
+            (&raw_video, "555-1-30016.m4s"),
+            (&raw_audio, "555-1-30280.m4s"),
+        ] {
             let mut bytes = b"000000000".to_vec();
             bytes.extend(std::fs::read(raw).unwrap());
             std::fs::write(cache.join(name), bytes).unwrap();
@@ -526,7 +558,10 @@ mod tests {
         assert_eq!(stream_kind(&info), Some(StreamKind::Video));
         assert!(info.contains(": Audio:"), "{info}");
         // 缓存原文件一个字节都不动；再导一次直接复用合成好的文件。
-        assert_eq!(std::fs::read(cache.join("555-1-30016.m4s")).unwrap(), before);
+        assert_eq!(
+            std::fs::read(cache.join("555-1-30016.m4s")).unwrap(),
+            before
+        );
         assert_eq!(remux(&entry, &work.path().join("data")).await.unwrap(), out);
     }
 }

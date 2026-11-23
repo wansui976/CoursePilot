@@ -97,7 +97,10 @@ pub fn local_model(id: &str) -> Option<&'static LocalEmbedModel> {
 pub const LOCAL_SUPPORTED: bool = cfg!(not(any(target_os = "android", target_os = "ios")));
 
 pub fn model_path(models_root: &Path, model: &LocalEmbedModel) -> PathBuf {
-    models_root.join("embed").join(model.dir).join(model.file.path)
+    models_root
+        .join("embed")
+        .join(model.dir)
+        .join(model.file.path)
 }
 
 pub fn is_installed(models_root: &Path, model: &LocalEmbedModel) -> bool {
@@ -105,7 +108,10 @@ pub fn is_installed(models_root: &Path, model: &LocalEmbedModel) -> bool {
         .is_ok_and(|meta| meta.is_file() && meta.len() == model.file.size)
 }
 
-pub fn missing_files(models_root: &Path, model: &'static LocalEmbedModel) -> Vec<(PathBuf, &'static ModelFile)> {
+pub fn missing_files(
+    models_root: &Path,
+    model: &'static LocalEmbedModel,
+) -> Vec<(PathBuf, &'static ModelFile)> {
     if is_installed(models_root, model) {
         Vec::new()
     } else {
@@ -142,7 +148,9 @@ impl Embedder {
     pub fn id(&self) -> String {
         match self {
             Embedder::Local { model, .. } => format!("local:{}", model.id),
-            Embedder::Cloud { base_url, model, .. } => {
+            Embedder::Cloud {
+                base_url, model, ..
+            } => {
                 format!("cloud:{}:{}", base_url.trim_end_matches('/'), model)
             }
         }
@@ -169,15 +177,22 @@ pub async fn current_embedder(db: &Db) -> AppResult<Option<Embedder>> {
             }))
         }
         Some("cloud") => {
-            let profile_id = get_setting(db, SETTING_CLOUD_PROFILE).await?.unwrap_or_default();
-            let model = get_setting(db, SETTING_CLOUD_MODEL).await?.unwrap_or_default();
+            let profile_id = get_setting(db, SETTING_CLOUD_PROFILE)
+                .await?
+                .unwrap_or_default();
+            let model = get_setting(db, SETTING_CLOUD_MODEL)
+                .await?
+                .unwrap_or_default();
             if profile_id.trim().is_empty() || model.trim().is_empty() {
                 return Ok(None);
             }
             let profiles = crate::llm::profiles::parse_profiles(
                 get_setting(db, "llm_profiles").await?.as_deref(),
             )?;
-            let Some(profile) = profiles.into_iter().find(|profile| profile.id == profile_id) else {
+            let Some(profile) = profiles
+                .into_iter()
+                .find(|profile| profile.id == profile_id)
+            else {
                 return Ok(None);
             };
             Ok(Some(Embedder::Cloud {
@@ -205,7 +220,12 @@ const CLOUD_BATCH: usize = 10;
 /// 本地一次送几段。
 const LOCAL_BATCH: usize = 32;
 
-pub async fn embed(db: &Db, embedder: &Embedder, texts: &[String], purpose: Purpose) -> AppResult<Vec<Vec<f32>>> {
+pub async fn embed(
+    db: &Db,
+    embedder: &Embedder,
+    texts: &[String],
+    purpose: Purpose,
+) -> AppResult<Vec<Vec<f32>>> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
@@ -224,7 +244,9 @@ pub async fn embed(db: &Db, embedder: &Embedder, texts: &[String], purpose: Purp
             }
             out
         }
-        Embedder::Cloud { profile_id, model, .. } => {
+        Embedder::Cloud {
+            profile_id, model, ..
+        } => {
             let (provider, _) = crate::commands::ai::provider_for_profile(db, profile_id).await?;
             let mut out = Vec::with_capacity(texts.len());
             for batch in texts.chunks(CLOUD_BATCH) {
@@ -301,7 +323,9 @@ mod local_server {
 
     async fn start(model: &'static LocalEmbedModel, path: &Path) -> AppResult<Server> {
         let binary = crate::sidecar::resolve(&crate::sidecar::LLAMA_SERVER, None)?;
-        let port = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")?
+            .local_addr()?
+            .port();
         let threads = std::thread::available_parallelism()
             .map(|n| (n.get() / 2).clamp(2, 8))
             .unwrap_or(4);
@@ -324,13 +348,20 @@ mod local_server {
         let base = format!("http://127.0.0.1:{port}");
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
-            if let Ok(response) = http().get(format!("{base}/health")).timeout(Duration::from_secs(2)).send().await {
+            if let Ok(response) = http()
+                .get(format!("{base}/health"))
+                .timeout(Duration::from_secs(2))
+                .send()
+                .await
+            {
                 if response.status().is_success() {
                     break;
                 }
             }
             if matches!(child.try_wait(), Ok(Some(_))) || Instant::now() >= deadline {
-                return Err(AppError::Other("本地嵌入模型没能启动（模型文件可能损坏，可在设置里删掉重下）".into()));
+                return Err(AppError::Other(
+                    "本地嵌入模型没能启动（模型文件可能损坏，可在设置里删掉重下）".into(),
+                ));
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
@@ -348,7 +379,10 @@ mod local_server {
                 loop {
                     tokio::time::sleep(Duration::from_secs(30)).await;
                     let mut guard = SERVER.lock().await;
-                    if guard.as_ref().is_some_and(|server| server.last_used.elapsed() >= IDLE_EXIT) {
+                    if guard
+                        .as_ref()
+                        .is_some_and(|server| server.last_used.elapsed() >= IDLE_EXIT)
+                    {
                         if let Some(mut server) = guard.take() {
                             let _ = server.child.kill().await;
                         }
@@ -358,13 +392,17 @@ mod local_server {
         });
     }
 
-    pub async fn embed(model: &'static LocalEmbedModel, path: &Path, inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
+    pub async fn embed(
+        model: &'static LocalEmbedModel,
+        path: &Path,
+        inputs: &[String],
+    ) -> AppResult<Vec<Vec<f32>>> {
         ensure_reaper();
         let base = {
             let mut guard = SERVER.lock().await;
-            let alive = guard
-                .as_mut()
-                .is_some_and(|server| server.model_id == model.id && matches!(server.child.try_wait(), Ok(None)));
+            let alive = guard.as_mut().is_some_and(|server| {
+                server.model_id == model.id && matches!(server.child.try_wait(), Ok(None))
+            });
             if !alive {
                 if let Some(mut old) = guard.take() {
                     let _ = old.child.kill().await;
@@ -384,9 +422,15 @@ mod local_server {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(AppError::Other(format!("本地嵌入模型返回 {status}：{}", body.chars().take(200).collect::<String>())));
+            return Err(AppError::Other(format!(
+                "本地嵌入模型返回 {status}：{}",
+                body.chars().take(200).collect::<String>()
+            )));
         }
-        let value: serde_json::Value = response.json().await.map_err(|error| AppError::Other(error.to_string()))?;
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|error| AppError::Other(error.to_string()))?;
         let mut rows: Vec<(usize, Vec<f32>)> = value["data"]
             .as_array()
             .map(|data| {
@@ -395,7 +439,12 @@ mod local_server {
                         let index = row["index"].as_u64().unwrap_or(0) as usize;
                         let vector = row["embedding"]
                             .as_array()
-                            .map(|values| values.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect())
+                            .map(|values| {
+                                values
+                                    .iter()
+                                    .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         (index, vector)
                     })
@@ -424,7 +473,11 @@ mod local_server {
 mod local_server {
     use super::*;
 
-    pub async fn embed(_model: &'static LocalEmbedModel, _path: &Path, _inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
+    pub async fn embed(
+        _model: &'static LocalEmbedModel,
+        _path: &Path,
+        _inputs: &[String],
+    ) -> AppResult<Vec<Vec<f32>>> {
         Err(AppError::Other("手机上不能跑本地嵌入模型".into()))
     }
 
@@ -498,7 +551,12 @@ fn cache() -> &'static Mutex<HashMap<CacheKey, Arc<VideoVectors>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-async fn load_vectors(db: &Db, video_id: &str, embedder: &str, indexed_at: i64) -> AppResult<Arc<VideoVectors>> {
+async fn load_vectors(
+    db: &Db,
+    video_id: &str,
+    embedder: &str,
+    indexed_at: i64,
+) -> AppResult<Arc<VideoVectors>> {
     let key = (video_id.to_string(), embedder.to_string());
     if let Some(hit) = cache().lock().unwrap().get(&key) {
         if hit.indexed_at == indexed_at {
@@ -525,9 +583,21 @@ async fn load_vectors(db: &Db, video_id: &str, embedder: &str, indexed_at: i64) 
             continue;
         }
         matrix.extend(vector);
-        chunks.push(Chunk { idx, first_segment, last_segment, start_ms, end_ms, text });
+        chunks.push(Chunk {
+            idx,
+            first_segment,
+            last_segment,
+            start_ms,
+            end_ms,
+            text,
+        });
     }
-    let loaded = Arc::new(VideoVectors { indexed_at, dim, chunks, matrix });
+    let loaded = Arc::new(VideoVectors {
+        indexed_at,
+        dim,
+        chunks,
+        matrix,
+    });
     cache().lock().unwrap().insert(key, loaded.clone());
     Ok(loaded)
 }
@@ -544,7 +614,12 @@ pub struct SemanticHit {
 
 /// 按意思找最像的 `top_k` 块。范围里还没建好索引的视频会被排进后台建索引，这一次先跳过。
 /// 没开语义检索时返回空列表。
-pub async fn search(db: &Db, videos: &[String], query: &str, top_k: usize) -> AppResult<Vec<SemanticHit>> {
+pub async fn search(
+    db: &Db,
+    videos: &[String],
+    query: &str,
+    top_k: usize,
+) -> AppResult<Vec<SemanticHit>> {
     let Some(embedder) = current_embedder(db).await? else {
         return Ok(Vec::new());
     };
@@ -559,7 +634,11 @@ pub async fn search(db: &Db, videos: &[String], query: &str, top_k: usize) -> Ap
     .fetch_all(&db.pool)
     .await?;
     let indexed: HashSet<&str> = states.iter().map(|(id, _)| id.as_str()).collect();
-    let missing: Vec<String> = videos.iter().filter(|id| !indexed.contains(id.as_str())).cloned().collect();
+    let missing: Vec<String> = videos
+        .iter()
+        .filter(|id| !indexed.contains(id.as_str()))
+        .cloned()
+        .collect();
     if !missing.is_empty() {
         enqueue(missing);
     }
@@ -579,7 +658,11 @@ pub async fn search(db: &Db, videos: &[String], query: &str, top_k: usize) -> Ap
         for (i, chunk) in vectors.chunks.iter().enumerate() {
             let row = &vectors.matrix[i * vectors.dim..(i + 1) * vectors.dim];
             let score: f32 = row.iter().zip(&query_vector).map(|(a, b)| a * b).sum();
-            hits.push(SemanticHit { video_id: video_id.clone(), chunk: chunk.clone(), score });
+            hits.push(SemanticHit {
+                video_id: video_id.clone(),
+                chunk: chunk.clone(),
+                score,
+            });
         }
     }
     hits.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -589,7 +672,12 @@ pub async fn search(db: &Db, videos: &[String], query: &str, top_k: usize) -> Ap
 
 /// 和 [`search`] 一样，但最多等 `limit`：问答不能因为加强功能而卡住。
 /// 超时或出错都只记日志、返回空列表（= 这一次只用关键词）。
-pub async fn search_or_skip(db: &Db, videos: &[String], query: &str, top_k: usize) -> Vec<SemanticHit> {
+pub async fn search_or_skip(
+    db: &Db,
+    videos: &[String],
+    query: &str,
+    top_k: usize,
+) -> Vec<SemanticHit> {
     const LIMIT: Duration = Duration::from_secs(10);
     match tokio::time::timeout(LIMIT, search(db, videos, query, top_k)).await {
         Ok(Ok(hits)) => hits,
@@ -682,7 +770,9 @@ pub fn enqueue(videos: Vec<String>) {
 /// 设置改了：清空队列、作废正在建的那个，再把当前来源下还没建的全排进去。
 pub fn restart() {
     let Some(indexer) = INDEXER.get() else { return };
-    indexer.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    indexer
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     indexer.queue.lock().unwrap().clear();
     indexer.queued.lock().unwrap().clear();
     indexer.update(|progress| *progress = IndexProgress::default());
@@ -699,7 +789,9 @@ pub fn resume() {
 
 /// 当前来源下还没建索引（或讲稿改过）的视频全排进队列。
 pub fn enqueue_all_missing() {
-    let Some(indexer) = INDEXER.get().cloned() else { return };
+    let Some(indexer) = INDEXER.get().cloned() else {
+        return;
+    };
     tauri::async_runtime::spawn(async move {
         match missing_videos(&indexer.db).await {
             Ok(videos) => enqueue(videos),
@@ -824,11 +916,12 @@ async fn index_video(db: &Db, video_id: &str, guard: Option<(&Indexer, u64)>) ->
     let mut tx = db.begin_write().await?;
     // 讲稿在算向量期间变了（重新识别、纠错）：这份向量对应的是旧讲稿，丢掉，等下一轮。
     // 在同一个事务里比，比完到提交之间讲稿不会再变。
-    let now: Vec<(i64, String)> =
-        sqlx::query_as("SELECT segment_idx, text FROM transcripts WHERE video_id=? ORDER BY segment_idx")
-            .bind(video_id)
-            .fetch_all(&mut *tx)
-            .await?;
+    let now: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT segment_idx, text FROM transcripts WHERE video_id=? ORDER BY segment_idx",
+    )
+    .bind(video_id)
+    .fetch_all(&mut *tx)
+    .await?;
     let unchanged = now.len() == segments.len()
         && now
             .iter()
@@ -898,9 +991,18 @@ pub async fn index_counts(db: &Db) -> AppResult<(i64, i64)> {
 pub async fn rebuild(db: &Db) -> AppResult<()> {
     if let Some(embedder) = current_embedder(db).await? {
         let id = embedder.id();
-        sqlx::query("DELETE FROM semantic_index_state WHERE embedder=?").bind(&id).execute(&db.pool).await?;
-        sqlx::query("DELETE FROM semantic_chunks WHERE embedder=?").bind(&id).execute(&db.pool).await?;
-        cache().lock().unwrap().retain(|(_, embedder), _| embedder != &id);
+        sqlx::query("DELETE FROM semantic_index_state WHERE embedder=?")
+            .bind(&id)
+            .execute(&db.pool)
+            .await?;
+        sqlx::query("DELETE FROM semantic_chunks WHERE embedder=?")
+            .bind(&id)
+            .execute(&db.pool)
+            .await?;
+        cache()
+            .lock()
+            .unwrap()
+            .retain(|(_, embedder), _| embedder != &id);
     }
     restart();
     Ok(())
@@ -923,7 +1025,13 @@ pub(crate) mod test_support {
     pub fn fake_vector(text: &str) -> Vec<f32> {
         let mut vector: Vec<f32> = CONCEPTS
             .iter()
-            .map(|words| if words.iter().any(|word| text.contains(word)) { 1.0 } else { 0.0 })
+            .map(|words| {
+                if words.iter().any(|word| text.contains(word)) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
             .collect();
         vector.push(0.05);
         vector
@@ -938,7 +1046,9 @@ pub(crate) mod test_support {
         let counter = requests.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
                 let counter = counter.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
@@ -953,10 +1063,15 @@ pub(crate) mod test_support {
                         if let Some(split) = text.find("\r\n\r\n") {
                             let length = text[..split]
                                 .lines()
-                                .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                                .find_map(|line| {
+                                    line.to_ascii_lowercase()
+                                        .strip_prefix("content-length:")
+                                        .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                                })
                                 .unwrap_or(0);
                             if buf.len() >= split + 4 + length {
-                                break String::from_utf8_lossy(&buf[split + 4..split + 4 + length]).to_string();
+                                break String::from_utf8_lossy(&buf[split + 4..split + 4 + length])
+                                    .to_string();
                             }
                         }
                     };
@@ -982,10 +1097,18 @@ pub(crate) mod test_support {
             "id": "fake", "name": "假接口", "kind": "openai",
             "base_url": format!("http://{addr}/v1"), "model": "chat", "key_required": false
         }]);
-        crate::commands::settings::set_setting(db, "llm_profiles", &profiles.to_string()).await.unwrap();
-        crate::commands::settings::set_setting(db, SETTING_BACKEND, "cloud").await.unwrap();
-        crate::commands::settings::set_setting(db, SETTING_CLOUD_PROFILE, "fake").await.unwrap();
-        crate::commands::settings::set_setting(db, SETTING_CLOUD_MODEL, "fake-embedding").await.unwrap();
+        crate::commands::settings::set_setting(db, "llm_profiles", &profiles.to_string())
+            .await
+            .unwrap();
+        crate::commands::settings::set_setting(db, SETTING_BACKEND, "cloud")
+            .await
+            .unwrap();
+        crate::commands::settings::set_setting(db, SETTING_CLOUD_PROFILE, "fake")
+            .await
+            .unwrap();
+        crate::commands::settings::set_setting(db, SETTING_CLOUD_MODEL, "fake-embedding")
+            .await
+            .unwrap();
         requests
     }
 }
@@ -996,12 +1119,18 @@ mod tests {
 
     async fn video_with_transcript(db: &Db, lines: &[&str]) -> String {
         let dir = tempfile::tempdir().unwrap();
-        let course = crate::commands::courses::create_course(db, "c".into(), dir.path().to_string_lossy().into())
-            .await
-            .unwrap();
+        let course = crate::commands::courses::create_course(
+            db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let path = dir.path().join("a.mp4");
         std::fs::write(&path, b"x").unwrap();
-        let video = crate::commands::videos::add_local_video(db, &course.id, path, None).await.unwrap();
+        let video = crate::commands::videos::add_local_video(db, &course.id, path, None)
+            .await
+            .unwrap();
         for (i, line) in lines.iter().enumerate() {
             sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)")
                 .bind(&video.id)
@@ -1024,11 +1153,16 @@ mod tests {
 
     #[tokio::test]
     async fn indexed_chunks_are_found_by_meaning_and_go_stale_when_the_transcript_changes() {
-        let db = Db::connect_and_migrate(&crate::db::test_db_path("semantic")).await.unwrap();
+        let db = Db::connect_and_migrate(&crate::db::test_db_path("semantic"))
+            .await
+            .unwrap();
         let requests = test_support::use_fake_cloud(&db).await;
         let video = video_with_transcript(
             &db,
-            &[&padded("学习率设得太大，参数会在谷底两边来回震荡"), &padded("模型在训练集上死记硬背，换了数据就不行")],
+            &[
+                &padded("学习率设得太大，参数会在谷底两边来回震荡"),
+                &padded("模型在训练集上死记硬背，换了数据就不行"),
+            ],
         )
         .await;
 
@@ -1036,7 +1170,14 @@ mod tests {
         assert_eq!(index_counts(&db).await.unwrap(), (1, 1));
 
         // 用词完全对不上，意思是第二段。
-        let hits = search(&db, &[video.clone()], "为什么换一批题就做不对了，泛化能力差", 1).await.unwrap();
+        let hits = search(
+            &db,
+            &[video.clone()],
+            "为什么换一批题就做不对了，泛化能力差",
+            1,
+        )
+        .await
+        .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].chunk.first_segment, 1);
         assert!(requests.load(std::sync::atomic::Ordering::SeqCst) >= 2);
@@ -1049,10 +1190,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(index_counts(&db).await.unwrap(), (0, 1));
-        assert!(search(&db, &[video.clone()], "泛化能力差", 3).await.unwrap().is_empty());
+        assert!(search(&db, &[video.clone()], "泛化能力差", 3)
+            .await
+            .unwrap()
+            .is_empty());
 
         assert_eq!(index_video_now(&db, &video).await.unwrap(), 2);
-        assert_eq!(search(&db, &[video.clone()], "泛化能力差", 3).await.unwrap().len(), 2);
+        assert_eq!(
+            search(&db, &[video.clone()], "泛化能力差", 3)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     /// 真模型、真讲稿（手动跑）：本机 llama-server + BGE Small，给开发库副本里的几个视频建索引再按意思搜。
@@ -1069,17 +1219,40 @@ mod tests {
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .find(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("llama-server")))
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("llama-server"))
+            })
             .expect("binaries/ 里没有 llama-server");
         std::os::unix::fs::symlink(&target, shim.path().join("llama-server")).unwrap();
-        std::env::set_var("PATH", format!("{}:{}", shim.path().display(), std::env::var("PATH").unwrap_or_default()));
+        std::env::set_var(
+            "PATH",
+            format!(
+                "{}:{}",
+                shim.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
 
-        let db = Db::connect_and_migrate(std::path::Path::new(&std::env::var("SEMANTIC_DB").unwrap())).await.unwrap();
+        let db =
+            Db::connect_and_migrate(std::path::Path::new(&std::env::var("SEMANTIC_DB").unwrap()))
+                .await
+                .unwrap();
         let models = std::env::var("SEMANTIC_MODELS").unwrap();
         crate::pipeline::model_store::remember_app_data(std::path::Path::new(&models));
-        crate::commands::settings::set_setting(&db, crate::pipeline::model_store::MODELS_DIR_SETTING, &models).await.unwrap();
-        crate::commands::settings::set_setting(&db, SETTING_BACKEND, "local").await.unwrap();
-        crate::commands::settings::set_setting(&db, SETTING_LOCAL_MODEL, BGE_SMALL_ZH.id).await.unwrap();
+        crate::commands::settings::set_setting(
+            &db,
+            crate::pipeline::model_store::MODELS_DIR_SETTING,
+            &models,
+        )
+        .await
+        .unwrap();
+        crate::commands::settings::set_setting(&db, SETTING_BACKEND, "local")
+            .await
+            .unwrap();
+        crate::commands::settings::set_setting(&db, SETTING_LOCAL_MODEL, BGE_SMALL_ZH.id)
+            .await
+            .unwrap();
         assert!(current_embedder(&db).await.unwrap().is_some(), "模型没装好");
 
         let videos: Vec<String> = sqlx::query_scalar(
@@ -1093,13 +1266,25 @@ mod tests {
         for video in &videos {
             chunks += index_video_now(&db, video).await.unwrap();
         }
-        eprintln!("indexed {} videos / {chunks} chunks in {:?}", videos.len(), started.elapsed());
-        for query in ["考试时字数不够怎么办", "面试时坐姿有什么讲究", "材料里第一段一般写什么"] {
+        eprintln!(
+            "indexed {} videos / {chunks} chunks in {:?}",
+            videos.len(),
+            started.elapsed()
+        );
+        for query in [
+            "考试时字数不够怎么办",
+            "面试时坐姿有什么讲究",
+            "材料里第一段一般写什么",
+        ] {
             let started = Instant::now();
             let hits = search(&db, &videos, query, 2).await.unwrap();
             eprintln!("{query} ({:?})", started.elapsed());
             for hit in hits {
-                eprintln!("  {:.3} {}", hit.score, hit.chunk.text.chars().take(60).collect::<String>());
+                eprintln!(
+                    "  {:.3} {}",
+                    hit.score,
+                    hit.chunk.text.chars().take(60).collect::<String>()
+                );
             }
         }
         stop_local_server().await;
@@ -1107,7 +1292,9 @@ mod tests {
 
     #[tokio::test]
     async fn without_a_configured_source_nothing_is_indexed_or_searched() {
-        let db = Db::connect_and_migrate(&crate::db::test_db_path("semantic_off")).await.unwrap();
+        let db = Db::connect_and_migrate(&crate::db::test_db_path("semantic_off"))
+            .await
+            .unwrap();
         let video = video_with_transcript(&db, &["学习率"]).await;
         assert!(current_embedder(&db).await.unwrap().is_none());
         assert_eq!(index_video_now(&db, &video).await.unwrap(), 0);
@@ -1156,8 +1343,16 @@ mod tests {
 
     #[test]
     fn cloud_vectors_are_keyed_by_endpoint_and_model_not_by_profile() {
-        let a = Embedder::Cloud { profile_id: "p1".into(), base_url: "https://x/v1/".into(), model: "m".into() };
-        let b = Embedder::Cloud { profile_id: "p2".into(), base_url: "https://x/v1".into(), model: "m".into() };
+        let a = Embedder::Cloud {
+            profile_id: "p1".into(),
+            base_url: "https://x/v1/".into(),
+            model: "m".into(),
+        };
+        let b = Embedder::Cloud {
+            profile_id: "p2".into(),
+            base_url: "https://x/v1".into(),
+            model: "m".into(),
+        };
         assert_eq!(a.id(), b.id());
     }
 }

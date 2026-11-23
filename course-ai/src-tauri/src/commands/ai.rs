@@ -394,10 +394,11 @@ pub async fn cmd_delete_quiz_set(
     set_id: String,
 ) -> AppResult<()> {
     let mut tx = state.db.begin_write().await?;
-    let raw: Option<String> = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
-        .bind(&video_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
+            .bind(&video_id)
+            .fetch_optional(&mut *tx)
+            .await?;
     let Some(raw) = raw else { return Ok(()) };
     // 这套题做成的复习卡也删掉：否则复习里还会出现题库里已经没有的题。
     for stem in crate::pipeline::quiz::orphaned_stems(&raw, &set_id)? {
@@ -435,11 +436,17 @@ async fn course_of_video(state: &AppState, video_id: &str) -> AppResult<String> 
 
 /// 这个视频所在课程的出题要求（同一门课的视频共用一份）。
 #[tauri::command]
-pub async fn cmd_get_quiz_course_rules(state: State<'_, AppState>, video_id: String) -> AppResult<String> {
+pub async fn cmd_get_quiz_course_rules(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<String> {
     let course_id = course_of_video(&state, &video_id).await?;
-    Ok(crate::commands::settings::get_setting(&state.db, &crate::pipeline::quiz::course_rules_key(&course_id))
-        .await?
-        .unwrap_or_default())
+    Ok(crate::commands::settings::get_setting(
+        &state.db,
+        &crate::pipeline::quiz::course_rules_key(&course_id),
+    )
+    .await?
+    .unwrap_or_default())
 }
 
 #[tauri::command]
@@ -450,8 +457,12 @@ pub async fn cmd_set_quiz_course_rules(
 ) -> AppResult<()> {
     let course_id = course_of_video(&state, &video_id).await?;
     let rules: String = rules.trim().chars().take(2000).collect();
-    crate::commands::settings::set_setting(&state.db, &crate::pipeline::quiz::course_rules_key(&course_id), &rules)
-        .await
+    crate::commands::settings::set_setting(
+        &state.db,
+        &crate::pipeline::quiz::course_rules_key(&course_id),
+        &rules,
+    )
+    .await
 }
 
 /// 改错 / 简答题判分。`question` 是题库里那道题的原始 JSON。
@@ -465,7 +476,9 @@ pub async fn cmd_grade_quiz_answer(
     let (provider, model) = provider_for(&state, AiTask::Quiz).await?;
     crate::usage_log::scoped(
         crate::usage_log::UsageScope::video(&video_id),
-        crate::pipeline::quiz::grade_answer(&state.db, &provider, &model, &video_id, &question, &answer),
+        crate::pipeline::quiz::grade_answer(
+            &state.db, &provider, &model, &video_id, &question, &answer,
+        ),
     )
     .await
 }
@@ -620,7 +633,8 @@ async fn generate_ai(
     if task == "highlights" {
         let _registration = register_ai_generation(&state, &video_id, &task)?;
         let (provider, model) = provider_for(&state, AiTask::Summary).await?;
-        crate::pipeline::highlights::generate_highlights(&state.db, &provider, &model, &video_id).await?;
+        crate::pipeline::highlights::generate_highlights(&state.db, &provider, &model, &video_id)
+            .await?;
         return Ok(());
     }
     let ai_task = match task.as_str() {
@@ -800,7 +814,9 @@ mod tests {
         // 存进去的是规范化后的紧凑 JSON，字段顺序由结构体决定。
         assert_eq!(
             get_setting(&db, "llm_profiles").await.unwrap().as_deref(),
-            Some(r#"[{"id":"kept","name":"Kept","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}]"#)
+            Some(
+                r#"[{"id":"kept","name":"Kept","kind":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini"}]"#
+            )
         );
         assert_eq!(
             get_setting(&db, "llm_task_routing")
@@ -829,8 +845,8 @@ mod tests {
             keychain::get_api_key(&db, "kept").await.unwrap(),
             Some("sk-new".into())
         );
-        let stored = parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
-            .unwrap();
+        let stored =
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref()).unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].model, "gpt-4o-mini");
     }
@@ -850,9 +866,11 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("ghost"));
         assert!(!keychain::has_api_key(&db, "ghost").await.unwrap());
-        assert!(parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
-            .unwrap()
-            .is_empty());
+        assert!(
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -863,7 +881,9 @@ mod tests {
             .unwrap();
         let original = r#"[{"id":"p1","name":"P","kind":"openai","base_url":"https://api.example.com/v1","model":"m"}]"#;
         save_llm_profiles(&db, original, "{}").await.unwrap();
-        keychain::set_api_key(&db, "p1", "sk-original").await.unwrap();
+        keychain::set_api_key(&db, "p1", "sk-original")
+            .await
+            .unwrap();
 
         let moved = r#"[{"id":"p1","name":"P","kind":"openai","base_url":"https://attacker.example/v1","model":"m"}]"#;
         let error = save_llm_profiles(&db, moved, "{}").await.unwrap_err();
@@ -914,9 +934,11 @@ mod tests {
         assert!(error.to_string().contains("重复"));
 
         // 校验失败不能留下半份配置。
-        assert!(parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
-            .unwrap()
-            .is_empty());
+        assert!(
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -953,8 +975,8 @@ mod tests {
 
         save_llm_profiles(&db, profiles, "{}").await.unwrap();
 
-        let stored = parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref())
-            .unwrap();
+        let stored =
+            parse_profiles(get_setting(&db, "llm_profiles").await.unwrap().as_deref()).unwrap();
         assert_eq!(stored[0].name, "Ollama");
         assert_eq!(stored[0].base_url, "http://127.0.0.1:11434");
         assert_eq!(stored[0].model, "qwen2.5:7b");

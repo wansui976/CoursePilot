@@ -59,7 +59,9 @@ pub async fn cmd_webdav_source_test(
     password: Option<String>,
 ) -> AppResult<usize> {
     match id {
-        Some(id) => webdav_import::test_saved(&state.db, &id, Some(url), Some(user), password).await,
+        Some(id) => {
+            webdav_import::test_saved(&state.db, &id, Some(url), Some(user), password).await
+        }
         None => {
             let kind = kind.unwrap_or_else(|| webdav_import::KIND_WEBDAV.into());
             webdav_import::test(&kind, &url, &user, password.as_deref().unwrap_or_default()).await
@@ -68,12 +70,18 @@ pub async fn cmd_webdav_source_test(
 }
 
 #[tauri::command]
-pub async fn cmd_webdav_browse(state: State<'_, AppState>, source_id: String, path: String) -> AppResult<Vec<BrowseEntry>> {
+pub async fn cmd_webdav_browse(
+    state: State<'_, AppState>,
+    source_id: String,
+    path: String,
+) -> AppResult<Vec<BrowseEntry>> {
     webdav_import::browse(&state.db, &source_id, &path).await
 }
 
 fn app_data(app: &tauri::AppHandle) -> AppResult<PathBuf> {
-    app.path().app_data_dir().map_err(|error| AppError::Config(error.to_string()))
+    app.path()
+        .app_data_dir()
+        .map_err(|error| AppError::Config(error.to_string()))
 }
 
 /// 「在线看」导入：只建视频条目。返回新建的视频 id。
@@ -95,9 +103,15 @@ pub async fn cmd_webdav_stream_url(
     media: State<'_, crate::media_server::MediaServer>,
     video_id: String,
 ) -> AppResult<Option<String>> {
-    let Some(source) = webdav_import::stream_source(&state.db, &video_id).await? else { return Ok(None) };
+    let Some(source) = webdav_import::stream_source(&state.db, &video_id).await? else {
+        return Ok(None);
+    };
     media.register_remote(&video_id, source);
-    Ok(Some(format!("{}?dav={}", media.url(&video_id), chrono::Utc::now().timestamp_millis())))
+    Ok(Some(format!(
+        "{}?dav={}",
+        media.url(&video_id),
+        chrono::Utc::now().timestamp_millis()
+    )))
 }
 
 /// 在线看的视频下载到本机（下到课程目录；课程没有目录时放应用数据目录）。进度走 DOWNLOAD_EVENT。
@@ -122,11 +136,30 @@ pub async fn cmd_webdav_download_video(
     let emitter = app.clone();
     let id = video_id.clone();
     let on_event = move |event: DownloadEvent| {
-        if let DownloadEvent::Progress { downloaded, total, .. } = event {
-            let _ = emitter.emit(DOWNLOAD_EVENT, DownloadProgress { video_id: id.clone(), downloaded, total, done: false });
+        if let DownloadEvent::Progress {
+            downloaded, total, ..
+        } = event
+        {
+            let _ = emitter.emit(
+                DOWNLOAD_EVENT,
+                DownloadProgress {
+                    video_id: id.clone(),
+                    downloaded,
+                    total,
+                    done: false,
+                },
+            );
         }
     };
     let result = webdav_import::download_streamed(&state.db, &video_id, &out_dir, &on_event).await;
-    let _ = app.emit(DOWNLOAD_EVENT, DownloadProgress { video_id, downloaded: 0, total: None, done: true });
+    let _ = app.emit(
+        DOWNLOAD_EVENT,
+        DownloadProgress {
+            video_id,
+            downloaded: 0,
+            total: None,
+            done: true,
+        },
+    );
     result
 }

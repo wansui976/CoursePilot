@@ -72,7 +72,8 @@ pub fn validate_new_root(new_root: &Path, old_root: &Path) -> AppResult<()> {
     std::fs::create_dir_all(new_root)
         .map_err(|e| AppError::Config(format!("没法在这里建文件夹：{e}")))?;
     let probe = new_root.join(".courseai-write-test");
-    std::fs::write(&probe, b"ok").map_err(|e| AppError::Config(format!("这个文件夹不能写入：{e}")))?;
+    std::fs::write(&probe, b"ok")
+        .map_err(|e| AppError::Config(format!("这个文件夹不能写入：{e}")))?;
     let _ = std::fs::remove_file(&probe);
     Ok(())
 }
@@ -99,7 +100,12 @@ pub fn dir_size(dir: &Path) -> u64 {
 pub fn models_size(root: &Path) -> u64 {
     MODEL_SUBDIRS
         .iter()
-        .map(|sub| files_under(&root.join(sub)).iter().map(|(_, len)| len).sum::<u64>())
+        .map(|sub| {
+            files_under(&root.join(sub))
+                .iter()
+                .map(|(_, len)| len)
+                .sum::<u64>()
+        })
         .sum()
 }
 
@@ -186,7 +192,11 @@ pub fn move_models(
 }
 
 /// 先写到 `.moving` 临时文件、写完再改名：搬到一半断电，新目录里不会留一个看着完整的坏模型。
-fn copy_with_progress(from: &Path, to: &Path, mut progress: impl FnMut(u64)) -> std::io::Result<()> {
+fn copy_with_progress(
+    from: &Path,
+    to: &Path,
+    mut progress: impl FnMut(u64),
+) -> std::io::Result<()> {
     use std::io::{Read, Write};
     let mut tmp_name = to.file_name().unwrap_or_default().to_os_string();
     tmp_name.push(".moving");
@@ -223,7 +233,10 @@ mod tests {
         let app = Path::new("/app");
         assert_eq!(root_from_setting(None, app), PathBuf::from("/app"));
         assert_eq!(root_from_setting(Some("  "), app), PathBuf::from("/app"));
-        assert_eq!(root_from_setting(Some("relative/dir"), app), PathBuf::from("/app"));
+        assert_eq!(
+            root_from_setting(Some("relative/dir"), app),
+            PathBuf::from("/app")
+        );
         let absolute = std::env::temp_dir().join("models");
         assert_eq!(root_from_setting(absolute.to_str(), app), absolute);
     }
@@ -240,8 +253,16 @@ mod tests {
         let mut seen = Vec::new();
         move_models(&old, &new, |done, total| seen.push((done, total))).unwrap();
 
-        assert_eq!(std::fs::read(new.join("whisper/ggml-base.bin")).unwrap(), vec![1; 1000]);
-        assert_eq!(std::fs::read(new.join("asr/sense-voice/model.int8.onnx")).unwrap().len(), 3000);
+        assert_eq!(
+            std::fs::read(new.join("whisper/ggml-base.bin")).unwrap(),
+            vec![1; 1000]
+        );
+        assert_eq!(
+            std::fs::read(new.join("asr/sense-voice/model.int8.onnx"))
+                .unwrap()
+                .len(),
+            3000
+        );
         assert!(new.join("asr/silero_vad.onnx").is_file());
         assert!(!old.join("whisper").exists());
         assert!(!old.join("asr").exists());
@@ -275,7 +296,10 @@ mod tests {
         let root = dir.path();
         assert!(legacy_dirs(root).is_empty());
         write(&root.join("whisper/ggml-base.bin"), &[1; 100]);
-        let old_qwen = crate::pipeline::local_asr::model_dir(root, &crate::pipeline::local_asr::QWEN3_ASR_SHERPA);
+        let old_qwen = crate::pipeline::local_asr::model_dir(
+            root,
+            &crate::pipeline::local_asr::QWEN3_ASR_SHERPA,
+        );
         write(&old_qwen.join("decoder.int8.onnx"), &[2; 300]);
         // 还在用的模型不能算进去。
         write(&root.join("asr/silero_vad.onnx"), &[3; 50]);
@@ -297,7 +321,10 @@ mod tests {
         let alias = real.clone();
         assert!(same_dir(&real, &alias));
         move_models(&real, &alias, |_, _| {}).unwrap();
-        assert!(real.join("asr/sense-voice/model.int8.onnx").is_file(), "模型不能被删掉");
+        assert!(
+            real.join("asr/sense-voice/model.int8.onnx").is_file(),
+            "模型不能被删掉"
+        );
     }
 
     #[test]
@@ -311,14 +338,22 @@ mod tests {
         write(&new.join("whisper/placeholder"), b"x");
         write(&new.join("asr"), b"not a dir");
         assert!(move_models(&old, &new, |_, _| {}).is_err());
-        assert!(old.join("whisper/ggml-base.bin").is_file(), "已经复制过去的也还留在原处");
+        assert!(
+            old.join("whisper/ggml-base.bin").is_file(),
+            "已经复制过去的也还留在原处"
+        );
         assert!(old.join("asr/silero_vad.onnx").is_file());
     }
 
     #[test]
     fn nothing_to_move_is_fine() {
         let dir = tempfile::tempdir().unwrap();
-        move_models(&dir.path().join("empty"), &dir.path().join("new"), |_, _| {}).unwrap();
+        move_models(
+            &dir.path().join("empty"),
+            &dir.path().join("new"),
+            |_, _| {},
+        )
+        .unwrap();
     }
 
     #[test]

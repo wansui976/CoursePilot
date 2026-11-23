@@ -64,10 +64,16 @@ pub async fn cmd_feynman_evaluate(
         .await?
         .ok_or_else(|| AppError::Config("尚未配置可用的大模型（设置 → 大模型）".into()))?;
     let scope = match &topic {
-        feynman::FeynmanTopic::Range { video_id, .. } => crate::usage_log::UsageScope::video(video_id),
+        feynman::FeynmanTopic::Range { video_id, .. } => {
+            crate::usage_log::UsageScope::video(video_id)
+        }
         feynman::FeynmanTopic::Concept { .. } => crate::usage_log::UsageScope::default(),
     };
-    crate::usage_log::scoped(scope, feynman::evaluate(&state.db, &provider, &model, &topic, &explanation)).await
+    crate::usage_log::scoped(
+        scope,
+        feynman::evaluate(&state.db, &provider, &model, &topic, &explanation),
+    )
+    .await
 }
 
 /// 某个话题最近的几次复述（新的在前），给「再讲一遍」做对比。
@@ -81,9 +87,7 @@ pub async fn cmd_feynman_attempts(
 
 /// 学习仪表盘汇总：全部知识点里「已经能讲清」的有几个。
 #[tauri::command]
-pub async fn cmd_feynman_mastery_summary(
-    state: State<'_, AppState>,
-) -> AppResult<(usize, usize)> {
+pub async fn cmd_feynman_mastery_summary(state: State<'_, AppState>) -> AppResult<(usize, usize)> {
     feynman::mastery_summary(&state.db).await
 }
 

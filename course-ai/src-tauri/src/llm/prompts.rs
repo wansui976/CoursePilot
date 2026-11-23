@@ -182,7 +182,16 @@ pub fn quiz_request(model: &str, transcript: &str, style: &str, extra: &str) -> 
 }
 
 /// 给改错 / 简答题判分。`excerpt` 是题目依据附近的讲稿（可为空）。
-pub fn quiz_grade_request(model: &str, kind: &str, question: &str, reference: &str, key_points: &[String], explanation: &str, excerpt: &str, answer: &str) -> ChatRequest {
+pub fn quiz_grade_request(
+    model: &str,
+    kind: &str,
+    question: &str,
+    reference: &str,
+    key_points: &[String],
+    explanation: &str,
+    excerpt: &str,
+    answer: &str,
+) -> ChatRequest {
     let task = if kind == "correct" {
         "这是一道找错改错题：学生要指出题干里那处错误，并给出正确说法。没指出真正的错处就是 wrong；\
          指出了错处但改得不对或不完整是 partial。"
@@ -192,7 +201,11 @@ pub fn quiz_grade_request(model: &str, kind: &str, question: &str, reference: &s
     let points = if key_points.is_empty() {
         "（无，按参考答案判）".to_string()
     } else {
-        key_points.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n")
+        key_points
+            .iter()
+            .map(|p| format!("- {p}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     let excerpt = if excerpt.trim().is_empty() {
         String::new()

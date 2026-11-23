@@ -17,7 +17,11 @@ pub const DEFAULT_BASE: &str = "http://127.0.0.1:11434";
 
 pub fn chat_url(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
-    let base = if trimmed.is_empty() { DEFAULT_BASE } else { trimmed };
+    let base = if trimmed.is_empty() {
+        DEFAULT_BASE
+    } else {
+        trimmed
+    };
     if base.ends_with("/api/chat") {
         base.to_string()
     } else {
@@ -55,13 +59,11 @@ fn message_value(message: &ChatMessage) -> Value {
         "content": message.content,
     });
     if !message.images.is_empty() {
-        value["images"] = json!(
-            message
-                .images
-                .iter()
-                .filter_map(|image| base64_of(image))
-                .collect::<Vec<_>>()
-        );
+        value["images"] = json!(message
+            .images
+            .iter()
+            .filter_map(|image| base64_of(image))
+            .collect::<Vec<_>>());
     }
     value
 }
@@ -92,25 +94,27 @@ pub fn build_body(req: &ChatRequest, stream: bool, max_tokens: Option<u32>) -> V
         "options": options,
     });
     if !req.tools.is_empty() {
-        body["tools"] = json!(
-            req.tools
-                .iter()
-                .map(|tool| json!({
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.parameters,
-                    }
-                }))
-                .collect::<Vec<_>>()
-        );
+        body["tools"] = json!(req
+            .tools
+            .iter()
+            .map(|tool| json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            }))
+            .collect::<Vec<_>>());
     }
     body
 }
 
 fn usage_of(value: &Value) -> Option<Usage> {
-    let prompt = value.get("prompt_eval_count").and_then(Value::as_i64).unwrap_or(0);
+    let prompt = value
+        .get("prompt_eval_count")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let completion = value.get("eval_count").and_then(Value::as_i64).unwrap_or(0);
     (prompt > 0 || completion > 0).then(|| Usage {
         prompt_tokens: prompt,
@@ -137,14 +141,17 @@ fn parse_message(message: &Value, next_index: &mut usize) -> (String, Vec<(usize
                     let name = function.get("name").and_then(Value::as_str)?;
                     let index = *next_index;
                     *next_index += 1;
-                    Some((index, ToolCall {
-                        id: format!("call_{index}"),
-                        name: name.to_string(),
-                        arguments: function
-                            .get("arguments")
-                            .map(|arguments| arguments.to_string())
-                            .unwrap_or_else(|| "{}".into()),
-                    }))
+                    Some((
+                        index,
+                        ToolCall {
+                            id: format!("call_{index}"),
+                            name: name.to_string(),
+                            arguments: function
+                                .get("arguments")
+                                .map(|arguments| arguments.to_string())
+                                .unwrap_or_else(|| "{}".into()),
+                        },
+                    ))
                 })
                 .collect()
         })
@@ -160,7 +167,9 @@ pub fn parse_response(value: &Value) -> AppResult<ChatResponse> {
     let (content, tool_calls) = parse_message(message, &mut index);
     let tool_calls: Vec<ToolCall> = tool_calls.into_iter().map(|(_, call)| call).collect();
     if content.trim().is_empty() && tool_calls.is_empty() {
-        return Err(AppError::Other(format!("Ollama 没有返回正文或工具调用：{value}")));
+        return Err(AppError::Other(format!(
+            "Ollama 没有返回正文或工具调用：{value}"
+        )));
     }
     Ok(ChatResponse {
         content,
@@ -230,7 +239,8 @@ pub async fn complete_stream(
                     canceled = true;
                     break;
                 }
-                let bytes = chunk.map_err(|error| AppError::Other(format!("Ollama 流中断：{error}")))?;
+                let bytes =
+                    chunk.map_err(|error| AppError::Other(format!("Ollama 流中断：{error}")))?;
                 buffer.extend_from_slice(&bytes);
                 while let Some(line) = crate::llm::take_sse_line(&mut buffer) {
                     let line = line.trim();
@@ -323,7 +333,10 @@ mod tests {
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages[0]["images"][0], "AA==");
         assert_eq!(messages[1]["tool_calls"][0]["function"]["name"], "seek");
-        assert_eq!(messages[1]["tool_calls"][0]["function"]["arguments"]["ms"], 1200);
+        assert_eq!(
+            messages[1]["tool_calls"][0]["function"]["arguments"]["ms"],
+            1200
+        );
         assert_eq!(messages[2]["role"], "tool");
         assert_eq!(body["tools"][0]["function"]["name"], "seek");
     }
@@ -367,7 +380,13 @@ mod tests {
     #[test]
     fn builds_chat_url_without_duplication() {
         assert_eq!(chat_url(""), "http://127.0.0.1:11434/api/chat");
-        assert_eq!(chat_url("http://192.168.1.5:11434/"), "http://192.168.1.5:11434/api/chat");
-        assert_eq!(chat_url("http://127.0.0.1:11434/api/chat"), "http://127.0.0.1:11434/api/chat");
+        assert_eq!(
+            chat_url("http://192.168.1.5:11434/"),
+            "http://192.168.1.5:11434/api/chat"
+        );
+        assert_eq!(
+            chat_url("http://127.0.0.1:11434/api/chat"),
+            "http://127.0.0.1:11434/api/chat"
+        );
     }
 }

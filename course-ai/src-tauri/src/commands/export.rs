@@ -163,7 +163,12 @@ pub async fn cmd_export_handout(
     }
     let slides: Vec<HandoutSlide> = slides
         .into_iter()
-        .map(|(page_no, start_ms, end_ms, image_path)| HandoutSlide { page_no, start_ms, end_ms, image_path })
+        .map(|(page_no, start_ms, end_ms, image_path)| HandoutSlide {
+            page_no,
+            start_ms,
+            end_ms,
+            image_path,
+        })
         .collect();
     let segments = list_segments(&state.db, &video_id).await?;
     let video_end_ms = video
@@ -174,7 +179,8 @@ pub async fn cmd_export_handout(
 
     if use_ai {
         if let Some((provider, model)) =
-            crate::commands::ai::provider_for_db(&state.db, crate::llm::profiles::AiTask::Notes).await?
+            crate::commands::ai::provider_for_db(&state.db, crate::llm::profiles::AiTask::Notes)
+                .await?
         {
             summarize_pages(&provider, &model, &mut pages).await;
         }
@@ -193,7 +199,10 @@ pub async fn cmd_export_handout(
         .unwrap_or_default();
     let paths: Vec<String> = pages.iter().map(|p| p.image_path.clone()).collect();
     let images = tokio::task::spawn_blocking(move || {
-        paths.iter().map(|p| image_data_uri(Path::new(p))).collect::<Vec<_>>()
+        paths
+            .iter()
+            .map(|p| image_data_uri(Path::new(p)))
+            .collect::<Vec<_>>()
     })
     .await
     .map_err(|error| AppError::Other(format!("read slide images: {error}")))?;

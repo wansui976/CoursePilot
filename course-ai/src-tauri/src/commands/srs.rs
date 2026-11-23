@@ -23,7 +23,7 @@ const TARGET_RETENTION: f64 = 0.9;
 const S_MIN: f64 = 0.1;
 
 /// 记忆可提取概率 R：随距上次复习的天数 t 按幂遗忘曲线衰减。R(0)=1，R(t=S,S)=0.9。
-fn retrievability(elapsed_days: f64, stability: f64) -> f64 {
+pub(crate) fn retrievability(elapsed_days: f64, stability: f64) -> f64 {
     (1.0 + FACTOR * elapsed_days.max(0.0) / stability.max(S_MIN)).powf(DECAY)
 }
 
@@ -316,7 +316,7 @@ pub fn concept_for_card(source_ms: Option<i64>, occ_in_video: &[(String, i64)]) 
         .map(|(concept_id, _)| concept_id.clone())
 }
 
-type OccByVideo = std::collections::HashMap<String, Vec<(String, i64)>>;
+pub(crate) type OccByVideo = std::collections::HashMap<String, Vec<(String, i64)>>;
 
 /// 把 (video_id, concept_id, start_ms) 行聚成 video_id -> [(concept_id, start_ms)]。
 fn group_occurrences_by_video(rows: Vec<(String, String, i64)>) -> OccByVideo {
@@ -331,7 +331,7 @@ fn group_occurrences_by_video(rows: Vec<(String, String, i64)>) -> OccByVideo {
 }
 
 /// 从 video->出现 映射里取某视频的出现切片（无则空），供 concept_for_card 使用。
-fn occ_for<'a>(by_video: &'a OccByVideo, video_id: Option<&str>) -> &'a [(String, i64)] {
+pub(crate) fn occ_for<'a>(by_video: &'a OccByVideo, video_id: Option<&str>) -> &'a [(String, i64)] {
     video_id
         .and_then(|v| by_video.get(v))
         .map(|v| v.as_slice())
@@ -339,7 +339,7 @@ fn occ_for<'a>(by_video: &'a OccByVideo, video_id: Option<&str>) -> &'a [(String
 }
 
 /// 拉某课程各视频的概念出现点，聚成 video_id -> [(concept_id, start_ms)]。
-async fn course_occurrences_by_video(db: &Db, course_id: &str) -> AppResult<OccByVideo> {
+pub(crate) async fn course_occurrences_by_video(db: &Db, course_id: &str) -> AppResult<OccByVideo> {
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
         "SELECT o.video_id, o.concept_id, o.start_ms
          FROM concept_occurrences o

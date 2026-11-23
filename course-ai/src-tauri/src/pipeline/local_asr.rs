@@ -318,12 +318,18 @@ fn file_ok(path: &Path, file: &ModelFile) -> bool {
 
 pub fn is_installed(app_data: &Path, model: &SherpaModel) -> bool {
     let dir = model_dir(app_data, model);
-    model.files.iter().all(|file| file_ok(&dir.join(file.path), file))
+    model
+        .files
+        .iter()
+        .all(|file| file_ok(&dir.join(file.path), file))
         && file_ok(&vad_path(app_data), &VAD)
 }
 
 /// 还缺哪些文件（含共用 VAD），给下载用：已经下好的不再重下。
-pub fn missing_files(app_data: &Path, model: &'static SherpaModel) -> Vec<(PathBuf, &'static ModelFile)> {
+pub fn missing_files(
+    app_data: &Path,
+    model: &'static SherpaModel,
+) -> Vec<(PathBuf, &'static ModelFile)> {
     let dir = model_dir(app_data, model);
     let mut missing: Vec<(PathBuf, &'static ModelFile)> = model
         .files
@@ -428,7 +434,11 @@ pub fn parse_wav_header(head: &[u8], file_len: u64) -> Option<WavFormat> {
             }
             let available = file_len.saturating_sub(body as u64);
             let declared = size as u64;
-            let data_len = if declared == 0 || declared > available { available } else { declared };
+            let data_len = if declared == 0 || declared > available {
+                available
+            } else {
+                declared
+            };
             return Some(WavFormat {
                 channels,
                 sample_rate,
@@ -563,7 +573,11 @@ pub fn char_time_ms(
 }
 
 /// token 文本依次在正文里的起始字符位置，配上它的时间戳。对不上就返回 None。
-pub fn token_char_times(text: &str, tokens: &[String], timestamps: &[f32]) -> Option<Vec<(usize, f32)>> {
+pub fn token_char_times(
+    text: &str,
+    tokens: &[String],
+    timestamps: &[f32],
+) -> Option<Vec<(usize, f32)>> {
     if tokens.len() != timestamps.len() || tokens.is_empty() {
         return None;
     }
@@ -572,7 +586,10 @@ pub fn token_char_times(text: &str, tokens: &[String], timestamps: &[f32]) -> Op
     let mut out = Vec::with_capacity(tokens.len());
     for (token, &t) in tokens.iter().zip(timestamps) {
         // SentencePiece 的词首标记「▁」和空格不占正文位置。
-        let piece: Vec<char> = token.chars().filter(|c| *c != '▁' && !c.is_whitespace()).collect();
+        let piece: Vec<char> = token
+            .chars()
+            .filter(|c| *c != '▁' && !c.is_whitespace())
+            .collect();
         if piece.is_empty() {
             continue;
         }
@@ -591,8 +608,17 @@ mod tests {
     #[test]
     fn registry_files_are_pinned_and_mirrored_in_china() {
         for model in MODELS {
-            assert!(model.files.iter().all(|f| f.sha256.len() == 64 && !f.urls.is_empty()));
-            assert!(model.files.iter().all(|f| f.urls[0].starts_with("https://modelscope.cn/")), "国内镜像排第一");
+            assert!(model
+                .files
+                .iter()
+                .all(|f| f.sha256.len() == 64 && !f.urls.is_empty()));
+            assert!(
+                model
+                    .files
+                    .iter()
+                    .all(|f| f.urls[0].starts_with("https://modelscope.cn/")),
+                "国内镜像排第一"
+            );
         }
         assert_eq!(find("sensevoice").unwrap().kind, SherpaKind::SenseVoice);
         assert!(find("base").is_none());
@@ -610,7 +636,10 @@ mod tests {
         std::fs::write(model.join("tokens.txt"), vec![0u8; 315_894]).unwrap();
         // 大小不对（下了一半）不算。
         std::fs::write(model.join("model.int8.onnx"), b"partial").unwrap();
-        let missing: Vec<&str> = missing_files(app_data, &SENSE_VOICE).iter().map(|(_, f)| f.path).collect();
+        let missing: Vec<&str> = missing_files(app_data, &SENSE_VOICE)
+            .iter()
+            .map(|(_, f)| f.path)
+            .collect();
         assert_eq!(missing, ["model.int8.onnx", "silero_vad.onnx"]);
     }
 
@@ -669,7 +698,15 @@ mod tests {
     fn parses_android_style_stereo_wav_and_downmixes_it() {
         let bytes = wav_bytes(2, 44_100, &[16_384, 0, -16_384, -16_384], true);
         let format = parse_wav_header(&bytes, bytes.len() as u64).unwrap();
-        assert_eq!((format.channels, format.sample_rate, format.bits, format.float), (2, 44_100, 16, false));
+        assert_eq!(
+            (
+                format.channels,
+                format.sample_rate,
+                format.bits,
+                format.float
+            ),
+            (2, 44_100, 16, false)
+        );
         assert_eq!(format.data_len, 8);
         let mono = frames_to_mono(&bytes[format.data_offset as usize..], &format);
         assert_eq!(mono, vec![0.25, -0.5]);
@@ -694,8 +731,14 @@ mod tests {
 
     #[test]
     fn hotwords_are_joined_with_ascii_commas_and_capped() {
-        let terms: Vec<String> = ["勒沙特列原理", " 焓变 ", "", "a,b"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(qwen3_hotwords(&terms).as_deref(), Some("勒沙特列原理,焓变,ab"));
+        let terms: Vec<String> = ["勒沙特列原理", " 焓变 ", "", "a,b"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            qwen3_hotwords(&terms).as_deref(),
+            Some("勒沙特列原理,焓变,ab")
+        );
         assert_eq!(qwen3_hotwords(&[]), None);
         let many: Vec<String> = (0..500).map(|i| format!("术语{i}")).collect();
         let joined = qwen3_hotwords(&many).unwrap();
@@ -705,7 +748,10 @@ mod tests {
 
     #[test]
     fn strips_control_tags() {
-        assert_eq!(strip_tags("<|zh|><|NEUTRAL|><|Speech|><|withitn|>你好。"), "你好。");
+        assert_eq!(
+            strip_tags("<|zh|><|NEUTRAL|><|Speech|><|withitn|>你好。"),
+            "你好。"
+        );
         assert_eq!(strip_tags("没有标记"), "没有标记");
     }
 
@@ -716,7 +762,10 @@ mod tests {
             .into_iter()
             .map(|(a, b)| text.chars().skip(a).take(b - a).collect())
             .collect();
-        assert_eq!(parts, ["大家好，我是张老师。", "今天讲梯度下降！", "为什么呢？"]);
+        assert_eq!(
+            parts,
+            ["大家好，我是张老师。", "今天讲梯度下降！", "为什么呢？"]
+        );
 
         let long = "我们这节课给大家介绍的学校都是一些性价比很高的学校，不管是各位同学你是考得好还是考得不好，今天要介绍的这么一大堆学校的话呢绝对有一个是适合你的";
         let parts = split_sentences(long);
@@ -733,7 +782,10 @@ mod tests {
 
     #[test]
     fn maps_tokens_to_text_positions_and_falls_back_to_proportional_times() {
-        let tokens: Vec<String> = ["▁大家", "好", "我", "是"].iter().map(|s| s.to_string()).collect();
+        let tokens: Vec<String> = ["▁大家", "好", "我", "是"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let times = token_char_times("大家好，我是", &tokens, &[0.1, 0.5, 1.0, 1.2]).unwrap();
         assert_eq!(times, vec![(0, 0.1), (2, 0.5), (4, 1.0), (5, 1.2)]);
         assert_eq!(char_time_ms(4, 6, 10_000, 12_000, Some(&times)), 11_000);

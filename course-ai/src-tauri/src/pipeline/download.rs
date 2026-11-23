@@ -973,7 +973,10 @@ mod tests {
             Some("courseai-no-such-drive".into())
         );
         #[cfg(not(target_os = "macos"))]
-        assert_eq!(unmounted_volume(Path::new("/Volumes/courseai-no-such-drive/网课")), None);
+        assert_eq!(
+            unmounted_volume(Path::new("/Volumes/courseai-no-such-drive/网课")),
+            None
+        );
         assert_eq!(unmounted_volume(Path::new("/Users/someone/网课")), None);
         assert_eq!(unmounted_volume(Path::new("/Volumes")), None);
         assert_eq!(unmounted_volume(Path::new("Volumes/x/y")), None);

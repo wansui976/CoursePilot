@@ -23,12 +23,18 @@ fn task_key(course_id: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn cmd_get_review_book(state: State<'_, AppState>, course_id: String) -> AppResult<ReviewBook> {
+pub async fn cmd_get_review_book(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> AppResult<ReviewBook> {
     review_book::get_review_book(&state.db, &course_id).await
 }
 
 #[tauri::command]
-pub async fn cmd_review_book_running(state: State<'_, AppState>, course_id: String) -> AppResult<bool> {
+pub async fn cmd_review_book_running(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> AppResult<bool> {
     Ok(state.is_running(&task_key(&course_id)))
 }
 
@@ -47,7 +53,9 @@ pub async fn cmd_generate_review_book(
     // 写正文要强模型，走「笔记」任务的配置。配置错误在返回前报给前端。
     let resolved = match crate::commands::ai::provider_for_db(&state.db, AiTask::Notes).await {
         Ok(Some(pair)) => Ok(pair),
-        Ok(None) => Err(AppError::Config("尚未配置可用的 LLM Profile / API Key（设置 → 大模型）".into())),
+        Ok(None) => Err(AppError::Config(
+            "尚未配置可用的 LLM Profile / API Key（设置 → 大模型）".into(),
+        )),
         Err(error) => Err(error),
     };
     let (provider, model) = match resolved {
@@ -67,12 +75,22 @@ pub async fn cmd_generate_review_book(
         // 用量记到这门课上，「用量与花费」里按课程能看到。
         let result = crate::usage_log::scoped(
             crate::usage_log::UsageScope::course(&course_id),
-            review_book::generate_review_book(&db, &provider, &model, &course_id, rewrite, &cancel, &mut on_progress),
+            review_book::generate_review_book(
+                &db,
+                &provider,
+                &model,
+                &course_id,
+                rewrite,
+                &cancel,
+                &mut on_progress,
+            ),
         )
         .await;
         let payload = match result {
             Ok(outcome) => ReviewEvent::Done { outcome },
-            Err(error) => ReviewEvent::Error { message: error.to_string() },
+            Err(error) => ReviewEvent::Error {
+                message: error.to_string(),
+            },
         };
         task_state.unregister_cancel(&key, &cancel);
         let _ = app.emit(&event, payload);
@@ -81,7 +99,10 @@ pub async fn cmd_generate_review_book(
 }
 
 #[tauri::command]
-pub async fn cmd_cancel_review_book(state: State<'_, AppState>, course_id: String) -> AppResult<()> {
+pub async fn cmd_cancel_review_book(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> AppResult<()> {
     state.cancel(&task_key(&course_id));
     Ok(())
 }

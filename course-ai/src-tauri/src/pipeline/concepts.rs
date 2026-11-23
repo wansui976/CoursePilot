@@ -1674,7 +1674,8 @@ pub async fn analyze_course_concepts(
                 tools: Vec::new(),
                 label: "concept_extract",
             };
-            let extracted = crate::pipeline::ai::complete_parsed(provider, &req, parse_concepts_json).await;
+            let extracted =
+                crate::pipeline::ai::complete_parsed(provider, &req, parse_concepts_json).await;
             match extracted {
                 Ok(concepts) => {
                     chunk_ok += 1;
@@ -2361,8 +2362,14 @@ mod tests {
             &db,
             &course.id,
             &[
-                MergedConcept { name: "甲概念".into(), occurrences: vec![(v1.clone(), 1000)] },
-                MergedConcept { name: "乙概念".into(), occurrences: vec![(v1.clone(), 2000)] },
+                MergedConcept {
+                    name: "甲概念".into(),
+                    occurrences: vec![(v1.clone(), 1000)],
+                },
+                MergedConcept {
+                    name: "乙概念".into(),
+                    occurrences: vec![(v1.clone(), 2000)],
+                },
             ],
         )
         .await
@@ -2390,7 +2397,10 @@ mod tests {
         replace_course_concepts(
             &db,
             &course.id,
-            &[MergedConcept { name: "甲概念".into(), occurrences: vec![(v1, 1000)] }],
+            &[MergedConcept {
+                name: "甲概念".into(),
+                occurrences: vec![(v1, 1000)],
+            }],
         )
         .await
         .unwrap();
@@ -2406,7 +2416,11 @@ mod tests {
                 .fetch_all(&db.pool)
                 .await
                 .unwrap();
-        assert_eq!(keys, [format!("concept:{new_id}")], "同名的复述要迁到新 id，合并掉的删除");
+        assert_eq!(
+            keys,
+            [format!("concept:{new_id}")],
+            "同名的复述要迁到新 id，合并掉的删除"
+        );
     }
 
     #[tokio::test]
@@ -2735,7 +2749,11 @@ mod tests {
             },
             MergedConcept {
                 name: "乙概念".into(),
-                occurrences: vec![(second.clone(), 0), (first.clone(), 2_000), (first.clone(), 0)],
+                occurrences: vec![
+                    (second.clone(), 0),
+                    (first.clone(), 2_000),
+                    (first.clone(), 0),
+                ],
             },
         ];
 

@@ -855,7 +855,7 @@ button.ca-time:hover {
   grid-template-columns: 240px minmax(0, 1fr) 230px;
   grid-template-areas:
     "note notebook pile"
-    "deck deck pile";
+    "deck deck miss";
   gap: 36px 40px;
   padding: 24px 40px 48px;
   align-items: start;
@@ -1017,6 +1017,11 @@ button.ca-time:hover {
   color: var(--text-muted);
 }
 
+.ca-desk-miss {
+  grid-area: miss;
+  transform: rotate(-1.5deg);
+}
+
 .ca-desk-deck {
   grid-area: deck;
   display: flex;
@@ -1027,7 +1032,7 @@ button.ca-time:hover {
 .ca-app[data-bucket="compact"] .ca-desk-surface,
 .ca-app[data-bucket="medium"] .ca-desk-surface {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "note" "notebook" "pile" "deck";
+  grid-template-areas: "note" "notebook" "pile" "deck" "miss";
   padding-inline: 20px;
 }
 
@@ -1306,4 +1311,407 @@ button.ca-time:hover {
   width: 1.5px;
   background: var(--marker-strong);
   pointer-events: none;
+}
+
+/* ===================== 复习翻卡 ===================== */
+
+.ca-review-pile {
+  position: relative;
+  margin-top: 8px;
+  perspective: 1600px;
+}
+
+/* 卡下垫着的纸：剩得越少垫得越薄。 */
+.ca-review-under {
+  --d: 1;
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-panel);
+  box-shadow: 0 0 0 1px var(--border-faint);
+  transform: translateY(calc(var(--d) * 10px)) scale(calc(1 - var(--d) * 0.035));
+  opacity: calc(1 - var(--d) * 0.3);
+}
+
+.ca-review-card {
+  position: relative;
+  padding: 32px 36px 28px;
+  border-radius: var(--r-lg);
+  background: var(--surface-panel);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 2px 4px rgb(16 24 20 / 0.05),
+    0 24px 48px -20px rgb(16 24 20 / 0.35);
+  transform-origin: center;
+}
+
+/* 翻面：绕竖轴转一下，答案在背面。 */
+.ca-review-card[data-revealed] {
+  animation: ca-card-flip 0.5s var(--ease-out);
+}
+
+@keyframes ca-card-flip {
+  0% {
+    transform: rotateY(0deg);
+  }
+  45% {
+    transform: rotateY(88deg);
+  }
+  55% {
+    transform: rotateY(-88deg);
+  }
+  100% {
+    transform: rotateY(0deg);
+  }
+}
+
+/* 评完分：往右甩到做完的那摞。 */
+.ca-review-card[data-tossing] {
+  transition:
+    transform 0.32s var(--ease-in),
+    opacity 0.32s var(--ease-in);
+  transform: translateX(120%) rotate(12deg);
+  opacity: 0;
+}
+
+/* 题目：衬线大字。 */
+.ca-review-card .ca-reading {
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+
+/* 评分按钮：纸片按钮；「良好」是最常见的诚实回答，用强调色。 */
+.ca-grade {
+  border: 0 !important;
+  background: var(--surface-panel) !important;
+  box-shadow: 0 0 0 1px var(--border-subtle), var(--shadow-card);
+  border-radius: var(--r-md) !important;
+}
+
+.ca-grade:hover {
+  box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-card-hover);
+}
+
+.ca-grade[data-grade="1"] .ca-grade-label {
+  color: var(--status-err);
+}
+
+.ca-grade[data-grade="3"] {
+  background: var(--accent) !important;
+  box-shadow: none;
+}
+
+.ca-grade[data-grade="3"] .ca-grade-label,
+.ca-grade[data-grade="3"] .ca-grade-interval,
+.ca-grade[data-grade="3"] .ca-grade-key {
+  color: var(--on-accent) !important;
+}
+
+.ca-grade-interval {
+  font-family: var(--font-mono);
+}
+
+/* ===================== 记忆曲线 ===================== */
+
+.ca-curve {
+  margin: 14px 0 0;
+  padding: 12px 12px 8px;
+  border-radius: var(--r-md);
+  background: var(--surface-app);
+  text-align: left;
+}
+
+.ca-curve svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.ca-curve .grid {
+  stroke: var(--border-faint);
+  stroke-width: 1;
+}
+
+.ca-curve .axis {
+  fill: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ca-curve .line {
+  fill: none;
+  stroke: var(--text-strong);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.ca-curve .future {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 2;
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+
+.ca-curve .thr {
+  stroke: var(--status-warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+
+.ca-curve .now {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+
+.ca-curve .rv {
+  fill: var(--marker-strong);
+  stroke: var(--surface-panel);
+  stroke-width: 2;
+}
+
+.ca-curve .rv.lapse {
+  fill: var(--surface-panel);
+  stroke: var(--status-err);
+}
+
+.ca-curve .nx {
+  fill: var(--surface-panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.ca-curve figcaption,
+.ca-curve-empty {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ===================== 错题本 ===================== */
+
+.ca-mistakes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ca-mistakes-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  max-width: 280px;
+}
+
+.ca-mistakes-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.ca-mistakes-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--status-err);
+}
+
+.ca-mistakes-pile {
+  position: relative;
+  width: 280px;
+  max-width: 100%;
+  isolation: isolate;
+}
+
+.ca-mistakes-pile .mc {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 140px;
+  padding: 14px 16px 12px 18px;
+  border-radius: var(--r-md);
+  background: var(--surface-panel);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    inset 3px 0 0 var(--status-err),
+    0 8px 18px -12px rgb(16 24 20 / 0.45);
+}
+
+/* 底下两张只露出一点边，叠成一小摞。 */
+.ca-mistakes-pile .mc:nth-child(2),
+.ca-mistakes-pile .mc:nth-child(3) {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+
+.ca-mistakes-pile .mc:nth-child(2) {
+  transform: translate(8px, 8px) rotate(2deg);
+}
+
+.ca-mistakes-pile .mc:nth-child(3) {
+  transform: translate(14px, 14px) rotate(4deg);
+  z-index: -2;
+}
+
+.ca-mistakes-pile .lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--status-err);
+}
+
+.ca-mistakes-pile .q {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.ca-mistakes-pile .streak {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ca-mistakes-pile .streak i {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-subtle);
+}
+
+.ca-mistakes-pile .streak i.on {
+  background: var(--status-ok);
+}
+
+/* ===================== 知识点收集册 ===================== */
+
+.ca-book {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 20px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.ca-book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+/* 一个知识点是一张小黑板卡。粉笔字的亮度跟着记忆走（--r 0..1）。 */
+.ca-kcard {
+  --r: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 112px;
+  padding: 12px 12px 10px;
+  border-radius: var(--r-md);
+  background: var(--board);
+  background-image: var(--grain-bg);
+  color: var(--chalk);
+  text-align: left;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 6px 14px -10px rgb(16 24 20 / 0.5);
+  transition:
+    transform 0.18s var(--ease-out),
+    box-shadow 0.18s;
+}
+
+.ca-kcard:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 14px 24px -14px rgb(16 24 20 / 0.55);
+}
+
+.ca-kcard .k {
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 500;
+  opacity: calc(0.45 + var(--r) * 0.55);
+}
+
+.ca-kcard .m {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+
+.ca-kcard .m i {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(238 242 236 / 0.16);
+  overflow: hidden;
+}
+
+.ca-kcard .m i b {
+  display: block;
+  height: 100%;
+  width: calc(var(--r) * 100%);
+  background: var(--marker-strong);
+}
+
+/* 褪色：去饱和，贴一张「该复习了」小标签。 */
+.ca-kcard.fading {
+  filter: saturate(0.4);
+}
+
+.ca-kcard .tab {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--marker-strong);
+  color: #1b1f1d;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* 待点亮：有卡没复习过，黑板很暗。 */
+.ca-kcard.pending {
+  opacity: 0.75;
+}
+
+/* 剪影：还没出过题，只剩虚线轮廓。 */
+.ca-kcard.locked {
+  background: transparent;
+  color: var(--text-faint);
+  box-shadow: none;
+  border: 1.5px dashed var(--border-strong);
+}
+
+.ca-kcard.locked .k {
+  opacity: 1;
+}
+
+.ca-kcard.locked:hover {
+  transform: none;
+}
+
+.ca-book-mistakes {
+  margin-top: 8px;
 }

@@ -120,18 +120,15 @@ pub async fn run_ocr_on_image(image: &Path, langs: &str) -> AppResult<String> {
             let _ = stdin.write_all(&image_bytes).await;
         })
     });
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| {
-        if let Some(writer) = &writer {
-            writer.abort();
-        }
-        AppError::Pipeline("tesseract 超时（30 秒），这张图先跳过".into())
-    })?
-    .map_err(|e| AppError::Pipeline(format!("tesseract wait: {e}")))?;
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+        .await
+        .map_err(|_| {
+            if let Some(writer) = &writer {
+                writer.abort();
+            }
+            AppError::Pipeline("tesseract 超时（30 秒），这张图先跳过".into())
+        })?
+        .map_err(|e| AppError::Pipeline(format!("tesseract wait: {e}")))?;
     if !output.status.success() {
         return Err(AppError::Pipeline(format!(
             "tesseract failed: {}",

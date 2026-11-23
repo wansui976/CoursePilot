@@ -711,11 +711,7 @@ fn release_files(video: &DoomedVideo, still_used: bool, owned_media_roots: &[Pat
 }
 
 /// 永久删除单个视频（连带其转写/笔记等衍生数据，经 FK 级联）。
-pub async fn purge_video(
-    db: &Db,
-    id: &str,
-    owned_media_roots: &[PathBuf],
-) -> AppResult<()> {
+pub async fn purge_video(db: &Db, id: &str, owned_media_roots: &[PathBuf]) -> AppResult<()> {
     let mut tx = db.begin_write().await?;
     let (course_id, data_dir, file_path, app_owned, subtitle_path) =
         sqlx::query_as::<_, (String, String, String, bool, Option<String>)>(
@@ -928,7 +924,10 @@ pub async fn cmd_add_local_batch(
 ) -> AppResult<BatchImport> {
     let roots = DataRoots::load(&app, &state.db).await?;
     // B 站缓存目录先合成成 mp4（写在存储位置下，缓存本身不动），再和普通文件一样导入。
-    let cache_root = roots.preferred.clone().unwrap_or_else(|| roots.fallback.clone());
+    let cache_root = roots
+        .preferred
+        .clone()
+        .unwrap_or_else(|| roots.fallback.clone());
     let (paths, cache_failures) = resolve_bilibili_caches(paths, &cache_root).await;
     let mut imported =
         add_local_batch(&state.db, &course_id, paths, |video| roots.for_video(video)).await?;
@@ -952,7 +951,11 @@ async fn resolve_bilibili_caches(
     let mut failed = Vec::new();
     for path in paths {
         let dir = Path::new(&path);
-        let Some(entry) = dir.is_dir().then(|| bilibili_cache::read_entry(dir)).flatten() else {
+        let Some(entry) = dir
+            .is_dir()
+            .then(|| bilibili_cache::read_entry(dir))
+            .flatten()
+        else {
             files.push(path);
             continue;
         };
@@ -1114,10 +1117,7 @@ pub async fn cmd_purge_video(
 }
 
 #[tauri::command]
-pub async fn cmd_purge_trash(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<u64> {
+pub async fn cmd_purge_trash(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<u64> {
     let owned = crate::storage::owned_media_roots(&app)?;
     purge_trash(&state.db, &owned).await
 }
@@ -1479,7 +1479,9 @@ mod tests {
     async fn a_synced_download_relinked_to_the_users_own_file_keeps_that_file() {
         // 别的设备下载、同步过来的 B 站视频：本机由「重新关联文件夹」指向了用户自己的那份。
         let dir = tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         let course_root = dir.path().join("我的课");
         std::fs::create_dir_all(&course_root).unwrap();
         let mine = course_root.join("第一讲.mp4");
@@ -1487,7 +1489,9 @@ mod tests {
         let course = create_course(&db, "c".into(), course_root.to_string_lossy().into())
             .await
             .unwrap();
-        let video = add_local_video(&db, &course.id, mine.clone(), None).await.unwrap();
+        let video = add_local_video(&db, &course.id, mine.clone(), None)
+            .await
+            .unwrap();
         sqlx::query("UPDATE videos SET source_type='bilibili', app_owned_file=0 WHERE id=?")
             .bind(&video.id)
             .execute(&db.pool)
@@ -1495,13 +1499,18 @@ mod tests {
             .unwrap();
         delete_video(&db, &video.id).await.unwrap();
         purge_video(&db, &video.id, &[]).await.unwrap();
-        assert!(mine.exists(), "用户自己的文件不能因为这条记录是 B 站来源就被删掉");
+        assert!(
+            mine.exists(),
+            "用户自己的文件不能因为这条记录是 B 站来源就被删掉"
+        );
     }
 
     #[tokio::test]
     async fn relinking_a_course_folder_stops_treating_its_files_as_downloads() {
         let dir = tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         let old_root = dir.path().join("old");
         let new_root = dir.path().join("new");
         std::fs::create_dir_all(&old_root).unwrap();
@@ -1511,15 +1520,21 @@ mod tests {
         let course = create_course(&db, "c".into(), old_root.to_string_lossy().into())
             .await
             .unwrap();
-        let video = add_local_video(&db, &course.id, old_root.join("a.mp4"), None).await.unwrap();
+        let video = add_local_video(&db, &course.id, old_root.join("a.mp4"), None)
+            .await
+            .unwrap();
         sqlx::query("UPDATE videos SET source_type='bilibili', app_owned_file=1 WHERE id=?")
             .bind(&video.id)
             .execute(&db.pool)
             .await
             .unwrap();
-        crate::commands::courses::relink_course_root(&db, &course.id, new_root.to_string_lossy().into())
-            .await
-            .unwrap();
+        crate::commands::courses::relink_course_root(
+            &db,
+            &course.id,
+            new_root.to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let owned: bool = sqlx::query_scalar("SELECT app_owned_file FROM videos WHERE id=?")
             .bind(&video.id)
             .fetch_one(&db.pool)
@@ -1576,14 +1591,9 @@ mod tests {
         std::fs::create_dir_all(&picked).unwrap();
         let file = picked.join(name);
         std::fs::write(&file, b"mobile copy").unwrap();
-        let video = add_local_video(
-            db,
-            course_id,
-            file.clone(),
-            Some(app_root.join("videos")),
-        )
-        .await
-        .unwrap();
+        let video = add_local_video(db, course_id, file.clone(), Some(app_root.join("videos")))
+            .await
+            .unwrap();
         let data_dir = PathBuf::from(&video.data_dir);
         std::fs::write(data_dir.join("audio.wav"), b"wav").unwrap();
         sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
@@ -1629,27 +1639,19 @@ mod tests {
             .await
             .unwrap();
 
-        let first = add_local_video(
-            &db,
-            &course.id,
-            file.clone(),
-            Some(app_root.join("videos")),
-        )
-        .await
-        .unwrap();
+        let first = add_local_video(&db, &course.id, file.clone(), Some(app_root.join("videos")))
+            .await
+            .unwrap();
         delete_video(&db, &first.id).await.unwrap();
         // 同一文件在删除后又导入了一次：新的活动行仍指着这个文件。
-        let second = add_local_video(
-            &db,
-            &course.id,
-            file.clone(),
-            Some(app_root.join("videos")),
-        )
-        .await
-        .unwrap();
+        let second = add_local_video(&db, &course.id, file.clone(), Some(app_root.join("videos")))
+            .await
+            .unwrap();
         assert_ne!(first.id, second.id);
 
-        purge_video(&db, &first.id, &[app_root.clone()]).await.unwrap();
+        purge_video(&db, &first.id, &[app_root.clone()])
+            .await
+            .unwrap();
         assert!(file.is_file(), "活动视频还在用这个文件，不能删");
 
         delete_video(&db, &second.id).await.unwrap();
@@ -1672,25 +1674,17 @@ mod tests {
             .await
             .unwrap();
 
-        let trashed = add_local_video(
-            &db,
-            &course.id,
-            file.clone(),
-            Some(app_root.join("videos")),
-        )
-        .await
-        .unwrap();
+        let trashed = add_local_video(&db, &course.id, file.clone(), Some(app_root.join("videos")))
+            .await
+            .unwrap();
         delete_video(&db, &trashed.id).await.unwrap();
-        add_local_video(
-            &db,
-            &course.id,
-            file.clone(),
-            Some(app_root.join("videos")),
-        )
-        .await
-        .unwrap();
+        add_local_video(&db, &course.id, file.clone(), Some(app_root.join("videos")))
+            .await
+            .unwrap();
 
-        purge_trash(&db, std::slice::from_ref(&app_root)).await.unwrap();
+        purge_trash(&db, std::slice::from_ref(&app_root))
+            .await
+            .unwrap();
 
         assert!(file.is_file(), "清空回收站也不能删活动视频还在用的文件");
     }
@@ -1735,8 +1729,7 @@ mod tests {
             .unwrap();
         let mut files = Vec::new();
         for name in ["a.mp4", "b.mp4"] {
-            let (_, file, _) =
-                trashed_mobile_video(&db, &course.id, &app_root, name).await;
+            let (_, file, _) = trashed_mobile_video(&db, &course.id, &app_root, name).await;
             files.push(file);
         }
 
@@ -1852,7 +1845,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let cache = dir.path().join("222");
         std::fs::create_dir_all(&cache).unwrap();
-        std::fs::write(cache.join("videoInfo.json"), r#"{"title":"坏缓存","cid":222}"#).unwrap();
+        std::fs::write(
+            cache.join("videoInfo.json"),
+            r#"{"title":"坏缓存","cid":222}"#,
+        )
+        .unwrap();
         // 没有 ftyp 的旧格式 / 没缓存完：读不出流。
         std::fs::write(cache.join("222-1-30080.m4s"), b"not an mp4").unwrap();
         let plain = dir.path().join("a.mp4").to_string_lossy().into_owned();

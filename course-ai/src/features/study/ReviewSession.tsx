@@ -2,14 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { qk } from "@/lib/queryKeys";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CheckCircle2, RotateCcw, X, XCircle } from "lucide-react";
+import { Check, CheckCircle2, LineChart, RotateCcw, X, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
-import { ipc, type DueCard } from "@/lib/ipc";
+import { ipc, type DueCard, type MistakeCard } from "@/lib/ipc";
 import { formatStudyInterval } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { prefersReducedMotion } from "@/lib/viewTransition";
 import { MathText } from "@/ui/MathText";
 import { renderInlineMarkdown } from "@/lib/renderMarkdown";
+import { MemoryCurve } from "./MemoryCurve";
+
+/** 评完分甩出去的时长（与 design.css 的 ca-toss 一致）。 */
+const TOSS_MS = 320;
 
 const GRADES: { rating: number; labelKey: string; key: string }[] = [
   { rating: 1, labelKey: "review.again", key: "1" },
@@ -59,16 +64,32 @@ function isInteractiveTarget(target: EventTarget | null) {
   );
 }
 
+/** 错题本里的卡没有排期预览（可能还没到期），按钮上就不显示间隔。 */
+function mistakeToDueCard(card: MistakeCard): DueCard {
+  return {
+    id: card.card_id,
+    video_id: card.video_id,
+    course_id: card.course_id,
+    front: card.front,
+    back: card.back,
+    source_ms: card.source_ms,
+    preview_ms: [],
+  };
+}
+
 /** 全屏、纯键盘的复习会话：空格翻面，1–4 打分，答错可回看出处。
  * 默认复习今日全部到期卡；给 `concept` 则只复习该课程该概念下的到期卡。 */
 export function ReviewSession({
   onClose,
   onJump,
   concept,
+  mistakes,
 }: {
   onClose: () => void;
   onJump: (card: DueCard) => void;
   concept?: { courseId: string; conceptId: string; name: string };
+  /** 只复习错题本：答错过、还没连对三次的卡（可以提前复习）。null 表示全部课程。 */
+  mistakes?: { courseId: string | null };
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -78,11 +99,15 @@ export function ReviewSession({
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: concept
       ? qk.srs.conceptSession(concept.courseId, concept.conceptId, sessionId)
-      : qk.srs.session(sessionId),
-    queryFn: () =>
+      : mistakes
+        ? [...qk.srs.mistakes(mistakes.courseId), sessionId]
+        : qk.srs.session(sessionId),
+    queryFn: (): Promise<DueCard[]> =>
       concept
         ? ipc.srs.dueByConcept(concept.courseId, concept.conceptId)
-        : ipc.srs.due(SESSION_LIMIT),
+        : mistakes
+          ? ipc.srs.mistakes(mistakes.courseId).then((list) => list.map(mistakeToDueCard))
+          : ipc.srs.due(SESSION_LIMIT),
     // 会话期间锁定这批卡，复习不即时刷新列表（避免卡片在脚下位移）。
     staleTime: Infinity,
     // 关闭后立刻丢弃这副牌；下一次打开必须按最新排期重新取数。
@@ -92,6 +117,9 @@ export function ReviewSession({
 
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
+  /** 评完分的这张正被甩向右边（做完的那摞），动画结束才换下一张。 */
+  const [tossing, setTossing] = useState(false);
+  const [showCurve, setShowCurve] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const exitButtonRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -110,7 +138,7 @@ export function ReviewSession({
 
   const review = useMutation({
     mutationFn: ({ cardId, rating }: { cardId: string; rating: number }) =>
-      ipc.srs.review(cardId, rating),
+      mistakes ? ipc.srs.reviewMistake(cardId, rating) : ipc.srs.review(cardId, rating),
   });
 
   async function grade(rating: number) {
@@ -124,7 +152,14 @@ export function ReviewSession({
         queryClient.invalidateQueries({ queryKey: qk.srs.dueByCourse() }),
         queryClient.invalidateQueries({ queryKey: qk.srs.conceptDue.all() }),
         queryClient.invalidateQueries({ queryKey: qk.weakConcepts() }),
+        queryClient.invalidateQueries({ queryKey: ["srs-mistakes"] }),
       ]);
+      // 不论评几分都往右甩：放到「做完的那摞」上。等级只看按钮，不看方向。
+      if (!prefersReducedMotion()) {
+        setTossing(true);
+        await new Promise((resolve) => window.setTimeout(resolve, TOSS_MS));
+      }
+      setTossing(false);
       setRevealed(false);
       selectedOptionsRef.current = [];
       setSelectedOptions([]);
@@ -158,6 +193,7 @@ export function ReviewSession({
     selectedOptionsRef.current = [];
     setSelectedOptions([]);
     setRevealed(false);
+    setShowCurve(false);
   }, [card?.id]);
 
   // 会话结束刷新待复习计数（仪表盘据此更新）。
@@ -298,10 +334,22 @@ export function ReviewSession({
               </Button>
             </div>
           ) : card ? (
+            <div className="ca-review-pile">
+              {/* 卡下垫着的几张纸：剩得越少垫得越薄。 */}
+              {Array.from({ length: Math.min(2, cards.length - index - 1) }, (_, depth) => (
+                <span
+                  key={depth}
+                  aria-hidden="true"
+                  className="ca-review-under"
+                  style={{ "--d": depth + 1 } as React.CSSProperties}
+                />
+              ))}
             <div
               key={card.id}
-              // 题目直接排在页面上，不再装进一张小卡片：大号衬线字就是这一屏的全部重心。
-              className="ca-card-enter px-2 py-6 sm:px-4"
+              // 一张纸卡：翻面时绕竖轴转一下，评完分甩向右边。
+              className="ca-review-card ca-card-enter"
+              data-revealed={revealed ? "" : undefined}
+              data-tossing={tossing ? "" : undefined}
             >
               <div className="ca-reading whitespace-pre-wrap text-center text-[length:calc(1.6rem*var(--reading-scale,1))] font-semibold leading-snug text-[var(--text-strong)]">
                 {renderInlineMarkdown(card.front)}
@@ -419,6 +467,16 @@ export function ReviewSession({
                         {t("review.reviewSource")}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      aria-expanded={showCurve}
+                      onClick={() => setShowCurve((open) => !open)}
+                      className="ca-touch-44 ml-3 mt-3 inline-flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:underline"
+                    >
+                      <LineChart className="h-3.5 w-3.5" />
+                      {t("memoryCurve.toggle")}
+                    </button>
+                    {showCurve && <MemoryCurve cardId={card.id} />}
                   </div>
                   <div className="mt-5 grid grid-cols-4 gap-2">
                     {GRADES.map((g) => {
@@ -472,6 +530,7 @@ export function ReviewSession({
                   </span>
                 </Button>
               )}
+            </div>
             </div>
           ) : null}
           </div>

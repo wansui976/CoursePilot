@@ -8,6 +8,7 @@ import { displayTitle } from "@/lib/videoTitle";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Kbd, Mark } from "@/ui/marks";
+import { MistakeDeck } from "@/features/study/MistakeDeck";
 import { CourseDeck } from "./CourseDeck";
 import { LectureCover } from "./LectureCover";
 import { UpdateNotice } from "./UpdateNotice";
@@ -140,6 +141,10 @@ export function DeskHome({
             </span>
           </button>
         </section>
+
+        <div className="ca-desk-miss">
+          <MistakeDeck onReview={() => shell?.openMainView("dashboard")} />
+        </div>
 
         <section className="ca-desk-deck" aria-label={t("desk.deckCaption", { count: summaries.length })}>
           <CourseDeck

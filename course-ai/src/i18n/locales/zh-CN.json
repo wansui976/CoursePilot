@@ -2521,5 +2521,41 @@
     "mistakes": "错题",
     "filler": "闲聊",
     "jump": "跳到 {{time}}"
+  },
+  "memoryCurve": {
+    "toggle": "记忆曲线",
+    "empty": "这张卡还没有复习记录。",
+    "summary": "现在大约还记得 {{now}}%，{{days}} 天后复习。",
+    "day_one": "{{count}} 天",
+    "day_other": "{{count}} 天",
+    "rating1": "这次答了「重来」",
+    "rating2": "这次答了「困难」",
+    "rating3": "这次答了「良好」",
+    "rating4": "这次答了「容易」"
+  },
+  "mistakes": {
+    "title": "错题本",
+    "count_one": "{{count}} 张",
+    "count_other": "{{count}} 张",
+    "missed": "答错 {{count}} 次",
+    "streakLabel": "连对",
+    "streak": "已连对 {{count}} 次，共需 {{total}} 次",
+    "review": "只复习错题"
+  },
+  "collection": {
+    "tab": "收集册",
+    "lit": "已点亮",
+    "fading": "正在褪色",
+    "locked": "还没出过题",
+    "dueTab": "该复习了",
+    "noCards": "还没有卡",
+    "notReviewed_one": "{{count}} 张卡待复习",
+    "notReviewed_other": "{{count}} 张卡待复习",
+    "state": {
+      "lit": "已点亮",
+      "fading": "正在褪色，该复习了",
+      "pending": "有卡还没复习",
+      "locked": "还没出过题"
+    }
   }
 }

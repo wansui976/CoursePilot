@@ -34,9 +34,9 @@ use tauri::{Emitter, Manager};
 use crate::commands::settings::{get_setting, set_setting};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::sync::compact::{self, batch_name, batch_seq, Listing};
 use crate::sync::envelope::SyncEnvelope;
 use crate::sync::webdav::WebDav;
-use crate::sync::compact::{self, batch_name, batch_seq, Listing};
 use crate::sync::{apply, identity, outbox};
 
 pub const SETTING_ENABLED: &str = "remote_sync_enabled";
@@ -106,8 +106,15 @@ pub async fn saved_config(db: &Db) -> AppResult<Option<RemoteConfig>> {
         .await?
         .filter(|folder| !folder.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_FOLDER.into());
-    let password = crate::llm::keychain::get_secret(db, SECRET_PASSWORD).await?.unwrap_or_default();
-    Ok(Some(RemoteConfig { url, folder, user, password }))
+    let password = crate::llm::keychain::get_secret(db, SECRET_PASSWORD)
+        .await?
+        .unwrap_or_default();
+    Ok(Some(RemoteConfig {
+        url,
+        folder,
+        user,
+        password,
+    }))
 }
 
 pub async fn is_enabled(db: &Db) -> AppResult<bool> {
@@ -187,7 +194,11 @@ pub async fn test_connection(config: &RemoteConfig) -> AppResult<usize> {
     check_clock(&dav).await?;
     dav.ensure_root().await?;
     dav.ensure_dir(DEVICES_DIR).await?;
-    Ok(dav.list(DEVICES_DIR).await?.map(|entries| entries.iter().filter(|entry| entry.is_dir).count()).unwrap_or(0))
+    Ok(dav
+        .list(DEVICES_DIR)
+        .await?
+        .map(|entries| entries.iter().filter(|entry| entry.is_dir).count())
+        .unwrap_or(0))
 }
 
 async fn check_clock(dav: &WebDav) -> AppResult<()> {
@@ -221,10 +232,18 @@ fn prepared() -> &'static Mutex<std::collections::HashMap<String, Prepared>> {
 }
 
 fn prepared_key(config: &RemoteConfig, device_id: &str) -> String {
-    format!("{}\0{}\0{}\0{device_id}", config.url, config.folder, config.user)
+    format!(
+        "{}\0{}\0{}\0{device_id}",
+        config.url, config.folder, config.user
+    )
 }
 
-pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_root: &Path) -> AppResult<RunReport> {
+pub async fn run_once(
+    db: &Db,
+    config: &RemoteConfig,
+    spool_root: &Path,
+    video_root: &Path,
+) -> AppResult<RunReport> {
     let dav = config.client()?;
     let identity = identity::ensure_sync_identity(db).await?;
     let device_id = identity.device_id.clone();
@@ -234,16 +253,31 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
     let (clock_due, dirs_ready) = {
         let mut map = prepared().lock().unwrap();
         let entry = map.entry(key.clone()).or_default();
-        (entry.clock_checked.is_none_or(|at| at.elapsed() >= CLOCK_CHECK_EVERY), entry.dirs_ready)
+        (
+            entry
+                .clock_checked
+                .is_none_or(|at| at.elapsed() >= CLOCK_CHECK_EVERY),
+            entry.dirs_ready,
+        )
     };
     if clock_due {
         check_clock(&dav).await?;
-        prepared().lock().unwrap().entry(key.clone()).or_default().clock_checked = Some(std::time::Instant::now());
+        prepared()
+            .lock()
+            .unwrap()
+            .entry(key.clone())
+            .or_default()
+            .clock_checked = Some(std::time::Instant::now());
     }
     if !dirs_ready {
         dav.ensure_root().await?;
         dav.ensure_dir(&batches_dir).await?;
-        prepared().lock().unwrap().entry(key.clone()).or_default().dirs_ready = true;
+        prepared()
+            .lock()
+            .unwrap()
+            .entry(key.clone())
+            .or_default()
+            .dirs_ready = true;
     }
 
     // 第一次开启：本机已有的数据全部排进出件箱（出件箱只记开启同步内核之后的改动）。
@@ -263,7 +297,9 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
         set_setting(db, SETTING_COVER_SNAPSHOT, "1").await?;
     }
 
-    let own_cache = compact::Cache { root: &spool_root.join("own") };
+    let own_cache = compact::Cache {
+        root: &spool_root.join("own"),
+    };
     let mut report = RunReport::default();
     report.pushed = push(db, &dav, &batches_dir, &own_cache).await?;
 
@@ -277,7 +313,12 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
     compact_own(db, &dav, &own_dir, &own_cache).await;
 
     // 设备信息（名字、最近同步时间）只在推了新改动、或这次运行还没写过时更新。
-    let written = prepared().lock().unwrap().entry(key.clone()).or_default().device_info_written;
+    let written = prepared()
+        .lock()
+        .unwrap()
+        .entry(key.clone())
+        .or_default()
+        .device_info_written;
     if report.pushed > 0 || !written {
         let info = DeviceInfo {
             device_id: device_id.clone(),
@@ -285,8 +326,14 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
             platform: platform_code().into(),
             last_sync_at: chrono::Utc::now().timestamp_millis(),
         };
-        dav.put(&format!("{own_dir}device.json"), serde_json::to_vec(&info)?).await?;
-        prepared().lock().unwrap().entry(key.clone()).or_default().device_info_written = true;
+        dav.put(&format!("{own_dir}device.json"), serde_json::to_vec(&info)?)
+            .await?;
+        prepared()
+            .lock()
+            .unwrap()
+            .entry(key.clone())
+            .or_default()
+            .device_info_written = true;
     }
     // 测试里不碰：局域网共享是进程里全局的，并行的测试打开它会改变这里的请求数。
     if crate::lan_share::supported() && !cfg!(test) {
@@ -296,8 +343,19 @@ pub async fn run_once(db: &Db, config: &RemoteConfig, spool_root: &Path, video_r
 }
 
 /// 局域网直连播放的地址写到网盘上自己的文件夹里（变了才写；关掉了就删掉）。出错只记日志，下一轮再试。
-async fn publish_lan(dav: &WebDav, own_dir: &str, key: &str, desired: Option<crate::lan_share::Advert>) {
-    let published = prepared().lock().unwrap().entry(key.to_string()).or_default().lan_published.clone();
+async fn publish_lan(
+    dav: &WebDav,
+    own_dir: &str,
+    key: &str,
+    desired: Option<crate::lan_share::Advert>,
+) {
+    let published = prepared()
+        .lock()
+        .unwrap()
+        .entry(key.to_string())
+        .or_default()
+        .lan_published
+        .clone();
     if published.as_ref() == Some(&desired) {
         return;
     }
@@ -310,7 +368,14 @@ async fn publish_lan(dav: &WebDav, own_dir: &str, key: &str, desired: Option<cra
         None => dav.delete(&path).await,
     };
     match result {
-        Ok(()) => prepared().lock().unwrap().entry(key.to_string()).or_default().lan_published = Some(desired),
+        Ok(()) => {
+            prepared()
+                .lock()
+                .unwrap()
+                .entry(key.to_string())
+                .or_default()
+                .lan_published = Some(desired)
+        }
         Err(error) => tracing::warn!(%error, "局域网地址没能写到网盘上"),
     }
 }
@@ -321,10 +386,14 @@ async fn publish_lan(dav: &WebDav, own_dir: &str, key: &str, desired: Option<cra
 ///
 /// 顺便：别的设备把这台「移除」了（留了标记），而这台其实还在用——摘掉标记，重新出现在列表里。
 async fn next_seq(db: &Db, dav: &WebDav, batches_dir: &str) -> AppResult<u64> {
-    let local: u64 = get_setting(db, SETTING_NEXT_SEQ).await?.and_then(|value| value.parse().ok()).unwrap_or(1);
+    let local: u64 = get_setting(db, SETTING_NEXT_SEQ)
+        .await?
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1);
     let listing = Listing::parse(&dav.list(batches_dir).await?.unwrap_or_default());
     if listing.retired {
-        dav.delete(&format!("{batches_dir}{}", compact::RETIRED_MARKER)).await?;
+        dav.delete(&format!("{batches_dir}{}", compact::RETIRED_MARKER))
+            .await?;
     }
     Ok(local.max(listing.max_seq() + 1))
 }
@@ -335,7 +404,9 @@ fn split_by_size(envelopes: &[SyncEnvelope]) -> AppResult<Vec<Vec<SyncEnvelope>>
     let mut size = 0usize;
     for envelope in envelopes {
         let bytes = serde_json::to_vec(envelope)?.len() + 1;
-        if chunks.is_empty() || (size + bytes > BATCH_MAX_BYTES && !chunks.last().unwrap().is_empty()) {
+        if chunks.is_empty()
+            || (size + bytes > BATCH_MAX_BYTES && !chunks.last().unwrap().is_empty())
+        {
             chunks.push(Vec::new());
             size = 0;
         }
@@ -345,7 +416,12 @@ fn split_by_size(envelopes: &[SyncEnvelope]) -> AppResult<Vec<Vec<SyncEnvelope>>
     Ok(chunks)
 }
 
-async fn push(db: &Db, dav: &WebDav, batches_dir: &str, cache: &compact::Cache<'_>) -> AppResult<usize> {
+async fn push(
+    db: &Db,
+    dav: &WebDav,
+    batches_dir: &str,
+    cache: &compact::Cache<'_>,
+) -> AppResult<usize> {
     if outbox::pending_count(db).await? == 0 {
         return Ok(0);
     }
@@ -359,11 +435,21 @@ async fn push(db: &Db, dav: &WebDav, batches_dir: &str, cache: &compact::Cache<'
         let chunks = split_by_size(&envelopes)?;
         for (index, chunk) in chunks.iter().enumerate() {
             let bytes = serde_json::to_vec(chunk)?;
-            if let Err(error) = dav.put(&format!("{batches_dir}{}", batch_name(seq)), bytes.clone()).await {
+            if let Err(error) = dav
+                .put(&format!("{batches_dir}{}", batch_name(seq)), bytes.clone())
+                .await
+            {
                 // 这一块和后面还没传的都放回出件箱；前面已经传上去的已经确认过了。
                 let message = error.to_string();
                 for envelope in chunks[index..].iter().flatten() {
-                    let _ = outbox::release_failed(db, &envelope.record_type, &envelope.record_id, &envelope.version, &message).await;
+                    let _ = outbox::release_failed(
+                        db,
+                        &envelope.record_type,
+                        &envelope.record_id,
+                        &envelope.version,
+                        &message,
+                    )
+                    .await;
                 }
                 return Err(error);
             }
@@ -372,11 +458,18 @@ async fn push(db: &Db, dav: &WebDav, batches_dir: &str, cache: &compact::Cache<'
             seq += 1;
             set_setting(db, SETTING_NEXT_SEQ, &seq.to_string()).await?;
             for envelope in chunk {
-                let cleared =
-                    outbox::acknowledge(db, &envelope.record_type, &envelope.record_id, &envelope.version, None).await?;
+                let cleared = outbox::acknowledge(
+                    db,
+                    &envelope.record_type,
+                    &envelope.record_id,
+                    &envelope.version,
+                    None,
+                )
+                .await?;
                 // 笔记要记下「和对端达成一致」时的内容，之后两边都改才能判成并发、保留双方。
                 if cleared && envelope.record_type == "Note" {
-                    apply::record_acked_note_basis(db, &envelope.record_id, envelope.updated_at).await?;
+                    apply::record_acked_note_basis(db, &envelope.record_id, envelope.updated_at)
+                        .await?;
                 }
             }
             pushed += chunk.len();
@@ -388,13 +481,17 @@ async fn push(db: &Db, dav: &WebDav, batches_dir: &str, cache: &compact::Cache<'
 async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppResult<usize> {
     let devices = dav.list(DEVICES_DIR).await?.unwrap_or_default();
     let mut pulled = 0;
-    for device in devices.iter().filter(|entry| entry.is_dir && entry.name != own_device) {
+    for device in devices
+        .iter()
+        .filter(|entry| entry.is_dir && entry.name != own_device)
+    {
         let device_dir = format!("{DEVICES_DIR}{}/", device.name);
-        let cursor: Option<(String, bool)> =
-            sqlx::query_as("SELECT last_batch, retired<>0 FROM sync_remote_cursors WHERE device_id=?")
-                .bind(&device.name)
-                .fetch_optional(&db.pool)
-                .await?;
+        let cursor: Option<(String, bool)> = sqlx::query_as(
+            "SELECT last_batch, retired<>0 FROM sync_remote_cursors WHERE device_id=?",
+        )
+        .bind(&device.name)
+        .fetch_optional(&db.pool)
+        .await?;
         let listing = compact::list(dav, &device_dir).await?;
         if let Some((_, retired)) = &cursor {
             if *retired != listing.retired {
@@ -405,7 +502,10 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
                     .await?;
             }
         }
-        let position = cursor.as_ref().and_then(|(name, _)| batch_seq(name)).unwrap_or(0);
+        let position = cursor
+            .as_ref()
+            .and_then(|(name, _)| batch_seq(name))
+            .unwrap_or(0);
         // 游标落在底稿覆盖范围里、中间的批次又已经删了（新设备、或者很久没同步）：先读底稿。
         let base = listing
             .latest_manifest()
@@ -420,16 +520,23 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
             // 这台设备没有新东西：不读它的设备信息，省一个请求。
             continue;
         }
-        let info: Option<DeviceInfo> = match dav.get_optional(&format!("{device_dir}device.json")).await {
-            Ok(Some(bytes)) => serde_json::from_slice(&bytes).ok(),
-            _ => None,
-        };
+        let info: Option<DeviceInfo> =
+            match dav.get_optional(&format!("{device_dir}device.json")).await {
+                Ok(Some(bytes)) => serde_json::from_slice(&bytes).ok(),
+                _ => None,
+            };
         if let Some((upto, manifest)) = base {
             // 底稿的某一份不见了：那台设备正好在重新压缩。这一轮先跳过它，下一轮重新列目录。
-            let Some((_, parts)) = compact::read_base(dav, &device_dir, &manifest).await? else { continue };
+            let Some((_, parts)) = compact::read_base(dav, &device_dir, &manifest).await? else {
+                continue;
+            };
             for (part, envelopes) in parts.iter().enumerate() {
                 for (index, envelope) in envelopes.iter().enumerate() {
-                    write_incoming(incoming, &format!("remote-{}-base{upto:012}-{part}-{index}", device.name), envelope)?;
+                    write_incoming(
+                        incoming,
+                        &format!("remote-{}-base{upto:012}-{part}-{index}", device.name),
+                        envelope,
+                    )?;
                 }
                 pulled += envelopes.len();
             }
@@ -437,14 +544,27 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
         }
         for (_, name) in pending {
             // 读的时候被压缩删掉了：下一轮重新列目录，会改读底稿。
-            let Some(bytes) = dav.get_optional(&format!("{device_dir}batches/{name}")).await? else { break };
+            let Some(bytes) = dav
+                .get_optional(&format!("{device_dir}batches/{name}"))
+                .await?
+            else {
+                break;
+            };
             // 读坏了（上传还没写完、文件损坏）：停在这里，游标不往前走，下一轮再读。
             let Ok(envelopes) = serde_json::from_slice::<Vec<SyncEnvelope>>(&bytes) else {
                 tracing::warn!(device = %device.name, batch = %name, "同步批次读不出来，下一轮再试");
                 break;
             };
             for (index, envelope) in envelopes.iter().enumerate() {
-                write_incoming(incoming, &format!("remote-{}-{}-{index}", device.name, name.trim_end_matches(".json")), envelope)?;
+                write_incoming(
+                    incoming,
+                    &format!(
+                        "remote-{}-{}-{index}",
+                        device.name,
+                        name.trim_end_matches(".json")
+                    ),
+                    envelope,
+                )?;
             }
             pulled += envelopes.len();
             // 每读完一批就记游标：信封已经落进进件目录（持久的），断在哪都能续上。
@@ -456,8 +576,17 @@ async fn pull(db: &Db, dav: &WebDav, own_device: &str, incoming: &Path) -> AppRe
 
 /// 自己的批次攒够了就压缩一次；上次没删完的旧文件接着删。出错只记日志——压缩不影响这一轮同步本身。
 async fn compact_own(db: &Db, dav: &WebDav, own_dir: &str, cache: &compact::Cache<'_>) {
-    let setting = |key| async move { get_setting(db, key).await.ok().flatten().and_then(|value| value.parse::<u64>().ok()) };
-    let last_pushed = setting(SETTING_NEXT_SEQ).await.unwrap_or(1).saturating_sub(1);
+    let setting = |key| async move {
+        get_setting(db, key)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|value| value.parse::<u64>().ok())
+    };
+    let last_pushed = setting(SETTING_NEXT_SEQ)
+        .await
+        .unwrap_or(1)
+        .saturating_sub(1);
     let base_upto = setting(SETTING_BASE_UPTO).await.unwrap_or(0);
     let tidy_pending = setting(SETTING_TIDY_PENDING).await.unwrap_or(0) > 0;
     if last_pushed.saturating_sub(base_upto) < compact::COMPACT_AFTER && !tidy_pending {
@@ -466,8 +595,18 @@ async fn compact_own(db: &Db, dav: &WebDav, own_dir: &str, cache: &compact::Cach
     match compact::compact(dav, own_dir, Some(cache)).await {
         Ok(outcome) => {
             tracing::info!(?outcome, "压缩了网盘上的同步批次");
-            let _ = set_setting(db, SETTING_BASE_UPTO, &outcome.base_upto.max(base_upto).to_string()).await;
-            let _ = set_setting(db, SETTING_TIDY_PENDING, if outcome.remaining > 0 { "1" } else { "0" }).await;
+            let _ = set_setting(
+                db,
+                SETTING_BASE_UPTO,
+                &outcome.base_upto.max(base_upto).to_string(),
+            )
+            .await;
+            let _ = set_setting(
+                db,
+                SETTING_TIDY_PENDING,
+                if outcome.remaining > 0 { "1" } else { "0" },
+            )
+            .await;
         }
         Err(error) => tracing::warn!(%error, "压缩网盘上的同步批次失败，下一轮再试"),
     }
@@ -481,7 +620,12 @@ fn write_incoming(dir: &Path, stem: &str, envelope: &SyncEnvelope) -> AppResult<
     Ok(())
 }
 
-async fn save_cursor(db: &Db, device_id: &str, batch: &str, info: Option<&DeviceInfo>) -> AppResult<()> {
+async fn save_cursor(
+    db: &Db,
+    device_id: &str,
+    batch: &str,
+    info: Option<&DeviceInfo>,
+) -> AppResult<()> {
     sqlx::query(
         "INSERT INTO sync_remote_cursors(device_id,last_batch,device_name,platform,seen_at) VALUES (?,?,?,?,?)
          ON CONFLICT(device_id) DO UPDATE SET last_batch=excluded.last_batch,
@@ -507,7 +651,11 @@ pub async fn retire_device(db: &Db, config: &RemoteConfig, device_id: &str) -> A
     if device_id == own {
         return Err(AppError::Config("不能移除这台设备自己".into()));
     }
-    if device_id.is_empty() || !device_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if device_id.is_empty()
+        || !device_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return Err(AppError::Config("设备 id 不对".into()));
     }
     let dav = config.client()?;
@@ -518,8 +666,13 @@ pub async fn retire_device(db: &Db, config: &RemoteConfig, device_id: &str) -> A
             break;
         }
     }
-    let marker = serde_json::json!({ "retiredAt": chrono::Utc::now().timestamp_millis(), "by": own });
-    dav.put(&format!("{device_dir}batches/{}", compact::RETIRED_MARKER), serde_json::to_vec(&marker)?).await?;
+    let marker =
+        serde_json::json!({ "retiredAt": chrono::Utc::now().timestamp_millis(), "by": own });
+    dav.put(
+        &format!("{device_dir}batches/{}", compact::RETIRED_MARKER),
+        serde_json::to_vec(&marker)?,
+    )
+    .await?;
     dav.delete(&format!("{device_dir}device.json")).await?;
     sqlx::query("UPDATE sync_remote_cursors SET retired=1 WHERE device_id=?")
         .bind(device_id)
@@ -536,7 +689,12 @@ pub async fn known_devices(db: &Db) -> AppResult<Vec<RemoteDevice>> {
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(device_id, name, platform, seen_at)| RemoteDevice { device_id, name, platform, seen_at })
+        .map(|(device_id, name, platform, seen_at)| RemoteDevice {
+            device_id,
+            name,
+            platform,
+            seen_at,
+        })
         .collect())
 }
 
@@ -588,7 +746,10 @@ pub async fn upload_pass(
         };
         let fingerprint = if actual == fingerprint {
             fingerprint
-        } else if crate::sync::media::remote_manifest(&dav, &fingerprint).await?.is_some() {
+        } else if crate::sync::media::remote_manifest(&dav, &fingerprint)
+            .await?
+            .is_some()
+        {
             // 网盘上已经有这个视频的一份原件：不用再把本机的副本传一份占额度。
             UPLOADED.lock().unwrap().insert(fingerprint);
             continue;
@@ -596,7 +757,14 @@ pub async fn upload_pass(
             actual
         };
         let report = |sent: u64, total: u64| progress(&video_id, &title, sent, total);
-        let done = crate::sync::media::upload(&dav, &fingerprint, Path::new(&file_path), &report, keep_going).await?;
+        let done = crate::sync::media::upload(
+            &dav,
+            &fingerprint,
+            Path::new(&file_path),
+            &report,
+            keep_going,
+        )
+        .await?;
         UPLOADED.lock().unwrap().insert(fingerprint);
         if done {
             uploaded += 1;
@@ -616,9 +784,16 @@ const MEDIA_ORPHAN_GRACE_MS: i64 = 7 * 24 * 3600 * 1000;
 
 /// 删掉网盘上没有任何视频条目（含回收站里的）再引用的视频文件。只在这台设备最近一小时内
 /// 同步成功过时做：本地库要是好几天没同步，就不知道别的设备新加了哪些视频。
-async fn collect_media_garbage(db: &Db, dav: &WebDav, present: &std::collections::HashSet<String>) -> AppResult<usize> {
+async fn collect_media_garbage(
+    db: &Db,
+    dav: &WebDav,
+    present: &std::collections::HashSet<String>,
+) -> AppResult<usize> {
     let now = chrono::Utc::now().timestamp_millis();
-    let last_success: i64 = get_setting(db, SETTING_LAST_SUCCESS).await?.and_then(|value| value.parse().ok()).unwrap_or(0);
+    let last_success: i64 = get_setting(db, SETTING_LAST_SUCCESS)
+        .await?
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
     if now - last_success > 3600 * 1000 {
         return Ok(0);
     }
@@ -628,19 +803,23 @@ async fn collect_media_garbage(db: &Db, dav: &WebDav, present: &std::collections
             .await?
             .into_iter()
             .collect();
-    let mut orphans: std::collections::BTreeMap<String, i64> = get_setting(db, SETTING_MEDIA_ORPHANS)
-        .await?
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_default();
+    let mut orphans: std::collections::BTreeMap<String, i64> =
+        get_setting(db, SETTING_MEDIA_ORPHANS)
+            .await?
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default();
     let unreferenced = |name: &String| {
-        name.len() == 64 && name.bytes().all(|byte| byte.is_ascii_hexdigit()) && !referenced.contains(name)
+        name.len() == 64
+            && name.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && !referenced.contains(name)
     };
     orphans.retain(|name, _| present.contains(name) && unreferenced(name));
     let mut removed = 0;
     for name in present.iter().filter(|name| unreferenced(name)) {
         let since = *orphans.entry(name.clone()).or_insert(now);
         if now - since >= MEDIA_ORPHAN_GRACE_MS {
-            dav.delete(&format!("{}{name}/", crate::sync::media::MEDIA_DIR)).await?;
+            dav.delete(&format!("{}{name}/", crate::sync::media::MEDIA_DIR))
+                .await?;
             orphans.remove(name);
             UPLOADED.lock().unwrap().remove(name);
             removed += 1;
@@ -651,18 +830,28 @@ async fn collect_media_garbage(db: &Db, dav: &WebDav, present: &std::collections
 }
 
 /// 已经确认在网盘上的视频（本次运行内的缓存，省得每一轮都去问一遍清单）。
-static UPLOADED: Mutex<std::collections::BTreeSet<String>> = Mutex::new(std::collections::BTreeSet::new());
+static UPLOADED: Mutex<std::collections::BTreeSet<String>> =
+    Mutex::new(std::collections::BTreeSet::new());
 
 /// 网盘上有没有这个视频的文件（有的话多大）。
-pub async fn remote_media_size(db: &Db, config: &RemoteConfig, video_id: &str) -> AppResult<Option<u64>> {
-    let fingerprint: Option<String> = sqlx::query_scalar("SELECT content_fingerprint FROM videos WHERE id=?")
-        .bind(video_id)
-        .fetch_optional(&db.pool)
-        .await?
-        .flatten();
-    let Some(fingerprint) = fingerprint.filter(|value| !value.is_empty()) else { return Ok(None) };
+pub async fn remote_media_size(
+    db: &Db,
+    config: &RemoteConfig,
+    video_id: &str,
+) -> AppResult<Option<u64>> {
+    let fingerprint: Option<String> =
+        sqlx::query_scalar("SELECT content_fingerprint FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_optional(&db.pool)
+            .await?
+            .flatten();
+    let Some(fingerprint) = fingerprint.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
     let dav = config.client()?;
-    Ok(crate::sync::media::remote_manifest(&dav, &fingerprint).await?.map(|manifest| manifest.size))
+    Ok(crate::sync::media::remote_manifest(&dav, &fingerprint)
+        .await?
+        .map(|manifest| manifest.size))
 }
 
 /// 把网盘上的视频下到本机，挂到这个视频条目上，返回文件路径。
@@ -673,15 +862,20 @@ pub async fn download_video(
     video_id: &str,
     progress: &(dyn Fn(u64, u64) + Send + Sync),
 ) -> AppResult<PathBuf> {
-    let (title, fingerprint): (String, Option<String>) =
-        sqlx::query_as("SELECT title, content_fingerprint FROM videos WHERE id=? AND deleted_at IS NULL")
-            .bind(video_id)
-            .fetch_optional(&db.pool)
-            .await?
-            .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let (title, fingerprint): (String, Option<String>) = sqlx::query_as(
+        "SELECT title, content_fingerprint FROM videos WHERE id=? AND deleted_at IS NULL",
+    )
+    .bind(video_id)
+    .fetch_optional(&db.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
     let fingerprint = fingerprint
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::Other("有这个视频文件的设备还没把它传到网盘（在那台设备上打开「上传视频文件」）".into()))?;
+        .ok_or_else(|| {
+            AppError::Other(
+                "有这个视频文件的设备还没把它传到网盘（在那台设备上打开「上传视频文件」）".into(),
+            )
+        })?;
     let dav = config.client()?;
     let target_dir = video_root.join(video_id);
     let path = crate::sync::media::download(
@@ -822,13 +1016,19 @@ pub fn nudge() {
 
 /// 立刻同步一轮并等结果（「立即同步」按钮）。
 pub async fn run_now() -> AppResult<RunReport> {
-    let engine = ENGINE.get().cloned().ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
+    let engine = ENGINE
+        .get()
+        .cloned()
+        .ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
     engine.run().await
 }
 
 /// 移除网盘上的另一台设备（设置页的「移除」）。和后台同步互斥，免得一边压缩一边读。
 pub async fn retire_now(device_id: &str) -> AppResult<()> {
-    let engine = ENGINE.get().cloned().ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
+    let engine = ENGINE
+        .get()
+        .cloned()
+        .ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
     let _guard = engine.lock.lock().await;
     let config = saved_config(&engine.db)
         .await?
@@ -837,7 +1037,10 @@ pub async fn retire_now(device_id: &str) -> AppResult<()> {
 }
 
 pub fn media_state() -> MediaState {
-    ENGINE.get().map(|engine| engine.media_state.lock().unwrap().clone()).unwrap_or_default()
+    ENGINE
+        .get()
+        .map(|engine| engine.media_state.lock().unwrap().clone())
+        .unwrap_or_default()
 }
 
 /// 关掉视频上传时置 false：正在传的那个视频传完当前这一块就停。
@@ -856,8 +1059,16 @@ pub fn nudge_media() {
 
 /// 下载一个视频（设置页 / 播放器的「从网盘下载」）。进度走 DOWNLOAD_EVENT。
 pub async fn download_now(video_id: &str) -> AppResult<PathBuf> {
-    let engine = ENGINE.get().cloned().ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
-    if !engine.downloading.lock().unwrap().insert(video_id.to_string()) {
+    let engine = ENGINE
+        .get()
+        .cloned()
+        .ok_or_else(|| AppError::Other("同步还没准备好".into()))?;
+    if !engine
+        .downloading
+        .lock()
+        .unwrap()
+        .insert(video_id.to_string())
+    {
         return Err(AppError::Other("这个视频正在下载".into()));
     }
     let result = engine.download(video_id).await;
@@ -874,7 +1085,10 @@ pub async fn download_now(video_id: &str) -> AppResult<PathBuf> {
 }
 
 pub fn state() -> RunState {
-    ENGINE.get().map(|engine| engine.state.lock().unwrap().clone()).unwrap_or_default()
+    ENGINE
+        .get()
+        .map(|engine| engine.state.lock().unwrap().clone())
+        .unwrap_or_default()
 }
 
 impl Engine {
@@ -882,29 +1096,63 @@ impl Engine {
         let config = saved_config(&self.db)
             .await?
             .ok_or_else(|| AppError::Config("还没填网盘地址和账号".into()))?;
-        let app_data = self.app.path().app_data_dir().map_err(|error| AppError::Config(error.to_string()))?;
+        let app_data = self
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| AppError::Config(error.to_string()))?;
         let app = self.app.clone();
         let id = video_id.to_string();
         let report = move |received: u64, total: u64| {
-            app.emit(DOWNLOAD_EVENT, DownloadProgress { video_id: id.clone(), received, total, done: false, error: None }).ok();
+            app.emit(
+                DOWNLOAD_EVENT,
+                DownloadProgress {
+                    video_id: id.clone(),
+                    received,
+                    total,
+                    done: false,
+                    error: None,
+                },
+            )
+            .ok();
         };
-        download_video(&self.db, &config, &app_data.join("synced-videos"), video_id, &report).await
+        download_video(
+            &self.db,
+            &config,
+            &app_data.join("synced-videos"),
+            video_id,
+            &report,
+        )
+        .await
     }
 
     async fn upload_media_if_enabled(&self) {
         let enabled = is_enabled(&self.db).await.unwrap_or(false)
-            && get_setting(&self.db, SETTING_UPLOAD_MEDIA).await.ok().flatten().as_deref() == Some("true");
+            && get_setting(&self.db, SETTING_UPLOAD_MEDIA)
+                .await
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("true");
         if !enabled {
             return;
         }
-        let Ok(Some(config)) = saved_config(&self.db).await else { return };
+        let Ok(Some(config)) = saved_config(&self.db).await else {
+            return;
+        };
         let db = self.db.clone();
         UPLOAD_ALLOWED.store(true, std::sync::atomic::Ordering::SeqCst);
         let keep_going = || UPLOAD_ALLOWED.load(std::sync::atomic::Ordering::SeqCst);
         let report = |video_id: &str, title: &str, sent: u64, total: u64| {
-            self.media_state.lock().unwrap().uploading =
-                Some(MediaProgress { video_id: video_id.into(), title: title.into(), sent, total });
-            self.app.emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone()).ok();
+            self.media_state.lock().unwrap().uploading = Some(MediaProgress {
+                video_id: video_id.into(),
+                title: title.into(),
+                sent,
+                total,
+            });
+            self.app
+                .emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone())
+                .ok();
         };
         let result = upload_pass(&db, &config, &report, &keep_going).await;
         {
@@ -912,12 +1160,22 @@ impl Engine {
             state.uploading = None;
             state.last_error = result.as_ref().err().map(|error| error.to_string());
         }
-        self.app.emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone()).ok();
+        self.app
+            .emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone())
+            .ok();
     }
 
     async fn restore_state(&self) {
-        let last_success_at = get_setting(&self.db, SETTING_LAST_SUCCESS).await.ok().flatten().and_then(|v| v.parse().ok());
-        let last_error = get_setting(&self.db, SETTING_LAST_ERROR).await.ok().flatten().filter(|v| !v.is_empty());
+        let last_success_at = get_setting(&self.db, SETTING_LAST_SUCCESS)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok());
+        let last_error = get_setting(&self.db, SETTING_LAST_ERROR)
+            .await
+            .ok()
+            .flatten()
+            .filter(|v| !v.is_empty());
         let mut state = self.state.lock().unwrap();
         state.last_success_at = last_success_at;
         state.last_error = last_error;
@@ -952,7 +1210,11 @@ impl Engine {
         let config = saved_config(&self.db)
             .await?
             .ok_or_else(|| AppError::Config("还没填网盘地址和账号".into()))?;
-        let app_data = self.app.path().app_data_dir().map_err(|error| AppError::Config(error.to_string()))?;
+        let app_data = self
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| AppError::Config(error.to_string()))?;
         let spool_root: PathBuf = app_data.join("sync");
         let video_root = app_data.join("synced-videos");
         self.state.lock().unwrap().running = true;
@@ -1022,7 +1284,9 @@ pub(crate) mod test_server {
         let shared = store.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
                 let store = shared.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
@@ -1033,11 +1297,17 @@ pub(crate) mod test_server {
                             return;
                         }
                         buf.extend_from_slice(&tmp[..n]);
-                        let Some(split) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                        let Some(split) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                            continue;
+                        };
                         let head = String::from_utf8_lossy(&buf[..split]).to_string();
                         let length = head
                             .lines()
-                            .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
                             .unwrap_or(0);
                         if buf.len() >= split + 4 + length {
                             break (head, buf[split + 4..split + 4 + length].to_vec());
@@ -1048,7 +1318,11 @@ pub(crate) mod test_server {
                     let path = parts.next().unwrap_or("").to_string();
                     let destination = head
                         .lines()
-                        .find_map(|line| line.to_ascii_lowercase().starts_with("destination:").then(|| line[12..].trim().to_string()))
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .starts_with("destination:")
+                                .then(|| line[12..].trim().to_string())
+                        })
                         .and_then(|url| reqwest::Url::parse(&url).ok())
                         .map(|url| url.path().to_string());
                     let (status, response_body) = {
@@ -1067,7 +1341,9 @@ pub(crate) mod test_server {
                         }
                     };
                     let offset = store.lock().unwrap().clock_offset_ms;
-                    let date = (chrono::Utc::now() + chrono::Duration::milliseconds(offset)).to_rfc2822().replace("+0000", "GMT");
+                    let date = (chrono::Utc::now() + chrono::Duration::milliseconds(offset))
+                        .to_rfc2822()
+                        .replace("+0000", "GMT");
                     let response = format!(
                         "HTTP/1.1 {status}\r\nDate: {date}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         response_body.len()
@@ -1088,10 +1364,19 @@ pub(crate) mod test_server {
         }
     }
 
-    fn handle(store: &mut Store, method: &str, path: &str, body: Vec<u8>) -> (&'static str, Vec<u8>) {
+    fn handle(
+        store: &mut Store,
+        method: &str,
+        path: &str,
+        body: Vec<u8>,
+    ) -> (&'static str, Vec<u8>) {
         match method {
             "MKCOL" => {
-                let dir = if path.ends_with('/') { path.to_string() } else { format!("{path}/") };
+                let dir = if path.ends_with('/') {
+                    path.to_string()
+                } else {
+                    format!("{path}/")
+                };
                 if store.dirs.contains(&dir) {
                     ("405 Method Not Allowed", Vec::new())
                 } else if !store.dirs.contains(&parent(&dir)) {
@@ -1109,7 +1394,11 @@ pub(crate) mod test_server {
                 ("201 Created", Vec::new())
             }
             "DELETE" => {
-                let dir = if path.ends_with('/') { path.to_string() } else { format!("{path}/") };
+                let dir = if path.ends_with('/') {
+                    path.to_string()
+                } else {
+                    format!("{path}/")
+                };
                 if store.files.remove(path).is_some() {
                     ("204 No Content", Vec::new())
                 } else if store.dirs.contains(&dir) {
@@ -1125,11 +1414,16 @@ pub(crate) mod test_server {
                 None => ("404 Not Found", Vec::new()),
             },
             "PROPFIND" => {
-                let dir = if path.ends_with('/') { path.to_string() } else { format!("{path}/") };
+                let dir = if path.ends_with('/') {
+                    path.to_string()
+                } else {
+                    format!("{path}/")
+                };
                 if !store.dirs.contains(&dir) {
                     return ("404 Not Found", Vec::new());
                 }
-                let mut xml = String::from(r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">"#);
+                let mut xml =
+                    String::from(r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">"#);
                 xml.push_str(&format!("<d:response><d:href>{dir}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>"));
                 for child in store.dirs.iter().filter(|d| *d != &dir && parent(d) == dir) {
                     xml.push_str(&format!("<d:response><d:href>{child}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>"));
@@ -1157,17 +1451,30 @@ mod tests {
     impl Device {
         async fn new(name: &str) -> Self {
             let dir = tempfile::tempdir().unwrap();
-            let db = Db::connect_and_migrate(&dir.path().join(format!("{name}.db"))).await.unwrap();
+            let db = Db::connect_and_migrate(&dir.path().join(format!("{name}.db")))
+                .await
+                .unwrap();
             Self { db, dir }
         }
 
         async fn sync(&self, config: &RemoteConfig) -> AppResult<RunReport> {
-            run_once(&self.db, config, &self.dir.path().join("sync"), &self.dir.path().join("synced-videos")).await
+            run_once(
+                &self.db,
+                config,
+                &self.dir.path().join("sync"),
+                &self.dir.path().join("synced-videos"),
+            )
+            .await
         }
     }
 
     fn config(url: &str) -> RemoteConfig {
-        RemoteConfig { url: url.into(), folder: "学习/CoursePilot".into(), user: "u".into(), password: "p".into() }
+        RemoteConfig {
+            url: url.into(),
+            folder: "学习/CoursePilot".into(),
+            user: "u".into(),
+            password: "p".into(),
+        }
     }
 
     async fn progress(db: &Db, video_id: &str) -> Option<i64> {
@@ -1186,30 +1493,55 @@ mod tests {
         let phone = Device::new("phone").await;
 
         // 电脑上已有的课程、视频和进度（开同步之前就有的）。
-        let course = crate::commands::courses::create_course(&pc.db, "申论".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &pc.db,
+            "申论".into(),
+            pc.dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let file = pc.dir.path().join("01.mp4");
         std::fs::write(&file, b"x").unwrap();
-        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
-        crate::commands::stats::save_video_progress(&pc.db, &video.id, 61_000, Some(600_000)).await.unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+            .await
+            .unwrap();
+        crate::commands::stats::save_video_progress(&pc.db, &video.id, 61_000, Some(600_000))
+            .await
+            .unwrap();
 
         let report = pc.sync(&config).await.unwrap();
         assert!(report.pushed >= 3, "{report:?}");
         assert_eq!(report.pending, 0);
-        assert!(store.lock().unwrap().files.keys().any(|path| path.contains("/batches/000000000001.json")));
+        assert!(store
+            .lock()
+            .unwrap()
+            .files
+            .keys()
+            .any(|path| path.contains("/batches/000000000001.json")));
 
         // 手机第一次同步：课程、视频条目（无媒体文件的占位）、进度都过来了。
         let report = phone.sync(&config).await.unwrap();
         assert!(report.applied >= 3, "{report:?}");
-        let title: String = sqlx::query_scalar("SELECT title FROM videos WHERE id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let title: String = sqlx::query_scalar("SELECT title FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&phone.db.pool)
+            .await
+            .unwrap();
         assert_eq!(title, video.title);
-        let file_path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let file_path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&phone.db.pool)
+            .await
+            .unwrap();
         assert_eq!(file_path, "", "手机上没有这个视频文件，是占位");
         assert_eq!(progress(&phone.db, &video.id).await, Some(61_000));
         assert_eq!(known_devices(&phone.db).await.unwrap().len(), 1);
 
         // 手机上接着看，进度回到电脑。合并时不往回发（回声抑制），电脑那边也不重复收自己的。
         tokio::time::sleep(Duration::from_millis(5)).await;
-        crate::commands::stats::save_video_progress(&phone.db, &video.id, 300_000, Some(600_000)).await.unwrap();
+        crate::commands::stats::save_video_progress(&phone.db, &video.id, 300_000, Some(600_000))
+            .await
+            .unwrap();
         let report = phone.sync(&config).await.unwrap();
         assert_eq!(report.pushed, 1, "{report:?}");
         pc.sync(&config).await.unwrap();
@@ -1228,63 +1560,128 @@ mod tests {
         let config = config(&url);
         let pc = Device::new("pc").await;
         let phone = Device::new("phone").await;
-        let course = crate::commands::courses::create_course(&pc.db, "申论".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &pc.db,
+            "申论".into(),
+            pc.dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let file = pc.dir.path().join("01.mp4");
         std::fs::write(&file, b"x").unwrap();
-        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+            .await
+            .unwrap();
         let exec = |sql: &'static str| {
             let db = pc.db.clone();
             let id = video.id.clone();
-            async move { sqlx::query(sql).bind(id).execute(&db.pool).await.unwrap(); }
+            async move {
+                sqlx::query(sql).bind(id).execute(&db.pool).await.unwrap();
+            }
         };
         for i in 0..3 {
             sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text,words_json) VALUES (?,?,?,?,?,?)")
                 .bind(&video.id).bind(i).bind(i * 1000).bind(i * 1000 + 900).bind(format!("第{i}句")).bind(Some("[]"))
                 .execute(&pc.db.pool).await.unwrap();
         }
-        exec("INSERT INTO summaries(video_id,content_md,generated_at) VALUES (?,'摘要 v1',1)").await;
+        exec("INSERT INTO summaries(video_id,content_md,generated_at) VALUES (?,'摘要 v1',1)")
+            .await;
         exec("INSERT INTO chapters(video_id,title,summary,start_ms,end_ms,order_index) VALUES (?,'开头','引入',0,900,0)").await;
-        exec("INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,'[1,2]',1)").await;
+        exec("INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,'[1,2]',1)")
+            .await;
         exec("INSERT INTO ai_artifact_sources(video_id,artifact,fingerprint,generated_at) VALUES (?,'summary','fp-1',1)").await;
         sqlx::query("INSERT INTO concepts(id,course_id,name,created_at,explanation) VALUES ('k1',?,'概括题',1,'讲解')")
             .bind(&course.id).execute(&pc.db.pool).await.unwrap();
-        sqlx::query("INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES ('k1',?,1000)")
-            .bind(&video.id).execute(&pc.db.pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES ('k1',?,1000)",
+        )
+        .bind(&video.id)
+        .execute(&pc.db.pool)
+        .await
+        .unwrap();
 
         pc.sync(&config).await.unwrap();
         let report = phone.sync(&config).await.unwrap();
         assert_eq!(report.parked, 0, "{report:?}");
 
-        let segments: Vec<String> = sqlx::query_scalar("SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx")
-            .bind(&video.id).fetch_all(&phone.db.pool).await.unwrap();
+        let segments: Vec<String> = sqlx::query_scalar(
+            "SELECT text FROM transcripts WHERE video_id=? ORDER BY segment_idx",
+        )
+        .bind(&video.id)
+        .fetch_all(&phone.db.pool)
+        .await
+        .unwrap();
         assert_eq!(segments, ["第0句", "第1句", "第2句"]);
-        let summary: String = sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let summary: String =
+            sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&phone.db.pool)
+                .await
+                .unwrap();
         assert_eq!(summary, "摘要 v1");
-        let fingerprint: String = sqlx::query_scalar("SELECT fingerprint FROM ai_artifact_sources WHERE video_id=? AND artifact='summary'")
-            .bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let fingerprint: String = sqlx::query_scalar(
+            "SELECT fingerprint FROM ai_artifact_sources WHERE video_id=? AND artifact='summary'",
+        )
+        .bind(&video.id)
+        .fetch_one(&phone.db.pool)
+        .await
+        .unwrap();
         assert_eq!(fingerprint, "fp-1", "过期判断靠的指纹一起过来");
-        let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE video_id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let chapters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chapters WHERE video_id=?")
+            .bind(&video.id)
+            .fetch_one(&phone.db.pool)
+            .await
+            .unwrap();
         assert_eq!(chapters, 1);
-        let quiz: String = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let quiz: String =
+            sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&phone.db.pool)
+                .await
+                .unwrap();
         assert_eq!(quiz, "[1,2]");
-        let occurrence: i64 = sqlx::query_scalar("SELECT start_ms FROM concept_occurrences WHERE concept_id='k1' AND video_id=?")
-            .bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let occurrence: i64 = sqlx::query_scalar(
+            "SELECT start_ms FROM concept_occurrences WHERE concept_id='k1' AND video_id=?",
+        )
+        .bind(&video.id)
+        .fetch_one(&phone.db.pool)
+        .await
+        .unwrap();
         assert_eq!(occurrence, 1000, "知识点 id 不变，出处指向同一个视频");
         // 合并进来的内容不会再被当成本机改动发回去。
-        assert_eq!(crate::sync::outbox::pending_count(&phone.db).await.unwrap(), 0);
+        assert_eq!(
+            crate::sync::outbox::pending_count(&phone.db).await.unwrap(),
+            0
+        );
         // 字幕到了，这条视频在手机上就是「已处理」，不会被再排去识别一遍。
-        let status: String = sqlx::query_scalar("SELECT processed_status FROM videos WHERE id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let status: String = sqlx::query_scalar("SELECT processed_status FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&phone.db.pool)
+            .await
+            .unwrap();
         assert_eq!(status, "done");
 
         // 手机上重新生成摘要，回到电脑；电脑那边的字幕不受影响。
         tokio::time::sleep(Duration::from_millis(5)).await;
         sqlx::query("UPDATE summaries SET content_md='摘要 v2', generated_at=2 WHERE video_id=?")
-            .bind(&video.id).execute(&phone.db.pool).await.unwrap();
+            .bind(&video.id)
+            .execute(&phone.db.pool)
+            .await
+            .unwrap();
         phone.sync(&config).await.unwrap();
         pc.sync(&config).await.unwrap();
-        let summary: String = sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?").bind(&video.id).fetch_one(&pc.db.pool).await.unwrap();
+        let summary: String =
+            sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?")
+                .bind(&video.id)
+                .fetch_one(&pc.db.pool)
+                .await
+                .unwrap();
         assert_eq!(summary, "摘要 v2");
-        let segments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?").bind(&video.id).fetch_one(&pc.db.pool).await.unwrap();
+        let segments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcripts WHERE video_id=?")
+            .bind(&video.id)
+            .fetch_one(&pc.db.pool)
+            .await
+            .unwrap();
         assert_eq!(segments, 3);
     }
 
@@ -1294,43 +1691,99 @@ mod tests {
         let config = config(&url);
         let pc = Device::new("pc").await;
         let phone = Device::new("phone").await;
-        let course = crate::commands::courses::create_course(&pc.db, "申论".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &pc.db,
+            "申论".into(),
+            pc.dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let file = pc.dir.path().join("01 概括.mp4");
         let content: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         std::fs::write(&file, &content).unwrap();
-        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+            .await
+            .unwrap();
         pc.sync(&config).await.unwrap();
         phone.sync(&config).await.unwrap();
 
         // 手机上还没有指纹（电脑没传过）：说清楚要先在电脑上传。
-        let error = download_video(&phone.db, &config, &phone.dir.path().join("synced-videos"), &video.id, &|_, _| {})
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = download_video(
+            &phone.db,
+            &config,
+            &phone.dir.path().join("synced-videos"),
+            &video.id,
+            &|_, _| {},
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("上传"), "{error}");
 
         let sent = std::sync::Mutex::new(Vec::new());
-        let report = |_: &str, _: &str, done: u64, total: u64| sent.lock().unwrap().push((done, total));
-        assert_eq!(upload_pass(&pc.db, &config, &report, &|| true).await.unwrap(), 1);
+        let report =
+            |_: &str, _: &str, done: u64, total: u64| sent.lock().unwrap().push((done, total));
+        assert_eq!(
+            upload_pass(&pc.db, &config, &report, &|| true)
+                .await
+                .unwrap(),
+            1
+        );
         assert_eq!(sent.lock().unwrap().last(), Some(&(300_000, 300_000)));
-        assert!(store.lock().unwrap().files.keys().any(|path| path.ends_with("/manifest.json")));
-        assert!(!store.lock().unwrap().files.keys().any(|path| path.ends_with(".uploading")), "临时名都改成了正式名");
+        assert!(store
+            .lock()
+            .unwrap()
+            .files
+            .keys()
+            .any(|path| path.ends_with("/manifest.json")));
+        assert!(
+            !store
+                .lock()
+                .unwrap()
+                .files
+                .keys()
+                .any(|path| path.ends_with(".uploading")),
+            "临时名都改成了正式名"
+        );
         // 再来一轮：已经在网盘上了，不重传。
-        assert_eq!(upload_pass(&pc.db, &config, &report, &|| true).await.unwrap(), 0);
+        assert_eq!(
+            upload_pass(&pc.db, &config, &report, &|| true)
+                .await
+                .unwrap(),
+            0
+        );
 
         // 指纹随视频条目同步到手机，手机按它下载。
         pc.sync(&config).await.unwrap();
         phone.sync(&config).await.unwrap();
-        assert_eq!(remote_media_size(&phone.db, &config, &video.id).await.unwrap(), Some(300_000));
-        let path = download_video(&phone.db, &config, &phone.dir.path().join("synced-videos"), &video.id, &|_, _| {})
-            .await
-            .unwrap();
+        assert_eq!(
+            remote_media_size(&phone.db, &config, &video.id)
+                .await
+                .unwrap(),
+            Some(300_000)
+        );
+        let path = download_video(
+            &phone.db,
+            &config,
+            &phone.dir.path().join("synced-videos"),
+            &video.id,
+            &|_, _| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), content);
         assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("mp4"));
-        let file_path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?").bind(&video.id).fetch_one(&phone.db.pool).await.unwrap();
+        let file_path: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
+            .bind(&video.id)
+            .fetch_one(&phone.db.pool)
+            .await
+            .unwrap();
         assert_eq!(file_path, path.to_string_lossy());
         // 挂上文件是本机的事，不往外发。
-        assert_eq!(crate::sync::outbox::pending_count(&phone.db).await.unwrap(), 0);
+        assert_eq!(
+            crate::sync::outbox::pending_count(&phone.db).await.unwrap(),
+            0
+        );
     }
 
     /// 局域网下载到的是电脑转好的 H.264 副本，视频条目里的指纹还是原片（AV1）的。
@@ -1340,10 +1793,19 @@ mod tests {
         let (url, _store) = test_server::start().await;
         let config = config(&url);
         let phone = Device::new("phone").await;
-        let course = crate::commands::courses::create_course(&phone.db, "c".into(), phone.dir.path().to_string_lossy().into()).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &phone.db,
+            "c".into(),
+            phone.dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let file = phone.dir.path().join("01.mp4");
         std::fs::write(&file, b"transcoded-h264-copy").unwrap();
-        let video = crate::commands::videos::add_local_video(&phone.db, &course.id, file.clone(), None).await.unwrap();
+        let video =
+            crate::commands::videos::add_local_video(&phone.db, &course.id, file.clone(), None)
+                .await
+                .unwrap();
         let original = "f".repeat(64);
         sqlx::query("UPDATE videos SET content_fingerprint=? WHERE id=?")
             .bind(&original)
@@ -1354,16 +1816,27 @@ mod tests {
         // 先把同步目录建好（平时是正常同步建的），再单独跑上传。
         phone.sync(&config).await.unwrap();
 
-        assert_eq!(upload_pass(&phone.db, &config, &|_, _, _, _| {}, &|| true).await.unwrap(), 1);
+        assert_eq!(
+            upload_pass(&phone.db, &config, &|_, _, _, _| {}, &|| true)
+                .await
+                .unwrap(),
+            1
+        );
         let actual = crate::sync::media::quick_fingerprint(&file).unwrap();
         let dav = config.client().unwrap();
         assert_ne!(actual, original, "前提：副本和原片不是同一份");
         assert!(
-            crate::sync::media::remote_manifest(&dav, &actual).await.unwrap().is_some(),
+            crate::sync::media::remote_manifest(&dav, &actual)
+                .await
+                .unwrap()
+                .is_some(),
             "按文件真实的指纹传上去"
         );
         assert!(
-            crate::sync::media::remote_manifest(&dav, &original).await.unwrap().is_none(),
+            crate::sync::media::remote_manifest(&dav, &original)
+                .await
+                .unwrap()
+                .is_none(),
             "没拿原片的指纹传不一样的字节"
         );
     }
@@ -1371,19 +1844,27 @@ mod tests {
     #[test]
     fn large_batches_are_split_into_files_under_the_size_limit() {
         let big = "字".repeat(3 * 1024 * 1024 / 3);
-        let envelope = |id: &str| SyncEnvelope::new(
-            "Transcript".into(),
-            id.into(),
-            crate::sync::envelope::SyncOperation::Save,
-            crate::sync::envelope::SyncVersion { counter: 1, device: "d".into() },
-            1,
-            serde_json::json!({"segments": [[0, 0, 1, big]]}),
-        );
-        let chunks = split_by_size(&[envelope("a"), envelope("b"), envelope("c"), envelope("d")]).unwrap();
+        let envelope = |id: &str| {
+            SyncEnvelope::new(
+                "Transcript".into(),
+                id.into(),
+                crate::sync::envelope::SyncOperation::Save,
+                crate::sync::envelope::SyncVersion {
+                    counter: 1,
+                    device: "d".into(),
+                },
+                1,
+                serde_json::json!({"segments": [[0, 0, 1, big]]}),
+            )
+        };
+        let chunks =
+            split_by_size(&[envelope("a"), envelope("b"), envelope("c"), envelope("d")]).unwrap();
         assert!(chunks.len() >= 2, "{}", chunks.len());
         assert_eq!(chunks.iter().map(Vec::len).sum::<usize>(), 4);
         for chunk in &chunks {
-            assert!(serde_json::to_vec(chunk).unwrap().len() <= BATCH_MAX_BYTES + 3 * 1024 * 1024 + 64);
+            assert!(
+                serde_json::to_vec(chunk).unwrap().len() <= BATCH_MAX_BYTES + 3 * 1024 * 1024 + 64
+            );
         }
     }
 
@@ -1405,7 +1886,9 @@ mod tests {
         let config = config(&url);
         let pc = Device::new("pc").await;
         let phone = Device::new("phone").await;
-        crate::commands::courses::create_course(&pc.db, "a".into(), "/tmp".into()).await.unwrap();
+        crate::commands::courses::create_course(&pc.db, "a".into(), "/tmp".into())
+            .await
+            .unwrap();
         pc.sync(&config).await.unwrap();
         phone.sync(&config).await.unwrap();
         pc.sync(&config).await.unwrap();
@@ -1414,8 +1897,17 @@ mod tests {
         let report = pc.sync(&config).await.unwrap();
         assert_eq!((report.pushed, report.pulled), (0, 0));
         let requests = store.lock().unwrap().requests.clone();
-        assert!(requests.iter().all(|request| request.starts_with("PROPFIND")), "{requests:?}");
-        assert_eq!(requests.len(), 2, "列设备 + 列另一台设备的批次：{requests:?}");
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.starts_with("PROPFIND")),
+            "{requests:?}"
+        );
+        assert_eq!(
+            requests.len(),
+            2,
+            "列设备 + 列另一台设备的批次：{requests:?}"
+        );
     }
 
     #[tokio::test]
@@ -1423,14 +1915,32 @@ mod tests {
         let (url, store) = test_server::start().await;
         let config = config(&url);
         let device = Device::new("pc").await;
-        crate::commands::courses::create_course(&device.db, "a".into(), "/tmp".into()).await.unwrap();
+        crate::commands::courses::create_course(&device.db, "a".into(), "/tmp".into())
+            .await
+            .unwrap();
         device.sync(&config).await.unwrap();
         // 模拟重装：本地序号丢了。
-        set_setting(&device.db, SETTING_NEXT_SEQ, "1").await.unwrap();
-        crate::commands::courses::create_course(&device.db, "b".into(), "/tmp".into()).await.unwrap();
+        set_setting(&device.db, SETTING_NEXT_SEQ, "1")
+            .await
+            .unwrap();
+        crate::commands::courses::create_course(&device.db, "b".into(), "/tmp".into())
+            .await
+            .unwrap();
         device.sync(&config).await.unwrap();
-        let batches: Vec<String> = store.lock().unwrap().files.keys().filter(|path| path.contains("/batches/")).cloned().collect();
-        assert!(batches.iter().any(|path| path.ends_with("000000000002.json")), "{batches:?}");
+        let batches: Vec<String> = store
+            .lock()
+            .unwrap()
+            .files
+            .keys()
+            .filter(|path| path.contains("/batches/"))
+            .cloned()
+            .collect();
+        assert!(
+            batches
+                .iter()
+                .any(|path| path.ends_with("000000000002.json")),
+            "{batches:?}"
+        );
         assert_eq!(batches.len(), 2, "没有覆盖已有的批次：{batches:?}");
     }
 
@@ -1440,12 +1950,18 @@ mod tests {
             .unwrap()
             .files
             .keys()
-            .filter_map(|path| path.split_once(&format!("/devices/{device}/")).map(|(_, rest)| rest.to_string()))
+            .filter_map(|path| {
+                path.split_once(&format!("/devices/{device}/"))
+                    .map(|(_, rest)| rest.to_string())
+            })
             .collect()
     }
 
     async fn course_names(db: &Db) -> Vec<String> {
-        sqlx::query_scalar("SELECT name FROM courses WHERE deleted_at IS NULL ORDER BY name").fetch_all(&db.pool).await.unwrap()
+        sqlx::query_scalar("SELECT name FROM courses WHERE deleted_at IS NULL ORDER BY name")
+            .fetch_all(&db.pool)
+            .await
+            .unwrap()
     }
 
     async fn device_id(db: &Db) -> String {
@@ -1455,7 +1971,9 @@ mod tests {
     /// 测试里攒 3 批就压缩（正式是 100 批）。
     async fn push_rounds(device: &Device, config: &RemoteConfig, names: &[&str]) {
         for name in names {
-            crate::commands::courses::create_course(&device.db, (*name).into(), "/tmp".into()).await.unwrap();
+            crate::commands::courses::create_course(&device.db, (*name).into(), "/tmp".into())
+                .await
+                .unwrap();
             device.sync(config).await.unwrap();
         }
     }
@@ -1482,14 +2000,28 @@ mod tests {
         pc.sync(&config).await.unwrap();
 
         let files = remote_files(&store, &pc_id);
-        assert!(files.iter().any(|f| f.starts_with("batches/base-")), "压缩出了底稿：{files:?}");
-        let remaining: Vec<u64> = files.iter().filter_map(|f| compact::batch_seq(f.strip_prefix("batches/")?)).collect();
-        assert_eq!(remaining, [4], "折进底稿（1~3）的批次删了，之后的那批留着：{files:?}");
+        assert!(
+            files.iter().any(|f| f.starts_with("batches/base-")),
+            "压缩出了底稿：{files:?}"
+        );
+        let remaining: Vec<u64> = files
+            .iter()
+            .filter_map(|f| compact::batch_seq(f.strip_prefix("batches/")?))
+            .collect();
+        assert_eq!(
+            remaining,
+            [4],
+            "折进底稿（1~3）的批次删了，之后的那批留着：{files:?}"
+        );
         let cached: Vec<String> = std::fs::read_dir(pc.dir.path().join("sync/own/batches"))
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(cached, ["000000000004.json"], "本地的批次副本也只留底稿之后的");
+        assert_eq!(
+            cached,
+            ["000000000004.json"],
+            "本地的批次副本也只留底稿之后的"
+        );
 
         // 新设备：从底稿拿到全部。
         let tablet = Device::new("tablet").await;
@@ -1516,7 +2048,10 @@ mod tests {
         let pc = Device::new("pc").await;
         let pc_id = device_id(&pc.db).await;
         push_rounds(&pc, &config, &["a", "b", "c"]).await;
-        let first: Vec<String> = remote_files(&store, &pc_id).into_iter().filter(|f| f.starts_with("base/")).collect();
+        let first: Vec<String> = remote_files(&store, &pc_id)
+            .into_iter()
+            .filter(|f| f.starts_with("base/"))
+            .collect();
         assert!(!first.is_empty());
 
         store.lock().unwrap().requests.clear();
@@ -1526,25 +2061,52 @@ mod tests {
             .unwrap()
             .requests
             .iter()
-            .filter_map(|request| request.strip_prefix("PUT ")?.rsplit_once("/base/").map(|(_, name)| format!("base/{name}")))
+            .filter_map(|request| {
+                request
+                    .strip_prefix("PUT ")?
+                    .rsplit_once("/base/")
+                    .map(|(_, name)| format!("base/{name}"))
+            })
             .collect();
         assert!(!puts.is_empty(), "第二次压缩传了新的份");
-        assert!(puts.iter().all(|part| !first.contains(part)), "网盘上已有的份不重传：{puts:?} vs {first:?}");
+        assert!(
+            puts.iter().all(|part| !first.contains(part)),
+            "网盘上已有的份不重传：{puts:?} vs {first:?}"
+        );
         // 网盘上留下的份正好是最新清单里列的那些（不再引用的旧份删了）。
         let files = remote_files(&store, &pc_id);
-        let manifest_path = files.iter().filter(|f| f.starts_with("batches/base-")).max().unwrap().clone();
+        let manifest_path = files
+            .iter()
+            .filter(|f| f.starts_with("batches/base-"))
+            .max()
+            .unwrap()
+            .clone();
         let manifest: compact::Manifest = serde_json::from_slice(
-            &store.lock().unwrap().files.iter().find(|(path, _)| path.ends_with(&manifest_path)).unwrap().1.clone(),
+            &store
+                .lock()
+                .unwrap()
+                .files
+                .iter()
+                .find(|(path, _)| path.ends_with(&manifest_path))
+                .unwrap()
+                .1
+                .clone(),
         )
         .unwrap();
-        let mut on_drive: Vec<String> = files.iter().filter_map(|f| f.strip_prefix("base/").map(str::to_string)).collect();
+        let mut on_drive: Vec<String> = files
+            .iter()
+            .filter_map(|f| f.strip_prefix("base/").map(str::to_string))
+            .collect();
         let mut listed = manifest.parts.clone();
         on_drive.sort();
         listed.sort();
         assert_eq!(on_drive, listed);
         let tablet = Device::new("tablet").await;
         tablet.sync(&config).await.unwrap();
-        assert_eq!(course_names(&tablet.db).await, ["a", "b", "c", "d", "e", "f"]);
+        assert_eq!(
+            course_names(&tablet.db).await,
+            ["a", "b", "c", "d", "e", "f"]
+        );
     }
 
     #[tokio::test]
@@ -1562,22 +2124,42 @@ mod tests {
         assert!(known_devices(&pc.db).await.unwrap().is_empty());
         let files = remote_files(&store, &phone_id);
         assert!(!files.contains(&"device.json".to_string()), "{files:?}");
-        assert!(files.iter().any(|f| f.starts_with("batches/base-")), "批次折进了底稿：{files:?}");
-        assert!(retire_device(&pc.db, &config, &device_id(&pc.db).await).await.is_err(), "不能移除自己");
+        assert!(
+            files.iter().any(|f| f.starts_with("batches/base-")),
+            "批次折进了底稿：{files:?}"
+        );
+        assert!(
+            retire_device(&pc.db, &config, &device_id(&pc.db).await)
+                .await
+                .is_err(),
+            "不能移除自己"
+        );
 
         // 新设备照样拿到旧手机写过的数据，而且不把它列出来。
         let tablet = Device::new("tablet").await;
         tablet.sync(&config).await.unwrap();
         tablet.sync(&config).await.unwrap();
         assert_eq!(course_names(&tablet.db).await, ["只在旧手机上建的课"]);
-        let listed: Vec<String> = known_devices(&tablet.db).await.unwrap().into_iter().map(|d| d.device_id).collect();
+        let listed: Vec<String> = known_devices(&tablet.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| d.device_id)
+            .collect();
         assert!(!listed.contains(&phone_id), "{listed:?}");
 
         // 旧手机其实还在用：下次推送时摘掉标记，重新出现。
         push_rounds(&old_phone, &config, &["又一门"]).await;
-        assert!(!remote_files(&store, &phone_id).iter().any(|f| f.ends_with(compact::RETIRED_MARKER)));
+        assert!(!remote_files(&store, &phone_id)
+            .iter()
+            .any(|f| f.ends_with(compact::RETIRED_MARKER)));
         pc.sync(&config).await.unwrap();
-        let listed: Vec<String> = known_devices(&pc.db).await.unwrap().into_iter().map(|d| d.device_id).collect();
+        let listed: Vec<String> = known_devices(&pc.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|d| d.device_id)
+            .collect();
         assert_eq!(listed, [phone_id]);
         assert_eq!(course_names(&pc.db).await, ["又一门", "只在旧手机上建的课"]);
     }
@@ -1592,33 +2174,88 @@ mod tests {
         let orphan = "a".repeat(64);
         let used = "b".repeat(64);
         for name in [&orphan, &used] {
-            dav.ensure_dir(&format!("{}{name}/", crate::sync::media::MEDIA_DIR)).await.unwrap();
-            dav.put(&format!("{}{name}/manifest.json", crate::sync::media::MEDIA_DIR), b"{}".to_vec()).await.unwrap();
+            dav.ensure_dir(&format!("{}{name}/", crate::sync::media::MEDIA_DIR))
+                .await
+                .unwrap();
+            dav.put(
+                &format!("{}{name}/manifest.json", crate::sync::media::MEDIA_DIR),
+                b"{}".to_vec(),
+            )
+            .await
+            .unwrap();
         }
-        let course = crate::commands::courses::create_course(&pc.db, "c".into(), "/tmp".into()).await.unwrap();
+        let course = crate::commands::courses::create_course(&pc.db, "c".into(), "/tmp".into())
+            .await
+            .unwrap();
         let file = pc.dir.path().join("v.mp4");
         std::fs::write(&file, b"x").unwrap();
-        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
-        sqlx::query("UPDATE videos SET content_fingerprint=? WHERE id=?").bind(&used).bind(&video.id).execute(&pc.db.pool).await.unwrap();
-        set_setting(&pc.db, SETTING_LAST_SUCCESS, &chrono::Utc::now().timestamp_millis().to_string()).await.unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET content_fingerprint=? WHERE id=?")
+            .bind(&used)
+            .bind(&video.id)
+            .execute(&pc.db.pool)
+            .await
+            .unwrap();
+        set_setting(
+            &pc.db,
+            SETTING_LAST_SUCCESS,
+            &chrono::Utc::now().timestamp_millis().to_string(),
+        )
+        .await
+        .unwrap();
         let present: std::collections::HashSet<String> = [orphan.clone(), used.clone()].into();
-        let exists = |name: &str| store.lock().unwrap().files.keys().any(|path| path.contains(name));
+        let exists = |name: &str| {
+            store
+                .lock()
+                .unwrap()
+                .files
+                .keys()
+                .any(|path| path.contains(name))
+        };
 
         // 第一次看到没人引用：只记下来，不删。
-        assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 0);
+        assert_eq!(
+            collect_media_garbage(&pc.db, &dav, &present).await.unwrap(),
+            0
+        );
         assert!(exists(&orphan));
         // 过了一周还是没人引用：删掉。有人引用的不动。
         let week_ago = chrono::Utc::now().timestamp_millis() - MEDIA_ORPHAN_GRACE_MS - 1;
-        set_setting(&pc.db, SETTING_MEDIA_ORPHANS, &serde_json::json!({ orphan.clone(): week_ago }).to_string()).await.unwrap();
-        assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 1);
+        set_setting(
+            &pc.db,
+            SETTING_MEDIA_ORPHANS,
+            &serde_json::json!({ orphan.clone(): week_ago }).to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            collect_media_garbage(&pc.db, &dav, &present).await.unwrap(),
+            1
+        );
         assert!(!exists(&orphan));
         assert!(exists(&used));
 
         // 本机很久没同步成功：不知道别的设备新加了什么，不删。
-        set_setting(&pc.db, SETTING_LAST_SUCCESS, "0").await.unwrap();
-        sqlx::query("UPDATE videos SET content_fingerprint=NULL").execute(&pc.db.pool).await.unwrap();
-        set_setting(&pc.db, SETTING_MEDIA_ORPHANS, &serde_json::json!({ used.clone(): week_ago }).to_string()).await.unwrap();
-        assert_eq!(collect_media_garbage(&pc.db, &dav, &present).await.unwrap(), 0);
+        set_setting(&pc.db, SETTING_LAST_SUCCESS, "0")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE videos SET content_fingerprint=NULL")
+            .execute(&pc.db.pool)
+            .await
+            .unwrap();
+        set_setting(
+            &pc.db,
+            SETTING_MEDIA_ORPHANS,
+            &serde_json::json!({ used.clone(): week_ago }).to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            collect_media_garbage(&pc.db, &dav, &present).await.unwrap(),
+            0
+        );
         assert!(exists(&used));
     }
 
@@ -1638,17 +2275,31 @@ mod tests {
             token: "t".repeat(64),
             cert_sha256: "c".repeat(64),
         };
-        let lan_puts = || store.lock().unwrap().requests.iter().filter(|r| r.ends_with("/lan.json")).count();
+        let lan_puts = || {
+            store
+                .lock()
+                .unwrap()
+                .requests
+                .iter()
+                .filter(|r| r.ends_with("/lan.json"))
+                .count()
+        };
 
         publish_lan(&dav, &own_dir, &key, Some(advert.clone())).await;
         assert!(remote_files(&store, &pc_id).contains(&"lan.json".to_string()));
         publish_lan(&dav, &own_dir, &key, Some(advert.clone())).await;
         assert_eq!(lan_puts(), 1, "没变就不再写");
-        let moved = crate::lan_share::Advert { addresses: vec!["192.168.1.9".into()], ..advert };
+        let moved = crate::lan_share::Advert {
+            addresses: vec!["192.168.1.9".into()],
+            ..advert
+        };
         publish_lan(&dav, &own_dir, &key, Some(moved)).await;
         assert_eq!(lan_puts(), 2, "地址变了重写");
         publish_lan(&dav, &own_dir, &key, None).await;
-        assert!(!remote_files(&store, &pc_id).contains(&"lan.json".to_string()), "关掉共享后删掉");
+        assert!(
+            !remote_files(&store, &pc_id).contains(&"lan.json".to_string()),
+            "关掉共享后删掉"
+        );
     }
 
     #[tokio::test]
@@ -1657,25 +2308,47 @@ mod tests {
         let config = config(&url);
         let pc = Device::new("pc").await;
         let phone = Device::new("phone").await;
-        let course = crate::commands::courses::create_course(&pc.db, "c".into(), pc.dir.path().to_string_lossy().into()).await.unwrap();
+        let course = crate::commands::courses::create_course(
+            &pc.db,
+            "c".into(),
+            pc.dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let mut videos = Vec::new();
         for name in ["01.mp4", "02.mp4"] {
             let file = pc.dir.path().join(name);
             std::fs::write(&file, b"x").unwrap();
-            videos.push(crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap());
+            videos.push(
+                crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+                    .await
+                    .unwrap(),
+            );
         }
         // 第一个视频开同步之前就截好了封面：首次同步补推。
-        std::fs::write(std::path::Path::new(&videos[0].data_dir).join("cover.jpg"), b"cover-one").unwrap();
+        std::fs::write(
+            std::path::Path::new(&videos[0].data_dir).join("cover.jpg"),
+            b"cover-one",
+        )
+        .unwrap();
         pc.sync(&config).await.unwrap();
         // 第二个之后才截（首页显示到它时）：截出来就排进同步。
-        std::fs::write(std::path::Path::new(&videos[1].data_dir).join("cover.jpg"), b"cover-two").unwrap();
-        crate::sync::content::enqueue_cover(&pc.db, &videos[1].id).await.unwrap();
+        std::fs::write(
+            std::path::Path::new(&videos[1].data_dir).join("cover.jpg"),
+            b"cover-two",
+        )
+        .unwrap();
+        crate::sync::content::enqueue_cover(&pc.db, &videos[1].id)
+            .await
+            .unwrap();
         pc.sync(&config).await.unwrap();
 
         // 手机上没有文件也看得到封面。
         phone.sync(&config).await.unwrap();
         for (video, expected) in videos.iter().zip([b"cover-one".as_slice(), b"cover-two"]) {
-            let bytes = crate::commands::videos::video_cover_bytes(&phone.db, &video.id).await.unwrap();
+            let bytes = crate::commands::videos::video_cover_bytes(&phone.db, &video.id)
+                .await
+                .unwrap();
             assert_eq!(bytes, expected);
         }
         // 收来的封面不再推回去；没有文件、也还没收到封面的视频直接说没有（不去跑 ffmpeg）。
@@ -1683,10 +2356,16 @@ mod tests {
         assert_eq!(again.pushed, 0, "{again:?}");
         let file = pc.dir.path().join("03.mp4");
         std::fs::write(&file, b"x").unwrap();
-        let third = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None).await.unwrap();
+        let third = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+            .await
+            .unwrap();
         pc.sync(&config).await.unwrap();
         phone.sync(&config).await.unwrap();
-        assert!(crate::commands::videos::video_cover_bytes(&phone.db, &third.id).await.is_err());
+        assert!(
+            crate::commands::videos::video_cover_bytes(&phone.db, &third.id)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1696,7 +2375,10 @@ mod tests {
         let device = Device::new("pc").await;
         let error = device.sync(&config(&url)).await.unwrap_err().to_string();
         assert!(error.contains("时钟"), "{error}");
-        assert!(store.lock().unwrap().files.is_empty(), "时钟不对时什么都不写");
+        assert!(
+            store.lock().unwrap().files.is_empty(),
+            "时钟不对时什么都不写"
+        );
     }
 
     #[tokio::test]

@@ -50,10 +50,16 @@ pub struct UsageScope {
 
 impl UsageScope {
     pub fn video(video_id: &str) -> Self {
-        Self { video_id: Some(video_id.to_string()), course_id: None }
+        Self {
+            video_id: Some(video_id.to_string()),
+            course_id: None,
+        }
     }
     pub fn course(course_id: &str) -> Self {
-        Self { video_id: None, course_id: Some(course_id.to_string()) }
+        Self {
+            video_id: None,
+            course_id: Some(course_id.to_string()),
+        }
     }
 }
 
@@ -111,7 +117,12 @@ pub fn deepseek_is_peak(at: chrono::DateTime<chrono::Utc>) -> bool {
     matches!(at.hour(), 1..=3 | 6..=9)
 }
 
-fn priced(fresh: i64, cached: i64, completion: i64, (input, cache, output): (f64, f64, f64)) -> f64 {
+fn priced(
+    fresh: i64,
+    cached: i64,
+    completion: i64,
+    (input, cache, output): (f64, f64, f64),
+) -> f64 {
     (fresh as f64 * input + cached as f64 * cache + completion as f64 * output) / 1_000_000.0
 }
 
@@ -131,12 +142,22 @@ pub fn estimate_cost_usd(
         Billing::DeepSeek => {
             let (input, cache, output) = deepseek_peak_price(model);
             let factor = if deepseek_is_peak(at) { 1.0 } else { 0.5 };
-            Some(priced(fresh, cached, completion, (input * factor, cache * factor, output * factor)))
+            Some(priced(
+                fresh,
+                cached,
+                completion,
+                (input * factor, cache * factor, output * factor),
+            ))
         }
         Billing::Catalog => {
             let entry = crate::llm::catalog::lookup(model)?;
             let (input, output) = (entry.input?, entry.output?);
-            Some(priced(fresh, cached, completion, (input, entry.cache_read.unwrap_or(input), output)))
+            Some(priced(
+                fresh,
+                cached,
+                completion,
+                (input, entry.cache_read.unwrap_or(input), output),
+            ))
         }
     }
 }
@@ -288,10 +309,12 @@ pub fn month_start_ms(now: chrono::DateTime<chrono::Local>) -> i64 {
 
 pub async fn month_cost_usd(db: &Db) -> AppResult<f64> {
     let since = month_start_ms(chrono::Local::now());
-    Ok(sqlx::query_scalar("SELECT COALESCE(SUM(cost_usd),0.0) FROM llm_usage WHERE at>=?")
-        .bind(since)
-        .fetch_one(&db.pool)
-        .await?)
+    Ok(
+        sqlx::query_scalar("SELECT COALESCE(SUM(cost_usd),0.0) FROM llm_usage WHERE at>=?")
+            .bind(since)
+            .fetch_one(&db.pool)
+            .await?,
+    )
 }
 
 pub async fn budget_usd(db: &Db) -> Option<f64> {
@@ -315,7 +338,13 @@ pub async fn over_budget_message(db: &Db) -> Option<String> {
     })
 }
 
-async fn grouped(db: &Db, since: i64, select_key: &str, join: &str, group: &str) -> AppResult<Vec<UsageRow>> {
+async fn grouped(
+    db: &Db,
+    since: i64,
+    select_key: &str,
+    join: &str,
+    group: &str,
+) -> AppResult<Vec<UsageRow>> {
     let sql = format!(
         "SELECT {select_key}, {SUMS} FROM llm_usage u {join} WHERE u.at>=? GROUP BY {group}
          ORDER BY cost_usd DESC, prompt_tokens DESC"
@@ -367,7 +396,10 @@ pub async fn video_usage(db: &Db, video_id: &str) -> AppResult<UsageRow> {
 /// 只留一年：一节课几十次调用，几年下来也就几万行，但没必要无限长。
 pub async fn prune(db: &Db) -> AppResult<()> {
     let cutoff = chrono::Utc::now().timestamp_millis() - 365 * 86_400_000;
-    sqlx::query("DELETE FROM llm_usage WHERE at<?").bind(cutoff).execute(&db.pool).await?;
+    sqlx::query("DELETE FROM llm_usage WHERE at<?")
+        .bind(cutoff)
+        .execute(&db.pool)
+        .await?;
     Ok(())
 }
 
@@ -412,7 +444,10 @@ pub struct DeepSeekBalance {
 }
 
 /// 解析 `GET /user/balance` 的回复。金额官方给的就是字符串（"110.00"），原样保留。
-fn parse_deepseek_balance(profile_name: &str, body: &serde_json::Value) -> AppResult<DeepSeekBalance> {
+fn parse_deepseek_balance(
+    profile_name: &str,
+    body: &serde_json::Value,
+) -> AppResult<DeepSeekBalance> {
     let infos = body["balance_infos"]
         .as_array()
         .ok_or_else(|| crate::error::AppError::Other("DeepSeek 余额接口返回的格式不认识".into()))?;
@@ -435,14 +470,21 @@ fn parse_deepseek_balance(profile_name: &str, body: &serde_json::Value) -> AppRe
 /// 第一个直连 DeepSeek 官方、填了 Key 的模型配置；没有就是 None（界面上不显示余额这一行）。
 async fn deepseek_profile(db: &Db) -> AppResult<Option<(String, String)>> {
     use crate::llm::profiles::{parse_profiles, ProviderKind};
-    let profiles = parse_profiles(crate::commands::settings::get_setting(db, "llm_profiles").await?.as_deref())?;
+    let profiles = parse_profiles(
+        crate::commands::settings::get_setting(db, "llm_profiles")
+            .await?
+            .as_deref(),
+    )?;
     for profile in profiles {
         if !matches!(profile.kind, ProviderKind::Openai | ProviderKind::Anthropic)
             || !crate::llm::is_deepseek_official(&profile.base_url)
         {
             continue;
         }
-        if let Some(key) = crate::llm::api_key_for(db, &profile).await?.filter(|key| !key.is_empty()) {
+        if let Some(key) = crate::llm::api_key_for(db, &profile)
+            .await?
+            .filter(|key| !key.is_empty())
+        {
             return Ok(Some((profile.name, key)));
         }
     }
@@ -470,7 +512,10 @@ pub async fn cmd_deepseek_balance(
         .map_err(|e| AppError::Other(format!("查询 DeepSeek 余额失败：{e}")))?;
     let status = response.status();
     if !status.is_success() {
-        return Err(AppError::Other(format!("查询 DeepSeek 余额失败（HTTP {}）", status.as_u16())));
+        return Err(AppError::Other(format!(
+            "查询 DeepSeek 余额失败（HTTP {}）",
+            status.as_u16()
+        )));
     }
     let body: serde_json::Value = response
         .json()
@@ -502,9 +547,24 @@ mod tests {
     fn totals_accumulate_per_label_and_model() {
         let _serial = serial();
         clear();
-        record("notes", "deepseek-chat", &usage(1000, 0, 300, 0), Billing::Catalog);
-        record("notes", "deepseek-chat", &usage(1000, 900, 280, 0), Billing::Catalog);
-        record("quiz", "deepseek-chat", &usage(1000, 900, 400, 0), Billing::Catalog);
+        record(
+            "notes",
+            "deepseek-chat",
+            &usage(1000, 0, 300, 0),
+            Billing::Catalog,
+        );
+        record(
+            "notes",
+            "deepseek-chat",
+            &usage(1000, 900, 280, 0),
+            Billing::Catalog,
+        );
+        record(
+            "quiz",
+            "deepseek-chat",
+            &usage(1000, 900, 400, 0),
+            Billing::Catalog,
+        );
 
         let totals = totals();
         let notes = totals.iter().find(|t| t.label == "notes").unwrap();
@@ -535,7 +595,12 @@ mod tests {
         // 不单独记的话，这笔钱在账面上和有用的输出长得一模一样。
         let _serial = serial();
         clear();
-        record("correction", "reasoner", &usage(500, 0, 900, 800), Billing::Catalog);
+        record(
+            "correction",
+            "reasoner",
+            &usage(500, 0, 900, 800),
+            Billing::Catalog,
+        );
 
         let totals = totals();
         assert_eq!(totals[0].completion_tokens, 900);
@@ -551,26 +616,55 @@ mod tests {
     fn cost_counts_cache_hits_at_the_cache_price() {
         // deepseek-flash 的目录价：输入 0.3、缓存 0.006、输出 1.2（USD / 百万 token）。
         let at = utc("2026-11-17T02:00:00Z");
-        let cost = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 900_000, 100_000, 0), Billing::Catalog, at)
-            .unwrap();
+        let cost = estimate_cost_usd(
+            "deepseek-flash",
+            &usage(1_000_000, 900_000, 100_000, 0),
+            Billing::Catalog,
+            at,
+        )
+        .unwrap();
         let expected = (100_000.0 * 0.3 + 900_000.0 * 0.006 + 100_000.0 * 1.2) / 1_000_000.0;
         assert!((cost - expected).abs() < 1e-9, "{cost} vs {expected}");
         // 没有缓存价的模型按普通输入价算（宁可估高）；查不到价格的是「未知」，不是 0。
-        assert!(estimate_cost_usd("no-such-model-xyz", &usage(10, 0, 10, 0), Billing::Catalog, at).is_none());
+        assert!(estimate_cost_usd(
+            "no-such-model-xyz",
+            &usage(10, 0, 10, 0),
+            Billing::Catalog,
+            at
+        )
+        .is_none());
         // 本机模型不花钱，哪怕目录里有同名模型的价。
-        assert_eq!(estimate_cost_usd("deepseek-flash", &usage(10, 0, 10, 0), Billing::Local, at), Some(0.0));
+        assert_eq!(
+            estimate_cost_usd("deepseek-flash", &usage(10, 0, 10, 0), Billing::Local, at),
+            Some(0.0)
+        );
     }
 
     #[test]
     fn deepseek_peak_hours_follow_beijing_weekdays() {
         // 2026-11-17 是周二。北京 9:00 = UTC 01:00。
-        assert!(!deepseek_is_peak(utc("2026-11-17T00:59:00Z")), "北京 8:59 还是空闲");
-        assert!(deepseek_is_peak(utc("2026-11-17T01:00:00Z")), "北京 9:00 进高峰");
+        assert!(
+            !deepseek_is_peak(utc("2026-11-17T00:59:00Z")),
+            "北京 8:59 还是空闲"
+        );
+        assert!(
+            deepseek_is_peak(utc("2026-11-17T01:00:00Z")),
+            "北京 9:00 进高峰"
+        );
         assert!(deepseek_is_peak(utc("2026-11-17T03:59:00Z")), "北京 11:59");
-        assert!(!deepseek_is_peak(utc("2026-11-17T04:00:00Z")), "北京 12:00 午间空闲");
+        assert!(
+            !deepseek_is_peak(utc("2026-11-17T04:00:00Z")),
+            "北京 12:00 午间空闲"
+        );
         assert!(deepseek_is_peak(utc("2026-11-17T06:00:00Z")), "北京 14:00");
-        assert!(!deepseek_is_peak(utc("2026-11-17T10:00:00Z")), "北京 18:00 收工");
-        assert!(!deepseek_is_peak(utc("2026-11-21T02:00:00Z")), "周六北京 10:00 也是空闲");
+        assert!(
+            !deepseek_is_peak(utc("2026-11-17T10:00:00Z")),
+            "北京 18:00 收工"
+        );
+        assert!(
+            !deepseek_is_peak(utc("2026-11-21T02:00:00Z")),
+            "周六北京 10:00 也是空闲"
+        );
         // 北京周一凌晨 = UTC 周日傍晚，空闲。
         assert!(!deepseek_is_peak(utc("2026-11-22T17:00:00Z")));
     }
@@ -590,8 +684,13 @@ mod tests {
         let pro_peak = estimate_cost_usd("deepseek-v4-pro", &u, Billing::DeepSeek, peak).unwrap();
         assert!((pro_peak - (1.32 + 3.96)).abs() < 1e-9, "{pro_peak}");
         // 缓存价也减半。
-        let cached = estimate_cost_usd("deepseek-flash", &usage(1_000_000, 1_000_000, 0, 0), Billing::DeepSeek, idle)
-            .unwrap();
+        let cached = estimate_cost_usd(
+            "deepseek-flash",
+            &usage(1_000_000, 1_000_000, 0, 0),
+            Billing::DeepSeek,
+            idle,
+        )
+        .unwrap();
         assert!((cached - 0.003).abs() < 1e-9, "{cached}");
     }
 
@@ -621,7 +720,9 @@ mod tests {
     #[tokio::test]
     async fn balance_only_uses_a_key_from_an_official_deepseek_profile() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         assert!(deepseek_profile(&db).await.unwrap().is_none(), "没配模型");
 
         let profiles = serde_json::json!([
@@ -629,13 +730,26 @@ mod tests {
             {"id": "ds-nokey", "name": "DeepSeek 备用", "kind": "openai", "base_url": "https://api.deepseek.com", "model": "deepseek-flash"},
             {"id": "ds", "name": "DeepSeek", "kind": "anthropic", "base_url": "https://api.deepseek.com/anthropic", "model": "deepseek-flash"}
         ]);
-        crate::commands::settings::set_setting(&db, "llm_profiles", &profiles.to_string()).await.unwrap();
-        crate::llm::keychain::set_api_key(&db, "sf", "sk-siliconflow").await.unwrap();
-        assert!(deepseek_profile(&db).await.unwrap().is_none(), "别家网关的 Key 不能拿去查 DeepSeek");
+        crate::commands::settings::set_setting(&db, "llm_profiles", &profiles.to_string())
+            .await
+            .unwrap();
+        crate::llm::keychain::set_api_key(&db, "sf", "sk-siliconflow")
+            .await
+            .unwrap();
+        assert!(
+            deepseek_profile(&db).await.unwrap().is_none(),
+            "别家网关的 Key 不能拿去查 DeepSeek"
+        );
 
-        crate::llm::keychain::set_api_key(&db, "ds", "sk-deepseek").await.unwrap();
+        crate::llm::keychain::set_api_key(&db, "ds", "sk-deepseek")
+            .await
+            .unwrap();
         let (name, key) = deepseek_profile(&db).await.unwrap().unwrap();
-        assert_eq!((name.as_str(), key.as_str()), ("DeepSeek", "sk-deepseek"), "跳过没填 Key 的那个");
+        assert_eq!(
+            (name.as_str(), key.as_str()),
+            ("DeepSeek", "sk-deepseek"),
+            "跳过没填 Key 的那个"
+        );
     }
 
     #[tokio::test]
@@ -650,18 +764,54 @@ mod tests {
         use crate::commands::courses::create_course;
         use crate::commands::videos::add_local_video;
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
-        let course = create_course(&db, "机器学习".into(), dir.path().to_string_lossy().into()).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = create_course(&db, "机器学习".into(), dir.path().to_string_lossy().into())
+            .await
+            .unwrap();
         let path = dir.path().join("v.mp4");
         std::fs::write(&path, b"x").unwrap();
         let video = add_local_video(&db, &course.id, path, None).await.unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         let u = usage(1000, 0, 100, 0);
-        insert(&db, now, &UsageScope::video(&video.id), "notes", "m", &u, Some(0.30)).await.unwrap();
-        insert(&db, now, &UsageScope::video(&video.id), "quiz", "m", &u, Some(0.20)).await.unwrap();
-        insert(&db, now, &UsageScope::default(), "assistant", "m", &u, None).await.unwrap();
+        insert(
+            &db,
+            now,
+            &UsageScope::video(&video.id),
+            "notes",
+            "m",
+            &u,
+            Some(0.30),
+        )
+        .await
+        .unwrap();
+        insert(
+            &db,
+            now,
+            &UsageScope::video(&video.id),
+            "quiz",
+            "m",
+            &u,
+            Some(0.20),
+        )
+        .await
+        .unwrap();
+        insert(&db, now, &UsageScope::default(), "assistant", "m", &u, None)
+            .await
+            .unwrap();
         // 一年多以前的不算进「最近 30 天」。
-        insert(&db, now - 400 * 86_400_000, &UsageScope::video(&video.id), "notes", "m", &u, Some(9.0)).await.unwrap();
+        insert(
+            &db,
+            now - 400 * 86_400_000,
+            &UsageScope::video(&video.id),
+            "notes",
+            "m",
+            &u,
+            Some(9.0),
+        )
+        .await
+        .unwrap();
 
         let s = summary(&db, 30).await.unwrap();
         assert_eq!(s.total.calls, 3);
@@ -670,16 +820,27 @@ mod tests {
         let ml = s.by_course.iter().find(|r| r.key == course.id).unwrap();
         assert_eq!(ml.name.as_deref(), Some("机器学习"));
         assert_eq!(ml.calls, 2);
-        assert!(s.by_course.iter().any(|r| r.key.is_empty() && r.calls == 1), "不属于课程的归到「其他」");
+        assert!(
+            s.by_course.iter().any(|r| r.key.is_empty() && r.calls == 1),
+            "不属于课程的归到「其他」"
+        );
         assert_eq!(video_usage(&db, &video.id).await.unwrap().calls, 3);
 
         assert!(over_budget_message(&db).await.is_none(), "没设预算不拦");
-        crate::commands::settings::set_setting(&db, BUDGET_SETTING, "1").await.unwrap();
+        crate::commands::settings::set_setting(&db, BUDGET_SETTING, "1")
+            .await
+            .unwrap();
         assert!(over_budget_message(&db).await.is_none(), "本月 $0.50 < $1");
-        crate::commands::settings::set_setting(&db, BUDGET_SETTING, "0.5").await.unwrap();
+        crate::commands::settings::set_setting(&db, BUDGET_SETTING, "0.5")
+            .await
+            .unwrap();
         assert!(over_budget_message(&db).await.unwrap().contains("$0.50"));
 
         prune(&db).await.unwrap();
-        assert_eq!(video_usage(&db, &video.id).await.unwrap().calls, 2, "一年前的清掉了");
+        assert_eq!(
+            video_usage(&db, &video.id).await.unwrap().calls,
+            2,
+            "一年前的清掉了"
+        );
     }
 }

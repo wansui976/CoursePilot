@@ -95,7 +95,10 @@ fn is_heading(line: &str) -> Option<&str> {
 /// 方括号里的东西如果是 `mm:ss` / `h:mm:ss`，返回毫秒。
 fn bracket_time(inner: &str) -> Option<i64> {
     let inner = inner.trim();
-    if inner.is_empty() || inner.len() > 8 || !inner.bytes().all(|b| b.is_ascii_digit() || b == b':') {
+    if inner.is_empty()
+        || inner.len() > 8
+        || !inner.bytes().all(|b| b.is_ascii_digit() || b == b':')
+    {
         return None;
     }
     parse_mmss(inner)
@@ -147,7 +150,10 @@ pub fn split_sections(notes: &[VideoNote]) -> Vec<Section> {
         let mut body = String::new();
         for line in note.markdown.lines() {
             if let Some(next) = is_heading(line) {
-                chunks.push((std::mem::replace(&mut heading, next.to_string()), std::mem::take(&mut body)));
+                chunks.push((
+                    std::mem::replace(&mut heading, next.to_string()),
+                    std::mem::take(&mut body),
+                ));
             } else {
                 body.push_str(line);
                 body.push('\n');
@@ -202,7 +208,10 @@ pub fn tiptap_markdown(doc: &Value) -> String {
 }
 
 fn children(node: &Value) -> &[Value] {
-    node.get("content").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
+    node.get("content")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
 }
 
 fn inline(node: &Value) -> String {
@@ -210,11 +219,18 @@ fn inline(node: &Value) -> String {
     for child in children(node) {
         match child.get("type").and_then(Value::as_str) {
             Some("text") => {
-                let text = child.get("text").and_then(Value::as_str).unwrap_or_default();
+                let text = child
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let bold = child
                     .get("marks")
                     .and_then(Value::as_array)
-                    .is_some_and(|marks| marks.iter().any(|m| m.get("type").and_then(Value::as_str) == Some("bold")));
+                    .is_some_and(|marks| {
+                        marks
+                            .iter()
+                            .any(|m| m.get("type").and_then(Value::as_str) == Some("bold"))
+                    });
                 if bold && !text.trim().is_empty() {
                     out.push_str(&format!("**{text}**"));
                 } else {
@@ -236,9 +252,19 @@ fn inline(node: &Value) -> String {
             }
             Some("math") => {
                 let attrs = child.get("attrs");
-                let latex = attrs.and_then(|a| a.get("latex")).and_then(Value::as_str).unwrap_or_default();
-                let display = attrs.and_then(|a| a.get("display")).and_then(Value::as_bool).unwrap_or(false);
-                out.push_str(&if display { format!("\\[{latex}\\]") } else { format!("\\({latex}\\)") });
+                let latex = attrs
+                    .and_then(|a| a.get("latex"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let display = attrs
+                    .and_then(|a| a.get("display"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                out.push_str(&if display {
+                    format!("\\[{latex}\\]")
+                } else {
+                    format!("\\({latex}\\)")
+                });
             }
             Some("hardBreak") => out.push('\n'),
             _ => out.push_str(&inline(child)),
@@ -255,8 +281,16 @@ fn blocks(content: Option<&Value>, depth: usize, out: &mut String) {
     for node in items {
         match node.get("type").and_then(Value::as_str) {
             Some("heading") => {
-                let level = node.get("attrs").and_then(|a| a.get("level")).and_then(Value::as_u64).unwrap_or(2);
-                out.push_str(&format!("{} {}\n\n", "#".repeat(level.clamp(1, 6) as usize), inline(node)));
+                let level = node
+                    .get("attrs")
+                    .and_then(|a| a.get("level"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(2);
+                out.push_str(&format!(
+                    "{} {}\n\n",
+                    "#".repeat(level.clamp(1, 6) as usize),
+                    inline(node)
+                ));
             }
             Some("paragraph") => {
                 let text = inline(node);
@@ -266,7 +300,11 @@ fn blocks(content: Option<&Value>, depth: usize, out: &mut String) {
             }
             Some(kind @ ("bulletList" | "orderedList" | "taskList")) => {
                 for (index, item) in children(node).iter().enumerate() {
-                    let marker = if kind == "orderedList" { format!("{}.", index + 1) } else { "-".into() };
+                    let marker = if kind == "orderedList" {
+                        format!("{}.", index + 1)
+                    } else {
+                        "-".into()
+                    };
                     let mut first = true;
                     for block in children(item) {
                         if first && block.get("type").and_then(Value::as_str) == Some("paragraph") {
@@ -318,7 +356,11 @@ fn blocks(content: Option<&Value>, depth: usize, out: &mut String) {
 }
 
 /// 用户改过就以编辑器内容为准，否则用 AI 原稿。
-pub fn note_markdown(content_md: Option<&str>, content_json: Option<&str>, user_edited: bool) -> Option<String> {
+pub fn note_markdown(
+    content_md: Option<&str>,
+    content_json: Option<&str>,
+    user_edited: bool,
+) -> Option<String> {
     if user_edited {
         if let Some(doc) = content_json.and_then(|json| serde_json::from_str::<Value>(json).ok()) {
             let md = tiptap_markdown(&doc);
@@ -327,7 +369,10 @@ pub fn note_markdown(content_md: Option<&str>, content_json: Option<&str>, user_
             }
         }
     }
-    content_md.map(str::trim).filter(|md| !md.is_empty()).map(str::to_string)
+    content_md
+        .map(str::trim)
+        .filter(|md| !md.is_empty())
+        .map(str::to_string)
 }
 
 /// 课程素材：有笔记的视频（按课程顺序）+ 没有笔记的视频标题。
@@ -345,7 +390,8 @@ pub async fn load_material(db: &Db, course_id: &str) -> AppResult<Material> {
         .bind(course_id)
         .fetch_optional(&db.pool)
         .await?;
-    let course_name = course_name.ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
+    let course_name =
+        course_name.ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
     let rows: Vec<NoteRow> = sqlx::query_as(
         "SELECT v.id, v.title, n.content_md, n.content_json, n.user_edited_at
          FROM videos v LEFT JOIN notes n ON n.video_id=v.id
@@ -359,11 +405,19 @@ pub async fn load_material(db: &Db, course_id: &str) -> AppResult<Material> {
     for (video_id, title, md, json, edited) in rows {
         let title = crate::export::display_title(&title);
         match note_markdown(md.as_deref(), json.as_deref(), edited.is_some()) {
-            Some(markdown) => notes.push(VideoNote { video_id, title, markdown }),
+            Some(markdown) => notes.push(VideoNote {
+                video_id,
+                title,
+                markdown,
+            }),
             None => without_notes.push(title),
         }
     }
-    Ok(Material { course_name, notes, without_notes })
+    Ok(Material {
+        course_name,
+        notes,
+        without_notes,
+    })
 }
 
 // ---------- 排目录 ----------
@@ -396,7 +450,11 @@ pub struct OutlineChapter {
 fn first_line(body: &str) -> String {
     let line = body
         .lines()
-        .map(|l| l.trim().trim_start_matches(['-', '*', '>', '#', ' ']).trim())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches(['-', '*', '>', '#', ' '])
+                .trim()
+        })
         .find(|l| !l.is_empty())
         .unwrap_or_default();
     // 摘要里不带出处标签，省 token 也免得模型把它当正文。
@@ -404,7 +462,9 @@ fn first_line(body: &str) -> String {
     let mut rest = line;
     while let Some(open) = rest.find("[N") {
         clean.push_str(&rest[..open]);
-        rest = rest[open..].find(']').map_or("", |close| &rest[open + close + 1..]);
+        rest = rest[open..]
+            .find(']')
+            .map_or("", |close| &rest[open + close + 1..]);
     }
     clean.push_str(rest);
     truncate_chars(clean.trim(), DIGEST_LINE_CHARS).replace("\n…（后略）", "…")
@@ -419,12 +479,22 @@ pub fn outline_digest(sections: &[Section]) -> String {
             current_video = &section.video_id;
             out.push_str(&format!("《{}》\n", section.video_title));
         }
-        out.push_str(&format!("  {} {} —— {}\n", section.id, section.heading, first_line(&section.body)));
+        out.push_str(&format!(
+            "  {} {} —— {}\n",
+            section.id,
+            section.heading,
+            first_line(&section.body)
+        ));
     }
     out
 }
 
-pub fn outline_request(model: &str, course_name: &str, digest: &str, topics_hint: Option<&str>) -> ChatRequest {
+pub fn outline_request(
+    model: &str,
+    course_name: &str,
+    digest: &str,
+    topics_hint: Option<&str>,
+) -> ChatRequest {
     let hint = topics_hint
         .map(|h| format!("\n已有的课程知识主题（按学习顺序，供分章参考，不必照搬）：\n{h}\n"))
         .unwrap_or_default();
@@ -455,14 +525,23 @@ pub fn outline_request(model: &str, course_name: &str, digest: &str, topics_hint
 
 /// 校验模型排的目录：编的编号丢掉，重复的只留第一次；漏分的小节挂到同一视频
 /// 相邻小节所在的章，再找不到就放进最后的「补充内容」章——内容一条都不丢。
-pub fn validate_outline(draft: OutlineDraft, sections: &[Section]) -> AppResult<(String, Vec<OutlineChapter>)> {
-    let index_of: HashMap<&str, usize> = sections.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
+pub fn validate_outline(
+    draft: OutlineDraft,
+    sections: &[Section],
+) -> AppResult<(String, Vec<OutlineChapter>)> {
+    let index_of: HashMap<&str, usize> = sections
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
     let mut chapter_of: Vec<Option<usize>> = vec![None; sections.len()];
     let mut chapters: Vec<(String, String, Vec<usize>)> = Vec::new();
     for draft_chapter in draft.chapters {
         let mut members = Vec::new();
         for id in &draft_chapter.sections {
-            let Some(&index) = index_of.get(id.trim()) else { continue };
+            let Some(&index) = index_of.get(id.trim()) else {
+                continue;
+            };
             if chapter_of[index].is_none() {
                 chapter_of[index] = Some(chapters.len());
                 members.push(index);
@@ -471,10 +550,16 @@ pub fn validate_outline(draft: OutlineDraft, sections: &[Section]) -> AppResult<
         if members.is_empty() {
             continue;
         }
-        chapters.push((draft_chapter.title.trim().to_string(), draft_chapter.intro.trim().to_string(), members));
+        chapters.push((
+            draft_chapter.title.trim().to_string(),
+            draft_chapter.intro.trim().to_string(),
+            members,
+        ));
     }
     if chapters.is_empty() {
-        return Err(AppError::Pipeline("模型排的目录里没有一个有效的小节编号".into()));
+        return Err(AppError::Pipeline(
+            "模型排的目录里没有一个有效的小节编号".into(),
+        ));
     }
     let mut leftovers = Vec::new();
     for index in 0..sections.len() {
@@ -505,7 +590,11 @@ pub fn validate_outline(draft: OutlineDraft, sections: &[Section]) -> AppResult<
             // 补进来的小节排回它在课程里的位置，不要都堆在章末。
             members.sort_unstable();
             OutlineChapter {
-                title: if title.is_empty() { format!("第 {} 章", n + 1) } else { title },
+                title: if title.is_empty() {
+                    format!("第 {} 章", n + 1)
+                } else {
+                    title
+                },
                 intro,
                 sections: members.iter().map(|&i| sections[i].key.clone()).collect(),
             }
@@ -533,10 +622,21 @@ pub fn chapter_request(
     };
     let mut material = String::new();
     for section in members {
-        let body = if cap == usize::MAX { section.body.clone() } else { truncate_chars(&section.body, cap) };
-        material.push_str(&format!("【{}】《{}》· {}\n{}\n\n", section.id, section.video_title, section.heading, body));
+        let body = if cap == usize::MAX {
+            section.body.clone()
+        } else {
+            truncate_chars(&section.body, cap)
+        };
+        material.push_str(&format!(
+            "【{}】《{}》· {}\n{}\n\n",
+            section.id, section.video_title, section.heading, body
+        ));
     }
-    let intro = if chapter.intro.is_empty() { String::new() } else { format!("，导读：{}", chapter.intro) };
+    let intro = if chapter.intro.is_empty() {
+        String::new()
+    } else {
+        format!("，导读：{}", chapter.intro)
+    };
     ChatRequest {
         model: model.to_string(),
         system: Some(format!(
@@ -594,22 +694,39 @@ pub fn normalize_sources(markdown: &str, members: &HashMap<&str, &Section>) -> S
         let inner = &after[..close];
         // [x] 链接文字、[1] 这类不是出处的，原样留着。
         let refs: Vec<&str> = inner.split([';', '；']).map(str::trim).collect();
-        let looks_like_source = refs.iter().all(|r| r.starts_with('N') && r[1..].starts_with(|c: char| c.is_ascii_digit()));
+        let looks_like_source = refs
+            .iter()
+            .all(|r| r.starts_with('N') && r[1..].starts_with(|c: char| c.is_ascii_digit()));
         if bracket_time(inner).is_some() {
             trim_trailing_space(&mut out);
         } else if looks_like_source {
             let mut kept = Vec::new();
             for reference in refs {
-                let digits_end = reference[1..].find(|c: char| !c.is_ascii_digit()).map_or(reference.len(), |i| i + 1);
+                let digits_end = reference[1..]
+                    .find(|c: char| !c.is_ascii_digit())
+                    .map_or(reference.len(), |i| i + 1);
                 let id = &reference[..digits_end];
-                let time = reference[digits_end..].trim_start_matches([' ', ',', '，', '·', '|', '@', '\u{a0}']);
-                let Some(section) = members.get(id) else { continue };
-                let ms = bracket_time(time).filter(|&ms| match (section.start_ms, section.end_ms) {
-                    (Some(start), Some(end)) => ms >= start - TIME_SLACK_MS && ms <= end + TIME_SLACK_MS,
-                    _ => true,
-                });
+                let time = reference[digits_end..]
+                    .trim_start_matches([' ', ',', '，', '·', '|', '@', '\u{a0}']);
+                let Some(section) = members.get(id) else {
+                    continue;
+                };
+                let ms =
+                    bracket_time(time).filter(|&ms| match (section.start_ms, section.end_ms) {
+                        (Some(start), Some(end)) => {
+                            ms >= start - TIME_SLACK_MS && ms <= end + TIME_SLACK_MS
+                        }
+                        _ => true,
+                    });
                 kept.push(match ms.or(section.start_ms) {
-                    Some(ms) => format!("{id} {}", if ms == bracket_time(time).unwrap_or(-1) { time.trim().to_string() } else { mmss(ms) }),
+                    Some(ms) => format!(
+                        "{id} {}",
+                        if ms == bracket_time(time).unwrap_or(-1) {
+                            time.trim().to_string()
+                        } else {
+                            mmss(ms)
+                        }
+                    ),
                     None => id.to_string(),
                 });
             }
@@ -674,13 +791,19 @@ async fn load_chapters(db: &Db, course_id: &str) -> AppResult<Vec<ChapterRow>> {
     .await?)
 }
 
-async fn load_outline(db: &Db, course_id: &str) -> AppResult<Option<(String, Vec<OutlineChapter>, i64)>> {
-    let row: Option<(String, String, i64)> =
-        sqlx::query_as("SELECT title,outline_json,generated_at FROM course_review_books WHERE course_id=?")
-            .bind(course_id)
-            .fetch_optional(&db.pool)
-            .await?;
-    let Some((title, json, generated_at)) = row else { return Ok(None) };
+async fn load_outline(
+    db: &Db,
+    course_id: &str,
+) -> AppResult<Option<(String, Vec<OutlineChapter>, i64)>> {
+    let row: Option<(String, String, i64)> = sqlx::query_as(
+        "SELECT title,outline_json,generated_at FROM course_review_books WHERE course_id=?",
+    )
+    .bind(course_id)
+    .fetch_optional(&db.pool)
+    .await?;
+    let Some((title, json, generated_at)) = row else {
+        return Ok(None);
+    };
     Ok(Some((title, serde_json::from_str(&json)?, generated_at)))
 }
 
@@ -711,7 +834,9 @@ async fn store_outline(
         .execute(&mut *tx)
         .await?;
     for (idx, (chapter, fingerprint)) in outline.iter().zip(fingerprints).enumerate() {
-        let carried = old.iter().find(|row| row.content_md.is_some() && &row.fingerprint == fingerprint);
+        let carried = old
+            .iter()
+            .find(|row| row.content_md.is_some() && &row.fingerprint == fingerprint);
         sqlx::query(
             "INSERT INTO course_review_chapters
                (course_id,idx,title,intro,content_md,sources_json,quiz_json,fingerprint,generated_at)
@@ -800,7 +925,11 @@ fn current_fingerprints(outline: &[OutlineChapter], sections: &[Section]) -> Opt
     let mut fingerprints = Vec::new();
     let mut seen = HashSet::new();
     for chapter in outline {
-        let members: Option<Vec<&Section>> = chapter.sections.iter().map(|key| by_key.get(key.as_str()).copied()).collect();
+        let members: Option<Vec<&Section>> = chapter
+            .sections
+            .iter()
+            .map(|key| by_key.get(key.as_str()).copied())
+            .collect();
         let members = members?;
         seen.extend(chapter.sections.iter().map(String::as_str));
         fingerprints.push(chapter_fingerprint(&members));
@@ -817,7 +946,9 @@ pub async fn get_review_book(db: &Db, course_id: &str) -> AppResult<ReviewBook> 
     let sections = split_sections(&material.notes);
     let outline = load_outline(db, course_id).await?;
     let rows = load_chapters(db, course_id).await?;
-    let fingerprints = outline.as_ref().and_then(|(_, outline, _)| current_fingerprints(outline, &sections));
+    let fingerprints = outline
+        .as_ref()
+        .and_then(|(_, outline, _)| current_fingerprints(outline, &sections));
     let chapters = rows
         .into_iter()
         .map(|row| {
@@ -843,7 +974,10 @@ pub async fn get_review_book(db: &Db, course_id: &str) -> AppResult<ReviewBook> 
         })
         .collect();
     Ok(ReviewBook {
-        title: outline.as_ref().map(|(title, _, _)| title.clone()).filter(|t| !t.is_empty()),
+        title: outline
+            .as_ref()
+            .map(|(title, _, _)| title.clone())
+            .filter(|t| !t.is_empty()),
         generated_at: outline.as_ref().map(|(_, _, at)| *at),
         chapters,
         outline_stale: outline.is_some() && fingerprints.is_none(),
@@ -872,13 +1006,20 @@ pub struct ReviewOutcome {
 
 /// 课程知识页已有的主题分组，作为排目录的参考。
 async fn topics_hint(db: &Db, course_id: &str) -> Option<String> {
-    let knowledge = crate::pipeline::concepts::get_course_knowledge(db, course_id).await.ok()?;
+    let knowledge = crate::pipeline::concepts::get_course_knowledge(db, course_id)
+        .await
+        .ok()?;
     knowledge.generated_at?;
     let lines: Vec<String> = knowledge
         .groups
         .iter()
         .map(|group| {
-            let names: Vec<&str> = group.concepts.iter().take(8).map(|c| c.name.as_str()).collect();
+            let names: Vec<&str> = group
+                .concepts
+                .iter()
+                .take(8)
+                .map(|c| c.name.as_str())
+                .collect();
             format!("- {}：{}", group.title, names.join("、"))
         })
         .collect();
@@ -902,23 +1043,43 @@ pub async fn generate_review_book(
     let material = load_material(db, course_id).await?;
     let sections = split_sections(&material.notes);
     if sections.is_empty() {
-        return Err(AppError::Pipeline("这门课还没有可用的笔记：先在视频里生成笔记，再来生成复习资料".into()));
+        return Err(AppError::Pipeline(
+            "这门课还没有可用的笔记：先在视频里生成笔记，再来生成复习资料".into(),
+        ));
     }
     let existing = load_outline(db, course_id).await?;
-    let fingerprints_now = existing.as_ref().and_then(|(_, outline, _)| current_fingerprints(outline, &sections));
+    let fingerprints_now = existing
+        .as_ref()
+        .and_then(|(_, outline, _)| current_fingerprints(outline, &sections));
     let (outline, fingerprints) = match (existing, fingerprints_now) {
         (Some((_, outline, _)), Some(fingerprints)) => (outline, fingerprints),
         _ => {
             on_progress(ReviewProgress::Outline);
             let hint = topics_hint(db, course_id).await;
-            let request = outline_request(model, &material.course_name, &outline_digest(&sections), hint.as_deref());
+            let request = outline_request(
+                model,
+                &material.course_name,
+                &outline_digest(&sections),
+                hint.as_deref(),
+            );
             if cancel.load(Ordering::SeqCst) {
-                return Ok(ReviewOutcome { canceled: true, ..Default::default() });
+                return Ok(ReviewOutcome {
+                    canceled: true,
+                    ..Default::default()
+                });
             }
-            let draft: OutlineDraft =
-                crate::pipeline::ai::complete_parsed(provider, &request, crate::pipeline::ai::parse_lenient_json).await?;
+            let draft: OutlineDraft = crate::pipeline::ai::complete_parsed(
+                provider,
+                &request,
+                crate::pipeline::ai::parse_lenient_json,
+            )
+            .await?;
             let (title, outline) = validate_outline(draft, &sections)?;
-            let title = if title.is_empty() { format!("《{}》复习资料", material.course_name) } else { title };
+            let title = if title.is_empty() {
+                format!("《{}》复习资料", material.course_name)
+            } else {
+                title
+            };
             let fingerprints = current_fingerprints(&outline, &sections)
                 .ok_or_else(|| AppError::Pipeline("目录校验后仍有小节没分进章节".into()))?;
             let old = load_chapters(db, course_id).await?;
@@ -932,7 +1093,11 @@ pub async fn generate_review_book(
         .filter(|&idx| {
             let row = rows.iter().find(|r| r.idx == idx as i64);
             rewrite == Some(idx)
-                || row.is_none_or(|r| r.content_md.is_none() || r.error.is_some() || r.fingerprint != fingerprints[idx])
+                || row.is_none_or(|r| {
+                    r.content_md.is_none()
+                        || r.error.is_some()
+                        || r.fingerprint != fingerprints[idx]
+                })
         })
         .collect();
     let total = pending.len();
@@ -1012,7 +1177,11 @@ mod tests {
     use super::*;
 
     fn note(id: &str, title: &str, md: &str) -> VideoNote {
-        VideoNote { video_id: id.into(), title: title.into(), markdown: md.into() }
+        VideoNote {
+            video_id: id.into(),
+            title: title.into(),
+            markdown: md.into(),
+        }
     }
 
     #[test]
@@ -1026,8 +1195,15 @@ mod tests {
         assert_eq!(ids, ["N001", "N002", "N003", "N004"]);
         assert_eq!(sections[0].heading, "第一讲", "标题前的开场白用视频名");
         assert_eq!(sections[1].heading, "梯度下降");
-        assert!(sections[1].body.contains("[N002 12:30]"), "{}", sections[1].body);
-        assert_eq!((sections[1].start_ms, sections[1].end_ms), (Some(750_000), Some(785_000)));
+        assert!(
+            sections[1].body.contains("[N002 12:30]"),
+            "{}",
+            sections[1].body
+        );
+        assert_eq!(
+            (sections[1].start_ms, sections[1].end_ms),
+            (Some(750_000), Some(785_000))
+        );
         assert_eq!(sections[2].start_ms, None, "速查表没有时间");
         assert_eq!(sections[3].start_ms, Some(3_723_000));
     }
@@ -1046,7 +1222,11 @@ mod tests {
             chapter_fingerprint(&[&after[1]]),
             "正文变了，指纹变"
         );
-        assert_eq!(chapter_fingerprint(&[&before[1]]), chapter_fingerprint(&[&after[2]]), "没改的节指纹不变");
+        assert_eq!(
+            chapter_fingerprint(&[&before[1]]),
+            chapter_fingerprint(&[&after[2]]),
+            "没改的节指纹不变"
+        );
     }
 
     #[test]
@@ -1058,15 +1238,30 @@ mod tests {
         let draft = OutlineDraft {
             title: "复习".into(),
             chapters: vec![
-                OutlineDraftChapter { title: "主题甲".into(), intro: "".into(), sections: vec!["N003".into(), "N001".into(), "N999".into()] },
-                OutlineDraftChapter { title: "空章".into(), intro: "".into(), sections: vec!["N001".into()] },
+                OutlineDraftChapter {
+                    title: "主题甲".into(),
+                    intro: "".into(),
+                    sections: vec!["N003".into(), "N001".into(), "N999".into()],
+                },
+                OutlineDraftChapter {
+                    title: "空章".into(),
+                    intro: "".into(),
+                    sections: vec!["N001".into()],
+                },
             ],
         };
         let (title, outline) = validate_outline(draft, &sections).unwrap();
         assert_eq!(title, "复习");
         assert_eq!(outline.len(), 2, "重复编号的空章被丢掉，补充章接在后面");
         // B（N002）漏了：挂到同视频相邻小节所在的章，并排回课程顺序。
-        assert_eq!(outline[0].sections, vec![sections[0].key.clone(), sections[1].key.clone(), sections[2].key.clone()]);
+        assert_eq!(
+            outline[0].sections,
+            vec![
+                sections[0].key.clone(),
+                sections[1].key.clone(),
+                sections[2].key.clone()
+            ]
+        );
         // D（N004）所在视频没有任何小节被分到：进「补充内容」。
         assert_eq!(outline[1].title, LEFTOVER_CHAPTER);
         assert_eq!(outline[1].sections, vec![sections[3].key.clone()]);
@@ -1074,7 +1269,10 @@ mod tests {
 
     #[test]
     fn normalizes_sources_and_removes_made_up_ones() {
-        let sections = split_sections(&[note("v1", "一", "## A\nx [12:30]\ny [13:00]"), note("v2", "二", "## B\nno time")]);
+        let sections = split_sections(&[
+            note("v1", "一", "## A\nx [12:30]\ny [13:00]"),
+            note("v2", "二", "## B\nno time"),
+        ]);
         let lookup: HashMap<&str, &Section> = sections.iter().map(|s| (s.id.as_str(), s)).collect();
         let md = "沿负梯度走 [N001 12:30]。震荡 [N001，12:40]。编的 [N099 01:00]。\
                   时间离谱 [N001 59:00]。没时间 [N002]。只有时间 [12:30]。多个 [N001 12:30; N002]。\
@@ -1099,21 +1297,37 @@ mod tests {
             ]}]}]}
         ]});
         let md = note_markdown(Some("AI 原稿"), Some(&doc.to_string()), true).unwrap();
-        assert_eq!(md, "## 梯度下降\n\n- 沿负梯度走 **关键**[12:30]\\(x_{t+1}\\)");
-        assert_eq!(note_markdown(Some("AI 原稿"), Some(&doc.to_string()), false).unwrap(), "AI 原稿");
+        assert_eq!(
+            md,
+            "## 梯度下降\n\n- 沿负梯度走 **关键**[12:30]\\(x_{t+1}\\)"
+        );
+        assert_eq!(
+            note_markdown(Some("AI 原稿"), Some(&doc.to_string()), false).unwrap(),
+            "AI 原稿"
+        );
         assert_eq!(note_markdown(Some("  "), None, false), None);
     }
 
     #[test]
     fn strips_fences_and_a_self_written_chapter_title() {
-        assert_eq!(clean_chapter_markdown("```markdown\n# 第一章\n## 学习目标\n- 能\n```"), "## 学习目标\n- 能");
-        assert_eq!(clean_chapter_markdown("## 学习目标\n- 能"), "## 学习目标\n- 能");
+        assert_eq!(
+            clean_chapter_markdown("```markdown\n# 第一章\n## 学习目标\n- 能\n```"),
+            "## 学习目标\n- 能"
+        );
+        assert_eq!(
+            clean_chapter_markdown("## 学习目标\n- 能"),
+            "## 学习目标\n- 能"
+        );
     }
 
     async fn seed_course(db: &Db) -> String {
         sqlx::query("INSERT INTO courses(id,name,root_path,created_at,updated_at) VALUES ('c1','机器学习','/tmp',0,0)").execute(&db.pool).await.unwrap();
         for (i, (vid, title, md)) in [
-            ("v1", "第一讲", "## 梯度下降\n- 沿负梯度走 [12:30]\n## 学习率\n- 太大会震荡 [13:00]"),
+            (
+                "v1",
+                "第一讲",
+                "## 梯度下降\n- 沿负梯度走 [12:30]\n## 学习率\n- 太大会震荡 [13:00]",
+            ),
             ("v2", "第二讲", "## 正则化\n- L2 防过拟合 [02:00]"),
             ("v3", "第三讲", ""),
         ]
@@ -1127,14 +1341,22 @@ mod tests {
                 .bind(vid).bind("c1").bind(title).bind(format!("/tmp/{vid}.mp4")).bind(i as i64)
                 .execute(&db.pool).await.unwrap();
             if !md.is_empty() {
-                sqlx::query("INSERT INTO notes(video_id,content_md) VALUES (?,?)").bind(vid).bind(md).execute(&db.pool).await.unwrap();
+                sqlx::query("INSERT INTO notes(video_id,content_md) VALUES (?,?)")
+                    .bind(vid)
+                    .bind(md)
+                    .execute(&db.pool)
+                    .await
+                    .unwrap();
             }
         }
         "c1".into()
     }
 
     fn reply(content: &str) -> crate::llm::ChatResponse {
-        crate::llm::ChatResponse { content: content.into(), ..Default::default() }
+        crate::llm::ChatResponse {
+            content: content.into(),
+            ..Default::default()
+        }
     }
 
     const OUTLINE: &str = r#"{"title":"机器学习复习","chapters":[
@@ -1143,7 +1365,9 @@ mod tests {
 
     #[tokio::test]
     async fn generates_outline_and_chapters_then_only_rewrites_what_changed() {
-        let db = Db::connect_and_migrate(&crate::db::test_db_path("review-book")).await.unwrap();
+        let db = Db::connect_and_migrate(&crate::db::test_db_path("review-book"))
+            .await
+            .unwrap();
         let course = seed_course(&db).await;
         let provider = Provider::Scripted {
             steps: std::sync::Mutex::new(vec![
@@ -1154,10 +1378,15 @@ mod tests {
         };
         let cancel = AtomicBool::new(false);
         let mut events = Vec::new();
-        let outcome = generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |p| events.push(p))
-            .await
-            .unwrap();
-        assert_eq!((outcome.written, outcome.failed, outcome.canceled), (2, 0, false));
+        let outcome = generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |p| {
+            events.push(p)
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            (outcome.written, outcome.failed, outcome.canceled),
+            (2, 0, false)
+        );
 
         let book = get_review_book(&db, &course).await.unwrap();
         assert_eq!(book.title.as_deref(), Some("机器学习复习"));
@@ -1165,7 +1394,11 @@ mod tests {
         assert_eq!(book.chapters.len(), 2);
         assert!(!book.outline_stale);
         // 两章是并发写的，谁先拿到哪条剧本不一定；按内容找。
-        let all: String = book.chapters.iter().filter_map(|c| c.content_md.clone()).collect();
+        let all: String = book
+            .chapters
+            .iter()
+            .filter_map(|c| c.content_md.clone())
+            .collect();
         assert!(!all.contains("N777"), "编的出处被去掉：{all}");
         assert!(book.chapters.iter().all(|c| !c.stale && c.error.is_none()));
         assert_eq!(book.chapters[0].sources["N001"].video_id, "v1");
@@ -1178,59 +1411,101 @@ mod tests {
             .unwrap();
         let book = get_review_book(&db, &course).await.unwrap();
         assert!(!book.outline_stale);
-        assert_eq!(book.chapters.iter().map(|c| c.stale).collect::<Vec<_>>(), [false, true]);
+        assert_eq!(
+            book.chapters.iter().map(|c| c.stale).collect::<Vec<_>>(),
+            [false, true]
+        );
 
         let provider = Provider::Scripted {
             steps: std::sync::Mutex::new(vec![reply("## 学习目标\n- 能区分 L1 L2 [N003 02:00]")]),
         };
-        let outcome = generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {}).await.unwrap();
+        let outcome =
+            generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {})
+                .await
+                .unwrap();
         assert_eq!(outcome.written, 1, "只重写素材变了的那章");
         let book = get_review_book(&db, &course).await.unwrap();
-        assert!(book.chapters[1].content_md.as_deref().unwrap().contains("L1 L2"));
+        assert!(book.chapters[1]
+            .content_md
+            .as_deref()
+            .unwrap()
+            .contains("L1 L2"));
         assert!(book.chapters.iter().all(|c| !c.stale));
     }
 
     #[tokio::test]
     async fn a_failed_chapter_keeps_the_others_and_is_retried_alone() {
-        let db = Db::connect_and_migrate(&crate::db::test_db_path("review-book-fail")).await.unwrap();
+        let db = Db::connect_and_migrate(&crate::db::test_db_path("review-book-fail"))
+            .await
+            .unwrap();
         let course = seed_course(&db).await;
-        let cut = crate::llm::ChatResponse { content: "## 学习目标\n- 写到一半".into(), truncated: true, ..Default::default() };
+        let cut = crate::llm::ChatResponse {
+            content: "## 学习目标\n- 写到一半".into(),
+            truncated: true,
+            ..Default::default()
+        };
         let provider = Provider::Scripted {
             steps: std::sync::Mutex::new(vec![reply(OUTLINE), cut.clone(), cut]),
         };
         let cancel = AtomicBool::new(false);
-        let outcome = generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {}).await.unwrap();
+        let outcome =
+            generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {})
+                .await
+                .unwrap();
         assert_eq!((outcome.written, outcome.failed), (0, 2));
         let book = get_review_book(&db, &course).await.unwrap();
         assert!(book.chapters.iter().all(|c| c.content_md.is_none()));
-        assert!(book.chapters[0].error.as_deref().unwrap().contains("单次输出上限"));
+        assert!(book.chapters[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("单次输出上限"));
 
         // 重试：目录不重排（剧本里没有目录那一步），两章各写一次。
         let provider = Provider::Scripted {
-            steps: std::sync::Mutex::new(vec![reply("## 学习目标\n- 甲"), reply("## 学习目标\n- 乙")]),
+            steps: std::sync::Mutex::new(vec![
+                reply("## 学习目标\n- 甲"),
+                reply("## 学习目标\n- 乙"),
+            ]),
         };
-        let outcome = generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {}).await.unwrap();
+        let outcome =
+            generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {})
+                .await
+                .unwrap();
         assert_eq!((outcome.written, outcome.failed), (2, 0));
         let book = get_review_book(&db, &course).await.unwrap();
-        assert!(book.chapters.iter().all(|c| c.content_md.is_some() && c.error.is_none()));
+        assert!(book
+            .chapters
+            .iter()
+            .all(|c| c.content_md.is_some() && c.error.is_none()));
     }
 
     #[tokio::test]
     async fn new_sections_trigger_a_new_outline_but_unchanged_chapters_are_carried_over() {
-        let db = Db::connect_and_migrate(&crate::db::test_db_path("review-book-reoutline")).await.unwrap();
+        let db = Db::connect_and_migrate(&crate::db::test_db_path("review-book-reoutline"))
+            .await
+            .unwrap();
         let course = seed_course(&db).await;
         let cancel = AtomicBool::new(false);
         let provider = Provider::Scripted {
-            steps: std::sync::Mutex::new(vec![reply(OUTLINE), reply("## 学习目标\n- 甲"), reply("## 学习目标\n- 乙")]),
+            steps: std::sync::Mutex::new(vec![
+                reply(OUTLINE),
+                reply("## 学习目标\n- 甲"),
+                reply("## 学习目标\n- 乙"),
+            ]),
         };
-        generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {}).await.unwrap();
+        generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {})
+            .await
+            .unwrap();
         let before = get_review_book(&db, &course).await.unwrap();
 
         // 第三讲补上了笔记：多了一节，目录要重排。
-        sqlx::query("INSERT INTO notes(video_id,content_md) VALUES ('v3','## 交叉验证\n- K 折 [05:00]')")
-            .execute(&db.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO notes(video_id,content_md) VALUES ('v3','## 交叉验证\n- K 折 [05:00]')",
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
         assert!(get_review_book(&db, &course).await.unwrap().outline_stale);
 
         // 新目录：前两章原样，交叉验证并进「泛化」。只有「泛化」要重写。
@@ -1238,13 +1513,26 @@ mod tests {
             {"title":"优化","intro":"怎么把损失降下来","sections":["N001","N002"]},
             {"title":"泛化","intro":"","sections":["N003","N004"]}]}"#;
         let provider = Provider::Scripted {
-            steps: std::sync::Mutex::new(vec![reply(outline), reply("## 学习目标\n- 乙加交叉验证 [N004 05:00]")]),
+            steps: std::sync::Mutex::new(vec![
+                reply(outline),
+                reply("## 学习目标\n- 乙加交叉验证 [N004 05:00]"),
+            ]),
         };
-        let outcome = generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {}).await.unwrap();
+        let outcome =
+            generate_review_book(&db, &provider, "m", &course, None, &cancel, &mut |_| {})
+                .await
+                .unwrap();
         assert_eq!(outcome.written, 1);
         let after = get_review_book(&db, &course).await.unwrap();
-        assert_eq!(after.chapters[0].content_md, before.chapters[0].content_md, "「优化」原样带过来");
-        assert!(after.chapters[1].content_md.as_deref().unwrap().contains("交叉验证"));
+        assert_eq!(
+            after.chapters[0].content_md, before.chapters[0].content_md,
+            "「优化」原样带过来"
+        );
+        assert!(after.chapters[1]
+            .content_md
+            .as_deref()
+            .unwrap()
+            .contains("交叉验证"));
         assert_eq!(after.chapters[1].sources["N004"].video_id, "v3");
         assert!(!after.outline_stale);
     }

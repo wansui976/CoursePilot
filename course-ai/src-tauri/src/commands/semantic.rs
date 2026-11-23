@@ -2,7 +2,9 @@
 
 use crate::commands::courses::AppState;
 use crate::commands::settings::{get_setting, set_setting};
-use crate::commands::whisper::{app_data, download_client, download_files, DownloadEvent, DOWNLOAD_STALL_TIMEOUT};
+use crate::commands::whisper::{
+    app_data, download_client, download_files, DownloadEvent, DOWNLOAD_STALL_TIMEOUT,
+};
 use crate::error::{AppError, AppResult};
 use crate::pipeline::model_store;
 use crate::pipeline::semantic::{self, IndexProgress, Purpose};
@@ -39,7 +41,10 @@ pub struct SemanticStatus {
 }
 
 #[tauri::command]
-pub async fn cmd_semantic_status(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<SemanticStatus> {
+pub async fn cmd_semantic_status(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<SemanticStatus> {
     let db = &state.db;
     let root = model_store::models_root(db, &app_data(&app)?).await?;
     let models = semantic::LOCAL_MODELS
@@ -55,7 +60,9 @@ pub async fn cmd_semantic_status(app: tauri::AppHandle, state: State<'_, AppStat
         .collect();
     let (indexed, total) = semantic::index_counts(db).await?;
     Ok(SemanticStatus {
-        backend: get_setting(db, semantic::SETTING_BACKEND).await?.unwrap_or_else(|| "off".into()),
+        backend: get_setting(db, semantic::SETTING_BACKEND)
+            .await?
+            .unwrap_or_else(|| "off".into()),
         local_supported: semantic::LOCAL_SUPPORTED,
         local_model: get_setting(db, semantic::SETTING_LOCAL_MODEL).await?,
         cloud_profile: get_setting(db, semantic::SETTING_CLOUD_PROFILE).await?,
@@ -82,19 +89,40 @@ pub async fn cmd_semantic_save(
         return Err(AppError::Config(format!("未知的语义检索来源：{backend}")));
     }
     if backend == "local" && !semantic::LOCAL_SUPPORTED {
-        return Err(AppError::Config("这台设备不能跑本地嵌入模型，请改用云端接口".into()));
+        return Err(AppError::Config(
+            "这台设备不能跑本地嵌入模型，请改用云端接口".into(),
+        ));
     }
     if let Some(id) = local_model.as_deref().filter(|id| !id.is_empty()) {
         if semantic::local_model(id).is_none() {
             return Err(AppError::Config(format!("未知的本地嵌入模型：{id}")));
         }
     }
-    let before = semantic::current_embedder(db).await?.map(|embedder| embedder.id());
+    let before = semantic::current_embedder(db)
+        .await?
+        .map(|embedder| embedder.id());
     set_setting(db, semantic::SETTING_BACKEND, &backend).await?;
-    set_setting(db, semantic::SETTING_LOCAL_MODEL, local_model.as_deref().unwrap_or("")).await?;
-    set_setting(db, semantic::SETTING_CLOUD_PROFILE, cloud_profile.as_deref().unwrap_or("").trim()).await?;
-    set_setting(db, semantic::SETTING_CLOUD_MODEL, cloud_model.as_deref().unwrap_or("").trim()).await?;
-    let after = semantic::current_embedder(db).await?.map(|embedder| embedder.id());
+    set_setting(
+        db,
+        semantic::SETTING_LOCAL_MODEL,
+        local_model.as_deref().unwrap_or(""),
+    )
+    .await?;
+    set_setting(
+        db,
+        semantic::SETTING_CLOUD_PROFILE,
+        cloud_profile.as_deref().unwrap_or("").trim(),
+    )
+    .await?;
+    set_setting(
+        db,
+        semantic::SETTING_CLOUD_MODEL,
+        cloud_model.as_deref().unwrap_or("").trim(),
+    )
+    .await?;
+    let after = semantic::current_embedder(db)
+        .await?
+        .map(|embedder| embedder.id());
     if before != after {
         semantic::restart();
     }
@@ -112,16 +140,35 @@ pub async fn cmd_semantic_download_model(
     if !semantic::LOCAL_SUPPORTED {
         return Err(AppError::Config("这台设备不能跑本地嵌入模型".into()));
     }
-    let model = semantic::local_model(&id).ok_or_else(|| AppError::Config(format!("未知的本地嵌入模型：{id}")))?;
+    let model = semantic::local_model(&id)
+        .ok_or_else(|| AppError::Config(format!("未知的本地嵌入模型：{id}")))?;
     let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
     let missing = semantic::missing_files(&root, model);
     let total: u64 = missing.iter().map(|(_, file)| file.size).sum();
-    let _keep_alive = crate::keep_alive::hold(crate::keep_alive::Kind::ModelDownload, model.id, model.display_name);
+    let _keep_alive = crate::keep_alive::hold(
+        crate::keep_alive::Kind::ModelDownload,
+        model.id,
+        model.display_name,
+    );
     let emit = |received: u64, done: bool, error: Option<String>| {
-        app.emit(DOWNLOAD_EVENT, DownloadEvent { id: model.id.into(), received, total, done, error }).ok();
+        app.emit(
+            DOWNLOAD_EVENT,
+            DownloadEvent {
+                id: model.id.into(),
+                received,
+                total,
+                done,
+                error,
+            },
+        )
+        .ok();
     };
     let client = download_client(DOWNLOAD_STALL_TIMEOUT)?;
-    if let Err(error) = download_files(&client, model.display_name, missing, |received| emit(received, false, None)).await {
+    if let Err(error) = download_files(&client, model.display_name, missing, |received| {
+        emit(received, false, None)
+    })
+    .await
+    {
         emit(0, true, Some(error.to_string()));
         return Err(error);
     }
@@ -132,8 +179,13 @@ pub async fn cmd_semantic_download_model(
 }
 
 #[tauri::command]
-pub async fn cmd_semantic_delete_model(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> AppResult<()> {
-    let model = semantic::local_model(&id).ok_or_else(|| AppError::Config(format!("未知的本地嵌入模型：{id}")))?;
+pub async fn cmd_semantic_delete_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    let model = semantic::local_model(&id)
+        .ok_or_else(|| AppError::Config(format!("未知的本地嵌入模型：{id}")))?;
     semantic::stop_local_server().await;
     let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
     let dir = root.join("embed").join(model.dir);
@@ -159,7 +211,13 @@ pub async fn cmd_semantic_test(state: State<'_, AppState>) -> AppResult<Semantic
         .await?
         .ok_or_else(|| AppError::Config("语义检索还没设置好".into()))?;
     let started = std::time::Instant::now();
-    let vectors = semantic::embed(&state.db, &embedder, &["梯度下降的学习率".to_string()], Purpose::Query).await?;
+    let vectors = semantic::embed(
+        &state.db,
+        &embedder,
+        &["梯度下降的学习率".to_string()],
+        Purpose::Query,
+    )
+    .await?;
     Ok(SemanticTest {
         dimensions: vectors.first().map(Vec::len).unwrap_or(0),
         millis: started.elapsed().as_millis() as u64,

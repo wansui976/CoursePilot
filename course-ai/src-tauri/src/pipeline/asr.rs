@@ -279,7 +279,11 @@ pub fn parse_whisper_json(input: &str) -> AppResult<WhisperJson> {
 /// 本地模型认普通话有时吐繁体字（训练语料里两种都有），而云端识别给的、界面用的都是简体，
 /// 同一门课换个识别方式字形就变了。选了中文、或自动检测出中文时转成简体；粤语不转，
 /// 粤语字幕通常就写繁体。
-pub(crate) fn simplify_mandarin(json: &mut WhisperJson, requested: Option<&str>, detected: Option<&str>) {
+pub(crate) fn simplify_mandarin(
+    json: &mut WhisperJson,
+    requested: Option<&str>,
+    detected: Option<&str>,
+) {
     let mandarin = match requested.map(str::trim) {
         Some("zh") => true,
         None | Some("") | Some("auto") => detected == Some("zh"),
@@ -670,5 +674,4 @@ mod tests {
                 .unwrap();
         assert_eq!(backups, 0);
     }
-
 }

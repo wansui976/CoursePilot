@@ -46,11 +46,11 @@ use crate::commands::courses::AppState;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
 use crate::jobs::{self, emit_update, JobEvent};
+use serde::Serialize;
+use sqlx::FromRow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
-use serde::Serialize;
-use sqlx::FromRow;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,7 +161,11 @@ pub(crate) const DEFAULT_LOCAL_MODEL: &str = "sensevoice";
 ///
 /// 设置里可能还存着已经不支持的 Whisper 模型（tiny、base…），找不到就当没选，同样退到已装的模型。
 /// `models_root` 是模型存放目录（用户可以换到别的盘）。
-fn select_local_model(models_root: &Path, preferred_id: &str, language: &str) -> Option<LocalModel> {
+fn select_local_model(
+    models_root: &Path,
+    preferred_id: &str,
+    language: &str,
+) -> Option<LocalModel> {
     // 手机上看内存：装好了、认得语言，还得放得下——否则 iOS 直接把应用杀掉（闪退）。
     let available_mb = local_asr::available_memory_mb();
     let usable = |model: &'static local_asr::SherpaModel| {
@@ -217,7 +221,16 @@ async fn run_local_model(
                 .map_err(|_| AppError::Pipeline("本地识别队列已关闭".into()))?
         }
     };
-    run_local_model_now(models_root, model, audio, language, hotwords, use_gpu, progress).await
+    run_local_model_now(
+        models_root,
+        model,
+        audio,
+        language,
+        hotwords,
+        use_gpu,
+        progress,
+    )
+    .await
 }
 
 /// 不排队，直接识别（调用方已经拿到名额，或者确定不会和别的识别抢资源）。
@@ -265,10 +278,12 @@ fn whisper_language_or_default(value: Option<String>) -> String {
 }
 
 async fn setting(db: &crate::db::Db, key: &str) -> AppResult<Option<String>> {
-    Ok(sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key=?")
-        .bind(key)
-        .fetch_optional(&db.pool)
-        .await?)
+    Ok(
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key=?")
+            .bind(key)
+            .fetch_optional(&db.pool)
+            .await?,
+    )
 }
 
 /// 识别一小段录音（费曼复述：用户对着麦克风讲的一两分钟），返回整段文字。
@@ -286,13 +301,21 @@ pub async fn transcribe_clip(
     let backend = asr_backend_or_default(setting(db, "asr_backend").await?);
     let mobile = matches!(std::env::consts::OS, "ios" | "android");
     // 手机上没有 ffmpeg：本地识别由原生桥把录音解成 WAV；云端引擎直接收录音本身（AAC / WebM）。
-    let (audio_path, audio_mime, audio_format, _temp) = if mobile && backend != AsrBackend::Whisper {
+    let (audio_path, audio_mime, audio_format, _temp) = if mobile && backend != AsrBackend::Whisper
+    {
         let format = if mime.contains("webm") { "webm" } else { "m4a" };
-        (input.to_path_buf(), mime.to_string(), format.to_string(), None)
+        (
+            input.to_path_buf(),
+            mime.to_string(),
+            format.to_string(),
+            None,
+        )
     } else {
         let purpose = match backend {
             AsrBackend::Whisper => audio::AudioPurpose::Whisper,
-            AsrBackend::Volcengine => audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Volcengine),
+            AsrBackend::Volcengine => {
+                audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Volcengine)
+            }
             AsrBackend::Aliyun => audio::AudioPurpose::CloudAsr(audio::CloudAsrProvider::Aliyun),
         };
         let prepared = audio::prepare_for_asr(app, input, work_dir, purpose).await?;
@@ -306,13 +329,20 @@ pub async fn transcribe_clip(
             let model_id = setting(db, "whisper_model")
                 .await?
                 .unwrap_or_else(|| DEFAULT_LOCAL_MODEL.into());
-            let app_data = app.path().app_data_dir().map_err(|e| AppError::Config(format!("app_data_dir: {e}")))?;
+            let app_data = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| AppError::Config(format!("app_data_dir: {e}")))?;
             let app_data = model_store::models_root(db, &app_data).await?;
             let lang = whisper_language_or_default(setting(db, "asr_language").await?);
             let model = select_local_model(&app_data, &model_id, &lang).ok_or_else(|| {
                 AppError::Config("还没有可用的本地识别模型（设置 → 语音识别 下载一个）".into())
             })?;
-            let hotwords = split_terms(&setting(db, "volcengine_asr_hotwords").await?.unwrap_or_default());
+            let hotwords = split_terms(
+                &setting(db, "volcengine_asr_hotwords")
+                    .await?
+                    .unwrap_or_default(),
+            );
             let use_gpu = asr_use_gpu(db).await;
             // 有视频正在本地识别时，一两分钟的录音不排在整节课后面干等：装了 SenseVoice 就用它
             // 马上转——它跑在 CPU 上、几秒钟，不去抢正在识别的显卡；没装才排队。
@@ -323,20 +353,49 @@ pub async fn transcribe_clip(
                 .filter(|m| matches!(m, LocalModel::Sherpa(s) if s.kind == local_asr::SherpaKind::SenseVoice));
             match quick {
                 Some(quick) => {
-                    run_local_model_now(&app_data, &quick, &audio_path, &lang, &hotwords, false, None).await?
+                    run_local_model_now(
+                        &app_data,
+                        &quick,
+                        &audio_path,
+                        &lang,
+                        &hotwords,
+                        false,
+                        None,
+                    )
+                    .await?
                 }
                 None => {
-                    run_local_model(&app_data, &model, &audio_path, &lang, &hotwords, use_gpu, None, None)
-                        .await?
+                    run_local_model(
+                        &app_data,
+                        &model,
+                        &audio_path,
+                        &lang,
+                        &hotwords,
+                        use_gpu,
+                        None,
+                        None,
+                    )
+                    .await?
                 }
             }
         }
         AsrBackend::Volcengine => {
-            let app_id = setting(db, "volcengine_asr_app_id").await?.unwrap_or_default();
-            let token = crate::llm::keychain::get_secret_or_legacy(db, "volcengine_asr_access_token")
+            let app_id = setting(db, "volcengine_asr_app_id")
                 .await?
                 .unwrap_or_default();
-            volcengine_auc::run_volcengine_file(&audio_path, &app_id, &token, None, &audio_format, None).await?
+            let token =
+                crate::llm::keychain::get_secret_or_legacy(db, "volcengine_asr_access_token")
+                    .await?
+                    .unwrap_or_default();
+            volcengine_auc::run_volcengine_file(
+                &audio_path,
+                &app_id,
+                &token,
+                None,
+                &audio_format,
+                None,
+            )
+            .await?
         }
         AsrBackend::Aliyun => {
             let api_key = crate::llm::keychain::get_secret_or_legacy(db, "dashscope_api_key")
@@ -346,7 +405,15 @@ pub async fn transcribe_clip(
                 .await?
                 .unwrap_or_else(|| aliyun_asr::DEFAULT_MODEL.to_string());
             let language = setting(db, "asr_language").await?;
-            aliyun_asr::run_aliyun(&audio_path, &audio_mime, &api_key, &model, language.as_deref(), None).await?
+            aliyun_asr::run_aliyun(
+                &audio_path,
+                &audio_mime,
+                &api_key,
+                &model,
+                language.as_deref(),
+                None,
+            )
+            .await?
         }
     };
     Ok(json
@@ -835,7 +902,11 @@ async fn run_all(
                 }
             };
             // 用户的热词表（和火山引擎共用一份）：只有 Qwen3-ASR 用得上。
-            let hotwords = split_terms(&setting(&db, "volcengine_asr_hotwords").await?.unwrap_or_default());
+            let hotwords = split_terms(
+                &setting(&db, "volcengine_asr_hotwords")
+                    .await?
+                    .unwrap_or_default(),
+            );
             let use_gpu = asr_use_gpu(&db).await;
             let on_wait = {
                 let app = app.clone();
@@ -1050,7 +1121,8 @@ async fn run_all(
             let provider = if over_budget {
                 None
             } else {
-                crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction).await?
+                crate::commands::ai::provider_for_db(&db, crate::llm::profiles::AiTask::Correction)
+                    .await?
             };
             let final_message = match provider {
                 Some((provider, model)) => {
@@ -1082,7 +1154,9 @@ async fn run_all(
                         }
                     }
                 }
-                None if over_budget => asr_done_message(count, TranscriptCorrectionOutcome::OverBudget),
+                None if over_budget => {
+                    asr_done_message(count, TranscriptCorrectionOutcome::OverBudget)
+                }
                 None => asr_done_message(count, TranscriptCorrectionOutcome::NoProvider),
             };
             jobs::update_progress(&db, &asr_job.id, 1.0, Some(&final_message)).await?;
@@ -1667,7 +1741,13 @@ async fn auto_ai_disabled_stages(db: &crate::db::Db) -> HashSet<String> {
         .ok()
         .flatten()
         .and_then(|raw| serde_json::from_str::<HashMap<String, bool>>(&raw).ok())
-        .map(|flags| flags.into_iter().filter(|(_, on)| !on).map(|(stage, _)| stage).collect())
+        .map(|flags| {
+            flags
+                .into_iter()
+                .filter(|(_, on)| !on)
+                .map(|(stage, _)| stage)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -1700,7 +1780,15 @@ async fn run_ai_followups(
         // 视频照常算处理完；以后打开开关再处理，或在面板里点生成都还能补上。
         if disabled_stages.contains(stage) {
             let _ = jobs::cancel(db, &job.id, AUTO_AI_OFF_MESSAGE).await;
-            emit_stage(app, video_id, &job.id, stage, "canceled", 0.0, Some(AUTO_AI_OFF_MESSAGE));
+            emit_stage(
+                app,
+                video_id,
+                &job.id,
+                stage,
+                "canceled",
+                0.0,
+                Some(AUTO_AI_OFF_MESSAGE),
+            );
             continue;
         }
         if halted_dependency_profile.is_some() {
@@ -2391,7 +2479,10 @@ mod tests {
         let waiter = tokio::spawn(async move {
             let mut ticket = gate.join();
             ticket
-                .admit(|| async { 1 }, move |ahead, limit| seen.lock().unwrap().push((ahead, limit)))
+                .admit(
+                    || async { 1 },
+                    move |ahead, limit| seen.lock().unwrap().push((ahead, limit)),
+                )
                 .await;
             ticket
         });
@@ -2435,7 +2526,11 @@ mod tests {
             slides_abort,
         })
         .await;
-        assert!(started.elapsed() < STOP_GRACE * 3, "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < STOP_GRACE * 3,
+            "{:?}",
+            started.elapsed()
+        );
         // 被中止的任务会把自己的局部变量丢掉：守卫的 Drop 证明支线确实停了。
         for _ in 0..50 {
             if dropped.load(Ordering::SeqCst) {
@@ -2452,17 +2547,26 @@ mod tests {
         let db = crate::db::Db::connect_and_migrate(&dir.path().join("test.db"))
             .await
             .unwrap();
-        assert!(auto_ai_disabled_stages(&db).await.is_empty(), "没设置过：全部自动生成");
+        assert!(
+            auto_ai_disabled_stages(&db).await.is_empty(),
+            "没设置过：全部自动生成"
+        );
 
-        crate::commands::settings::set_setting(&db, AUTO_AI_TASKS_KEY, r#"{"quiz":false,"mindmap":false,"notes":true}"#)
-            .await
-            .unwrap();
+        crate::commands::settings::set_setting(
+            &db,
+            AUTO_AI_TASKS_KEY,
+            r#"{"quiz":false,"mindmap":false,"notes":true}"#,
+        )
+        .await
+        .unwrap();
         let off = auto_ai_disabled_stages(&db).await;
         assert_eq!(off.len(), 2);
         assert!(off.contains("quiz") && off.contains("mindmap"));
 
         // 存坏了不能把所有产物都关掉。
-        crate::commands::settings::set_setting(&db, AUTO_AI_TASKS_KEY, "not json").await.unwrap();
+        crate::commands::settings::set_setting(&db, AUTO_AI_TASKS_KEY, "not json")
+            .await
+            .unwrap();
         assert!(auto_ai_disabled_stages(&db).await.is_empty());
     }
 
@@ -2614,16 +2718,20 @@ mod tests {
         };
         set_finished(ids[0].clone(), 1_000).await;
         set_finished(ids[1].clone(), 2_000).await;
-        sqlx::query("UPDATE processing_jobs SET status='running' WHERE video_id=? AND stage='quiz'")
-            .bind(&ids[2])
-            .execute(&db.pool)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE processing_jobs SET status='failed' WHERE video_id=? AND stage='notes'")
-            .bind(&ids[3])
-            .execute(&db.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE processing_jobs SET status='running' WHERE video_id=? AND stage='quiz'",
+        )
+        .bind(&ids[2])
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE processing_jobs SET status='failed' WHERE video_id=? AND stage='notes'",
+        )
+        .bind(&ids[3])
+        .execute(&db.pool)
+        .await
+        .unwrap();
 
         let recent = list_recent_processed(&db, 5).await.unwrap();
         let got: Vec<&str> = recent.iter().map(|item| item.video.id.as_str()).collect();
@@ -2666,10 +2774,16 @@ mod tests {
         for file in model.files {
             let path = dir.join(file.path);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::File::create(&path).unwrap().set_len(file.size).unwrap();
+            std::fs::File::create(&path)
+                .unwrap()
+                .set_len(file.size)
+                .unwrap();
         }
         let vad = local_asr::vad_path(app_data);
-        std::fs::File::create(&vad).unwrap().set_len(local_asr::VAD.size).unwrap();
+        std::fs::File::create(&vad)
+            .unwrap()
+            .set_len(local_asr::VAD.size)
+            .unwrap();
     }
 
     #[test]
@@ -2679,13 +2793,20 @@ mod tests {
         install_sherpa(app, &local_asr::SENSE_VOICE);
         install_sherpa(app, &local_asr::QWEN3_ASR);
         // 1.7B 还没下载：退到同类的 0.6B，而不是清单里排第一的 SenseVoice。
-        assert!(matches!(select_local_model(app, "qwen3-asr-1.7b", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "qwen3-asr"));
+        assert!(
+            matches!(select_local_model(app, "qwen3-asr-1.7b", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "qwen3-asr")
+        );
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             install_sherpa(app, &local_asr::QWEN3_ASR_17B);
-            assert!(matches!(select_local_model(app, "qwen3-asr-1.7b", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "qwen3-asr-1.7b"));
+            assert!(
+                matches!(select_local_model(app, "qwen3-asr-1.7b", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "qwen3-asr-1.7b")
+            );
             // 两个 Qwen 各装各的目录，文件名也不同。
-            assert_ne!(local_asr::model_dir(app, &local_asr::QWEN3_ASR), local_asr::model_dir(app, &local_asr::QWEN3_ASR_17B));
+            assert_ne!(
+                local_asr::model_dir(app, &local_asr::QWEN3_ASR),
+                local_asr::model_dir(app, &local_asr::QWEN3_ASR_17B)
+            );
         }
     }
 
@@ -2696,12 +2817,18 @@ mod tests {
         install_sherpa(app, &local_asr::SENSE_VOICE);
 
         // 选中且装好、语言也认得：就用它。
-        assert!(matches!(select_local_model(app, "sensevoice", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
+        assert!(
+            matches!(select_local_model(app, "sensevoice", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice")
+        );
         // 选了没装的 Qwen3-ASR：退到装好的 SenseVoice。
-        assert!(matches!(select_local_model(app, "qwen3-asr", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
+        assert!(
+            matches!(select_local_model(app, "qwen3-asr", "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice")
+        );
         // 设置里还存着已经不支持的 Whisper 模型：当没选，用装好的模型，而不是报「没有可用模型」。
         for stale in ["tiny", "base", "large-v3-turbo"] {
-            assert!(matches!(select_local_model(app, stale, "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice"));
+            assert!(
+                matches!(select_local_model(app, stale, "zh"), Some(LocalModel::Sherpa(m)) if m.id == "sensevoice")
+            );
         }
         // SenseVoice 不认法语、又没装别的：没有能用的本地模型。
         assert!(select_local_model(app, "sensevoice", "fr").is_none());

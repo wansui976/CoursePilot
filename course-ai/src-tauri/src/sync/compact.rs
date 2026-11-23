@@ -65,7 +65,8 @@ pub fn manifest_name(upto: u64) -> String {
 /// 批次文件名 → 序号。只认 12 位数字的名字，清单、标记、临时文件都不算。
 pub fn batch_seq(name: &str) -> Option<u64> {
     let digits = name.strip_suffix(".json")?;
-    (digits.len() == 12 && digits.bytes().all(|byte| byte.is_ascii_digit())).then(|| digits.parse().ok())?
+    (digits.len() == 12 && digits.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| digits.parse().ok())?
 }
 
 fn manifest_upto(name: &str) -> Option<u64> {
@@ -97,7 +98,10 @@ impl Listing {
     }
 
     pub fn latest_manifest(&self) -> Option<(u64, &str)> {
-        self.manifests.iter().next_back().map(|(upto, name)| (*upto, name.as_str()))
+        self.manifests
+            .iter()
+            .next_back()
+            .map(|(upto, name)| (*upto, name.as_str()))
     }
 
     /// 网盘上已经用过的最大序号（批次删了，底稿清单还记着覆盖到哪）。
@@ -114,7 +118,9 @@ impl Listing {
 
     /// 已经折进底稿、可以删的东西：最新底稿覆盖到的批次、旧的清单。
     fn stale_files(&self) -> Vec<String> {
-        let Some((upto, _)) = self.latest_manifest() else { return Vec::new() };
+        let Some((upto, _)) = self.latest_manifest() else {
+            return Vec::new();
+        };
         let batches = self.batches.range(..=upto).map(|(_, name)| name.clone());
         let manifests = self.manifests.range(..upto).map(|(_, name)| name.clone());
         batches.chain(manifests).collect()
@@ -122,17 +128,34 @@ impl Listing {
 }
 
 pub async fn list(dav: &WebDav, device_dir: &str) -> AppResult<Listing> {
-    let entries = dav.list(&format!("{device_dir}batches/")).await?.unwrap_or_default();
+    let entries = dav
+        .list(&format!("{device_dir}batches/"))
+        .await?
+        .unwrap_or_default();
     Ok(Listing::parse(&entries))
 }
 
 /// 读一份底稿。某一份文件不见了（另一台设备正好在重新压缩）返回 None，下一轮重新列目录再读。
-pub async fn read_base(dav: &WebDav, device_dir: &str, manifest: &str) -> AppResult<Option<(Manifest, Vec<Vec<SyncEnvelope>>)>> {
-    let Some(bytes) = dav.get_optional(&format!("{device_dir}batches/{manifest}")).await? else { return Ok(None) };
+pub async fn read_base(
+    dav: &WebDav,
+    device_dir: &str,
+    manifest: &str,
+) -> AppResult<Option<(Manifest, Vec<Vec<SyncEnvelope>>)>> {
+    let Some(bytes) = dav
+        .get_optional(&format!("{device_dir}batches/{manifest}"))
+        .await?
+    else {
+        return Ok(None);
+    };
     let manifest: Manifest = serde_json::from_slice(&bytes)?;
     let mut parts = Vec::with_capacity(manifest.parts.len());
     for part in &manifest.parts {
-        let Some(bytes) = dav.get_optional(&format!("{device_dir}base/{part}")).await? else { return Ok(None) };
+        let Some(bytes) = dav
+            .get_optional(&format!("{device_dir}base/{part}"))
+            .await?
+        else {
+            return Ok(None);
+        };
         parts.push(serde_json::from_slice(&bytes)?);
     }
     Ok(Some((manifest, parts)))
@@ -142,7 +165,10 @@ pub async fn read_base(dav: &WebDav, device_dir: &str, manifest: &str) -> AppRes
 pub fn fold(base: Vec<SyncEnvelope>, batches: Vec<Vec<SyncEnvelope>>) -> Vec<SyncEnvelope> {
     let mut latest: BTreeMap<(String, String), SyncEnvelope> = BTreeMap::new();
     for envelope in base.into_iter().chain(batches.into_iter().flatten()) {
-        latest.insert((envelope.record_type.clone(), envelope.record_id.clone()), envelope);
+        latest.insert(
+            (envelope.record_type.clone(), envelope.record_id.clone()),
+            envelope,
+        );
     }
     latest.into_values().collect()
 }
@@ -152,9 +178,16 @@ pub fn fold(base: Vec<SyncEnvelope>, batches: Vec<Vec<SyncEnvelope>>) -> Vec<Syn
 pub fn partition(envelopes: &[SyncEnvelope]) -> AppResult<Vec<(String, Vec<u8>)>> {
     let mut buckets: BTreeMap<(String, u8), Vec<&SyncEnvelope>> = BTreeMap::new();
     for envelope in envelopes {
-        let spread: u8 = if crate::sync::content::is_content(&envelope.record_type) { 16 } else { 4 };
+        let spread: u8 = if crate::sync::content::is_content(&envelope.record_type) {
+            16
+        } else {
+            4
+        };
         let bucket = Sha256::digest(envelope.record_id.as_bytes())[0] % spread;
-        buckets.entry((envelope.record_type.clone(), bucket)).or_default().push(envelope);
+        buckets
+            .entry((envelope.record_type.clone(), bucket))
+            .or_default()
+            .push(envelope);
     }
     let mut parts = Vec::new();
     for (_, members) in buckets {
@@ -180,7 +213,10 @@ pub fn partition(envelopes: &[SyncEnvelope]) -> AppResult<Vec<(String, Vec<u8>)>
 fn named_part(chunk: &[&SyncEnvelope]) -> AppResult<(String, Vec<u8>)> {
     let bytes = serde_json::to_vec(chunk)?;
     let digest = Sha256::digest(&bytes);
-    let name: String = digest[..12].iter().map(|byte| format!("{byte:02x}")).collect();
+    let name: String = digest[..12]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     Ok((format!("{name}.json"), bytes))
 }
 
@@ -228,7 +264,9 @@ impl Cache<'_> {
         }
         let keep: BTreeSet<&str> = manifest.parts.iter().map(String::as_str).collect();
         remove_files_where(&self.root.join("base"), |name| !keep.contains(name))?;
-        remove_files_where(&self.root.join("batches"), |name| batch_seq(name).is_some_and(|seq| seq <= manifest.upto))?;
+        remove_files_where(&self.root.join("batches"), |name| {
+            batch_seq(name).is_some_and(|seq| seq <= manifest.upto)
+        })?;
         Ok(())
     }
 }
@@ -244,7 +282,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
 }
 
 fn remove_files_where(dir: &Path, remove: impl Fn(&str) -> bool) -> AppResult<()> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Ok(()) };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(());
+    };
     for entry in entries.flatten() {
         if entry.file_name().to_str().is_some_and(&remove) {
             let _ = std::fs::remove_file(entry.path());
@@ -255,16 +295,30 @@ fn remove_files_where(dir: &Path, remove: impl Fn(&str) -> bool) -> AppResult<()
 
 /// 压缩一台设备的批次：把最新底稿之后的批次全部折进一份新底稿，然后清掉折进去的旧文件。
 /// 没有新批次时只做清理（上一轮没删完的）。`cache` 只在压缩自己的批次时传。
-pub async fn compact(dav: &WebDav, device_dir: &str, cache: Option<&Cache<'_>>) -> AppResult<Outcome> {
+pub async fn compact(
+    dav: &WebDav,
+    device_dir: &str,
+    cache: Option<&Cache<'_>>,
+) -> AppResult<Outcome> {
     let listing = list(dav, device_dir).await?;
-    let previous = listing.latest_manifest().map(|(upto, name)| (upto, name.to_string()));
+    let previous = listing
+        .latest_manifest()
+        .map(|(upto, name)| (upto, name.to_string()));
     let previous_upto = previous.as_ref().map(|(upto, _)| *upto).unwrap_or(0);
-    let pending: Vec<(u64, String)> =
-        listing.batches.range(previous_upto + 1..).map(|(seq, name)| (*seq, name.clone())).collect();
+    let pending: Vec<(u64, String)> = listing
+        .batches
+        .range(previous_upto + 1..)
+        .map(|(seq, name)| (*seq, name.clone()))
+        .collect();
 
-    let mut outcome = Outcome { base_upto: previous_upto, ..Outcome::default() };
+    let mut outcome = Outcome {
+        base_upto: previous_upto,
+        ..Outcome::default()
+    };
     let mut current: Option<Manifest> = match &previous {
-        Some((_, name)) => Some(serde_json::from_slice(&dav.get(&format!("{device_dir}batches/{name}")).await?)?),
+        Some((_, name)) => Some(serde_json::from_slice(
+            &dav.get(&format!("{device_dir}batches/{name}")).await?,
+        )?),
         None => None,
     };
     let mut listing = listing;
@@ -295,7 +349,8 @@ pub async fn compact(dav: &WebDav, device_dir: &str, cache: Option<&Cache<'_>>) 
         dav.ensure_dir(&format!("{device_dir}base/")).await?;
         for (name, bytes) in &parts {
             if !old_parts.contains(name) {
-                dav.put(&format!("{device_dir}base/{name}"), bytes.clone()).await?;
+                dav.put(&format!("{device_dir}base/{name}"), bytes.clone())
+                    .await?;
                 outcome.uploaded_parts += 1;
             }
         }
@@ -304,7 +359,11 @@ pub async fn compact(dav: &WebDav, device_dir: &str, cache: Option<&Cache<'_>>) 
             parts: parts.iter().map(|(name, _)| name.clone()).collect(),
             created_at: chrono::Utc::now().timestamp_millis(),
         };
-        dav.put(&format!("{device_dir}batches/{}", manifest_name(upto)), serde_json::to_vec(&manifest)?).await?;
+        dav.put(
+            &format!("{device_dir}batches/{}", manifest_name(upto)),
+            serde_json::to_vec(&manifest)?,
+        )
+        .await?;
         if let Some(cache) = cache {
             cache.retain(&manifest, &parts)?;
         }
@@ -315,10 +374,17 @@ pub async fn compact(dav: &WebDav, device_dir: &str, cache: Option<&Cache<'_>>) 
     }
 
     // 清理：折进底稿的批次、旧清单，以及不再被最新清单引用的底稿文件。
-    let mut stale: Vec<String> = listing.stale_files().into_iter().map(|name| format!("{device_dir}batches/{name}")).collect();
+    let mut stale: Vec<String> = listing
+        .stale_files()
+        .into_iter()
+        .map(|name| format!("{device_dir}batches/{name}"))
+        .collect();
     if let Some(manifest) = &current {
         let keep: BTreeSet<&str> = manifest.parts.iter().map(String::as_str).collect();
-        let parts = dav.list(&format!("{device_dir}base/")).await?.unwrap_or_default();
+        let parts = dav
+            .list(&format!("{device_dir}base/"))
+            .await?
+            .unwrap_or_default();
         stale.extend(
             parts
                 .iter()
@@ -344,7 +410,10 @@ mod tests {
             record_type.into(),
             id.into(),
             SyncOperation::Save,
-            SyncVersion { counter, device: "pc".into() },
+            SyncVersion {
+                counter,
+                device: "pc".into(),
+            },
             counter,
             serde_json::json!({ "text": text }),
         )
@@ -362,8 +431,14 @@ mod tests {
 
     #[test]
     fn folding_keeps_only_the_latest_copy_of_each_record() {
-        let base = vec![envelope("Note", "a", 1, "old"), envelope("Note", "b", 2, "b")];
-        let batches = vec![vec![envelope("Note", "a", 3, "newer")], vec![envelope("Note", "a", 4, "newest")]];
+        let base = vec![
+            envelope("Note", "a", 1, "old"),
+            envelope("Note", "b", 2, "b"),
+        ];
+        let batches = vec![
+            vec![envelope("Note", "a", 3, "newer")],
+            vec![envelope("Note", "a", 4, "newest")],
+        ];
         let folded = fold(base, batches);
         assert_eq!(folded.len(), 2);
         assert_eq!(folded[0].payload["text"], "newest");
@@ -372,13 +447,19 @@ mod tests {
 
     #[test]
     fn unchanged_records_keep_the_same_part_names() {
-        let transcripts: Vec<_> = (0..40).map(|i| envelope("Transcript", &format!("v{i}"), i, "字幕")).collect();
+        let transcripts: Vec<_> = (0..40)
+            .map(|i| envelope("Transcript", &format!("v{i}"), i, "字幕"))
+            .collect();
         let mut before = transcripts.clone();
         before.push(envelope("VideoProgress", "v1", 100, "10s"));
         let mut after = transcripts;
         after.push(envelope("VideoProgress", "v1", 101, "20s"));
         let names = |envelopes: &[SyncEnvelope]| -> BTreeSet<String> {
-            partition(envelopes).unwrap().into_iter().map(|(name, _)| name).collect()
+            partition(envelopes)
+                .unwrap()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
         };
         let (before, after) = (names(&before), names(&after));
         // 只有进度那一份变了：字幕那些份名字不变，下次压缩不用重传。
@@ -388,15 +469,31 @@ mod tests {
 
     #[test]
     fn listing_knows_what_is_already_covered() {
-        let entries: Vec<Entry> = ["000000000001.json", "000000000002.json", "000000000003.json", "base-000000000002.json", RETIRED_MARKER]
-            .iter()
-            .map(|name| Entry { name: (*name).into(), is_dir: false, size: None })
-            .collect();
+        let entries: Vec<Entry> = [
+            "000000000001.json",
+            "000000000002.json",
+            "000000000003.json",
+            "base-000000000002.json",
+            RETIRED_MARKER,
+        ]
+        .iter()
+        .map(|name| Entry {
+            name: (*name).into(),
+            is_dir: false,
+            size: None,
+        })
+        .collect();
         let listing = Listing::parse(&entries);
-        assert_eq!(listing.latest_manifest(), Some((2, "base-000000000002.json")));
+        assert_eq!(
+            listing.latest_manifest(),
+            Some((2, "base-000000000002.json"))
+        );
         assert_eq!(listing.max_seq(), 3);
         assert!(listing.retired);
-        assert_eq!(listing.stale_files(), ["000000000001.json", "000000000002.json"]);
+        assert_eq!(
+            listing.stale_files(),
+            ["000000000001.json", "000000000002.json"]
+        );
         assert!(listing.has_all_between(0, 3));
         let mut gap = listing.clone();
         gap.batches.remove(&1);

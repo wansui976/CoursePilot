@@ -667,7 +667,12 @@ const LECTURE_ASK_SYSTEM: &str = "你是这节课的答疑助手。上面是这�
 
 /// 这节课问答要不要带整节讲稿前缀。本机模型不带：免费，但两三万字的预填充在 CPU 上
 /// 要几十秒，小窗口还会被截断——检索那几段对它正合适。取前缀出错也只是退回检索。
-async fn lecture_prefix(db: &Db, provider: &Provider, model: &str, video_id: &str) -> Option<String> {
+async fn lecture_prefix(
+    db: &Db,
+    provider: &Provider,
+    model: &str,
+    video_id: &str,
+) -> Option<String> {
     if provider.billing() == crate::usage_log::Billing::Local {
         return None;
     }
@@ -700,7 +705,14 @@ fn lecture_question(retrieved: &Retrieved, query: &str) -> String {
         let joined = retrieved
             .slides
             .iter()
-            .map(|slide| format!("[{}] 第 {} 页：{}", mmss(slide.start_ms), slide.page_no, slide.text))
+            .map(|slide| {
+                format!(
+                    "[{}] 第 {} 页：{}",
+                    mmss(slide.start_ms),
+                    slide.page_no,
+                    slide.text
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
         blocks.push(format!("相关课件页（时间是这页出现的时刻）：\n{joined}"));
@@ -738,7 +750,11 @@ const SEMANTIC_PAD_MS: i64 = 10_000;
 const SEMANTIC_EXTRA_SCOPE_LINES: usize = 6;
 
 /// 往单视频的检索结果里补语义命中的窗口（和已有窗口重叠的跳过），之后仍按时间排好。
-fn augment_with_semantic(retrieved: &mut Retrieved, segments: &[TranscriptSegment], hits: &[semantic::SemanticHit]) {
+fn augment_with_semantic(
+    retrieved: &mut Retrieved,
+    segments: &[TranscriptSegment],
+    hits: &[semantic::SemanticHit],
+) {
     if retrieved.is_empty() {
         return;
     }
@@ -761,7 +777,9 @@ fn augment_with_semantic(retrieved: &mut Retrieved, segments: &[TranscriptSegmen
             .iter()
             .filter(|seg| seg.end_ms > start && seg.start_ms < end)
             .collect();
-        let Some(first) = inside.first() else { continue };
+        let Some(first) = inside.first() else {
+            continue;
+        };
         let text = inside
             .iter()
             .map(|seg| format!("[{}] {}", mmss(seg.start_ms), seg.text.trim()))
@@ -806,8 +824,15 @@ fn augment_scope_with_semantic(
         if covered {
             continue;
         }
-        let Some(title) = titles.get(&hit.video_id) else { continue };
-        context.push_str(&format!("\n〈{} {}〉{}", title, mmss(hit.chunk.start_ms), hit.chunk.text));
+        let Some(title) = titles.get(&hit.video_id) else {
+            continue;
+        };
+        context.push_str(&format!(
+            "\n〈{} {}〉{}",
+            title,
+            mmss(hit.chunk.start_ms),
+            hit.chunk.text
+        ));
         citations.push(Citation {
             index: 0,
             text: hit.chunk.text.clone(),
@@ -851,10 +876,18 @@ pub async fn hybrid_search_scope(
     let ids: Vec<String> = videos.iter().map(|(id, _)| id.clone()).collect();
     let semantic_hits = semantic::search_or_skip(db, &ids, query, limit.max(30)).await;
     if semantic_hits.is_empty() {
-        return Ok(renumber(keyword.into_iter().take(limit).map(|(_, citation)| citation).collect()));
+        return Ok(renumber(
+            keyword
+                .into_iter()
+                .take(limit)
+                .map(|(_, citation)| citation)
+                .collect(),
+        ));
     }
-    let titles: std::collections::HashMap<&str, &str> =
-        videos.iter().map(|(id, title)| (id.as_str(), title.as_str())).collect();
+    let titles: std::collections::HashMap<&str, &str> = videos
+        .iter()
+        .map(|(id, title)| (id.as_str(), title.as_str()))
+        .collect();
     let rrf = |rank: usize| 1.0 / (RRF_K + rank as f64 + 1.0);
 
     // (融合分, 引用, 关键词名次——同分时让关键词靠前的先出)
@@ -879,8 +912,17 @@ pub async fn hybrid_search_scope(
         if semantic_used[position] {
             continue;
         }
-        let text: String = hit.chunk.text.chars().take(SEMANTIC_SNIPPET_CHARS).collect();
-        let text = if hit.chunk.text.chars().count() > SEMANTIC_SNIPPET_CHARS { format!("{text}…") } else { text };
+        let text: String = hit
+            .chunk
+            .text
+            .chars()
+            .take(SEMANTIC_SNIPPET_CHARS)
+            .collect();
+        let text = if hit.chunk.text.chars().count() > SEMANTIC_SNIPPET_CHARS {
+            format!("{text}…")
+        } else {
+            text
+        };
         fused.push((
             rrf(position),
             Citation {
@@ -889,7 +931,9 @@ pub async fn hybrid_search_scope(
                 start_ms: hit.chunk.start_ms,
                 end_ms: hit.chunk.end_ms,
                 video_id: Some(hit.video_id.clone()),
-                video_title: titles.get(hit.video_id.as_str()).map(|title| title.to_string()),
+                video_title: titles
+                    .get(hit.video_id.as_str())
+                    .map(|title| title.to_string()),
                 slide_image: None,
                 slide_page: None,
             },
@@ -897,7 +941,13 @@ pub async fn hybrid_search_scope(
         ));
     }
     fused.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
-    Ok(renumber(fused.into_iter().take(limit).map(|(_, citation, _)| citation).collect()))
+    Ok(renumber(
+        fused
+            .into_iter()
+            .take(limit)
+            .map(|(_, citation, _)| citation)
+            .collect(),
+    ))
 }
 
 /// 检索式问答（非流式）：召回相关讲稿窗口与课件页，只喂这些片段。
@@ -917,17 +967,38 @@ pub async fn answer(
         retrieve(&segments, &pages, query, history)
     } else {
         let never = AtomicBool::new(false);
-        retrieve_or_expand(provider, chat_model, &segments, &pages, query, history, &never, &mut |_| {}).await
+        retrieve_or_expand(
+            provider,
+            chat_model,
+            &segments,
+            &pages,
+            query,
+            history,
+            &never,
+            &mut |_| {},
+        )
+        .await
     };
     if !retrieved.is_empty() {
-        let hits = semantic::search_or_skip(db, &[video_id.to_string()], query, SEMANTIC_EXTRA_WINDOWS * 2).await;
+        let hits = semantic::search_or_skip(
+            db,
+            &[video_id.to_string()],
+            query,
+            SEMANTIC_EXTRA_WINDOWS * 2,
+        )
+        .await;
         augment_with_semantic(&mut retrieved, &segments, &hits);
     }
     let req = match prefix {
         Some(prefix) => lecture_ask_request(chat_model, prefix, history, &retrieved, query),
         None => {
             let (system, context) = ask_context(&retrieved);
-            ask_request(chat_model, system, context, build_chat_messages(history, query))
+            ask_request(
+                chat_model,
+                system,
+                context,
+                build_chat_messages(history, query),
+            )
         }
     };
     let answer = provider.complete(&req).await?.content;
@@ -1060,7 +1131,13 @@ pub async fn answer_stream(
         .await
     };
     if !retrieved.is_empty() {
-        let hits = semantic::search_or_skip(db, &[video_id.to_string()], query, SEMANTIC_EXTRA_WINDOWS * 2).await;
+        let hits = semantic::search_or_skip(
+            db,
+            &[video_id.to_string()],
+            query,
+            SEMANTIC_EXTRA_WINDOWS * 2,
+        )
+        .await;
         augment_with_semantic(&mut retrieved, &segments, &hits);
     }
     let citations = retrieved_citations(&retrieved);
@@ -1073,7 +1150,12 @@ pub async fn answer_stream(
         Some(prefix) => lecture_ask_request(chat_model, prefix, history, &retrieved, query),
         None => {
             let (system, context) = ask_context(&retrieved);
-            ask_request(chat_model, system, context, build_chat_messages(history, query))
+            ask_request(
+                chat_model,
+                system,
+                context,
+                build_chat_messages(history, query),
+            )
         }
     };
     let raw = provider
@@ -1681,7 +1763,10 @@ pub async fn keyword_search_scope_scored(
     for term in &terms {
         let n = binds.len() + 2;
         if term.bytes().any(|byte| byte.is_ascii_alphabetic()) {
-            let escaped = term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+            let escaped = term
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
             binds.push(format!("%{escaped}%"));
             filters.push(format!("{{col}} LIKE ?{n} ESCAPE '\\'"));
         } else {
@@ -1695,21 +1780,25 @@ pub async fn keyword_search_scope_scored(
     const PAGES: &str = "ocr_text IS NOT NULL AND TRIM(ocr_text) <> ''";
 
     // 总篇数只数行、不读正文，走 video_id 索引。
-    let segment_total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM transcripts WHERE {SCOPE}"))
-        .bind(&scope)
-        .fetch_one(&db.pool)
-        .await?;
-    let page_total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM slides WHERE {SCOPE} AND {PAGES}"))
-        .bind(&scope)
-        .fetch_one(&db.pool)
-        .await?;
+    let segment_total: i64 =
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM transcripts WHERE {SCOPE}"))
+            .bind(&scope)
+            .fetch_one(&db.pool)
+            .await?;
+    let page_total: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM slides WHERE {SCOPE} AND {PAGES}"
+    ))
+    .bind(&scope)
+    .fetch_one(&db.pool)
+    .await?;
 
     let segment_sql = format!(
         "SELECT video_id, segment_idx, start_ms, end_ms, text FROM transcripts
          WHERE {SCOPE} AND ({})",
         any_hit("text")
     );
-    let mut segment_query = sqlx::query_as::<_, (String, i64, i64, i64, String)>(&segment_sql).bind(&scope);
+    let mut segment_query =
+        sqlx::query_as::<_, (String, i64, i64, i64, String)>(&segment_sql).bind(&scope);
     for bind in &binds {
         segment_query = segment_query.bind(bind);
     }
@@ -1719,7 +1808,8 @@ pub async fn keyword_search_scope_scored(
         any_hit("ocr_text")
     );
     let mut page_query =
-        sqlx::query_as::<_, (String, i64, i64, Option<i64>, String, String)>(&page_sql).bind(&scope);
+        sqlx::query_as::<_, (String, i64, i64, Option<i64>, String, String)>(&page_sql)
+            .bind(&scope);
     for bind in &binds {
         page_query = page_query.bind(bind);
     }
@@ -1740,7 +1830,9 @@ pub async fn keyword_search_scope_scored(
     // (视频在范围里的位置, 0=字幕/1=课件, 原有顺序) → 与旧实现逐视频追加的先后一致。
     let mut keyed: Vec<((usize, u8, i64), Hit)> = Vec::new();
     for (vid, segment_idx, start_ms, end_ms, text) in segment_rows {
-        let Some(&(index, title)) = order.get(vid.as_str()) else { continue };
+        let Some(&(index, title)) = order.get(vid.as_str()) else {
+            continue;
+        };
         let score = weights.score(&text);
         if score > 0.0 {
             keyed.push((
@@ -1757,7 +1849,9 @@ pub async fn keyword_search_scope_scored(
         }
     }
     for (vid, page_no, start_ms, end_ms, image_path, ocr_text) in page_rows {
-        let Some(&(index, title)) = order.get(vid.as_str()) else { continue };
+        let Some(&(index, title)) = order.get(vid.as_str()) else {
+            continue;
+        };
         let score = weights.score(&ocr_text);
         if score > 0.0 {
             let page = SlidePage {
@@ -1769,7 +1863,12 @@ pub async fn keyword_search_scope_scored(
             };
             keyed.push((
                 (index, 1, page_no),
-                slide_hit(score, page, &weights, Some((vid.clone(), title.to_string()))),
+                slide_hit(
+                    score,
+                    page,
+                    &weights,
+                    Some((vid.clone(), title.to_string())),
+                ),
             ));
         }
     }
@@ -2052,12 +2151,23 @@ mod tests {
         };
         let cancel = AtomicBool::new(false);
         let mut events: Vec<AskEvent> = Vec::new();
-        let answer = answer_stream(&db, &provider, "m", &vid, "为什么会卡住", &[], &cancel, &mut |e| events.push(e))
-            .await
-            .unwrap();
+        let answer = answer_stream(
+            &db,
+            &provider,
+            "m",
+            &vid,
+            "为什么会卡住",
+            &[],
+            &cancel,
+            &mut |e| events.push(e),
+        )
+        .await
+        .unwrap();
         assert_eq!(answer.answer, "因为陷入了局部极小值 [01:10]");
         assert!(
-            !events.iter().any(|e| matches!(e, AskEvent::Status { text } if text.contains("换个说法"))),
+            !events
+                .iter()
+                .any(|e| matches!(e, AskEvent::Status { text } if text.contains("换个说法"))),
             "{events:?}"
         );
     }
@@ -2073,7 +2183,10 @@ mod tests {
             }],
             slides: Vec::new(),
         };
-        let history = vec![ChatMessage::user("上一问"), ChatMessage::assistant("上一答")];
+        let history = vec![
+            ChatMessage::user("上一问"),
+            ChatMessage::assistant("上一答"),
+        ];
         let req = lecture_ask_request("m", "讲稿前缀".into(), &history, &retrieved, "为什么会卡住");
         // 讲稿走可缓存前缀，按任务变化的指令跟在后面；片段跟着这一问走，system 每问都一样。
         assert_eq!(req.cacheable_context.as_deref(), Some("讲稿前缀"));
@@ -2083,7 +2196,10 @@ mod tests {
         assert!(last.contains("[01:10] 梯度下降会陷入局部极小值"), "{last}");
         assert!(last.ends_with("问题：为什么会卡住"), "{last}");
         // 没检索到就只发问题本身，不挂一个空的「精确片段」标题。
-        let empty = Retrieved { windows: Vec::new(), slides: Vec::new() };
+        let empty = Retrieved {
+            windows: Vec::new(),
+            slides: Vec::new(),
+        };
         let bare = lecture_ask_request("m", "讲稿前缀".into(), &[], &empty, "讲了什么");
         assert_eq!(bare.messages[0].content, "讲了什么");
     }
@@ -2635,25 +2751,54 @@ mod tests {
     #[tokio::test]
     async fn sql_side_scope_search_matches_the_in_memory_reference_exactly() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
-        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
             .await
             .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         // 词表故意小：大量同分、大量重复命中，最能暴露排序上的差别。
         let pieces = [
-            "梯度", "下降", "学习率", "太大", "反向", "传播", "损失", "函数", "SGD", "Adam", "ReLU", "的", "是",
-            "会", "震荡", "收敛", "Batch", "噪声", "100%", "a_b", " ",
+            "梯度",
+            "下降",
+            "学习率",
+            "太大",
+            "反向",
+            "传播",
+            "损失",
+            "函数",
+            "SGD",
+            "Adam",
+            "ReLU",
+            "的",
+            "是",
+            "会",
+            "震荡",
+            "收敛",
+            "Batch",
+            "噪声",
+            "100%",
+            "a_b",
+            " ",
         ];
         let mut seed = 11u64;
         let mut rnd = move |n: usize| {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((seed >> 33) as usize) % n
         };
         let mut videos = Vec::new();
         for i in 0..6 {
             let path = dir.path().join(format!("{i}.mp4"));
             std::fs::write(&path, b"x").unwrap();
-            let video = crate::commands::videos::add_local_video(&db, &course.id, path, None).await.unwrap();
+            let video = crate::commands::videos::add_local_video(&db, &course.id, path, None)
+                .await
+                .unwrap();
             for k in 0..60i64 {
                 let text: String = (0..1 + rnd(6)).map(|_| pieces[rnd(pieces.len())]).collect();
                 sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)")
@@ -2670,7 +2815,12 @@ mod tests {
                 let ocr: Option<String> = match k {
                     0 => None,
                     1 => Some("   ".into()),
-                    _ => Some((0..2 + rnd(8)).map(|_| pieces[rnd(pieces.len())]).collect::<Vec<_>>().join("\n")),
+                    _ => Some(
+                        (0..2 + rnd(8))
+                            .map(|_| pieces[rnd(pieces.len())])
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ),
                 };
                 sqlx::query("INSERT INTO slides(video_id,page_no,start_ms,end_ms,image_path,ocr_text) VALUES (?,?,?,?,?,?)")
                     .bind(&video.id)
@@ -2700,8 +2850,12 @@ mod tests {
             "完全不相关的问题",
         ] {
             for limit in [3, 50] {
-                let new = keyword_search_scope_scored(&db, &videos, query, limit).await.unwrap();
-                let old = keyword_search_scope_scored_reference(&db, &videos, query, limit).await.unwrap();
+                let new = keyword_search_scope_scored(&db, &videos, query, limit)
+                    .await
+                    .unwrap();
+                let old = keyword_search_scope_scored_reference(&db, &videos, query, limit)
+                    .await
+                    .unwrap();
                 compared_hits += old.len();
                 slide_hits += old.iter().filter(|(_, c)| c.slide_page.is_some()).count();
                 assert_eq!(
@@ -2712,82 +2866,156 @@ mod tests {
             }
         }
         // 对拍不能是两边都空：确实比到了大量字幕和课件命中。
-        assert!(compared_hits > 200 && slide_hits > 10, "{compared_hits} {slide_hits}");
-        assert!(keyword_search_scope_scored(&db, &[], "梯度", 5).await.unwrap().is_empty());
+        assert!(
+            compared_hits > 200 && slide_hits > 10,
+            "{compared_hits} {slide_hits}"
+        );
+        assert!(keyword_search_scope_scored(&db, &[], "梯度", 5)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     fn seg_at(idx: i64, start_ms: i64, text: &str) -> TranscriptSegment {
-        TranscriptSegment { id: idx, video_id: "v".into(), segment_idx: idx, start_ms, end_ms: start_ms + 5_000, text: text.into() }
+        TranscriptSegment {
+            id: idx,
+            video_id: "v".into(),
+            segment_idx: idx,
+            start_ms,
+            end_ms: start_ms + 5_000,
+            text: text.into(),
+        }
     }
 
     fn hit_at(video: &str, start_ms: i64, end_ms: i64, text: &str) -> semantic::SemanticHit {
         semantic::SemanticHit {
             video_id: video.into(),
-            chunk: semantic::Chunk { idx: 0, first_segment: 0, last_segment: 0, start_ms, end_ms, text: text.into() },
+            chunk: semantic::Chunk {
+                idx: 0,
+                first_segment: 0,
+                last_segment: 0,
+                start_ms,
+                end_ms,
+                text: text.into(),
+            },
             score: 0.9,
         }
     }
 
     #[test]
     fn semantic_windows_only_supplement_a_keyword_answer_and_skip_overlaps() {
-        let segments = vec![seg_at(0, 0, "学习率太大会震荡"), seg_at(1, 600_000, "步子迈小一点更稳"), seg_at(2, 1_200_000, "无关")];
+        let segments = vec![
+            seg_at(0, 0, "学习率太大会震荡"),
+            seg_at(1, 600_000, "步子迈小一点更稳"),
+            seg_at(2, 1_200_000, "无关"),
+        ];
         // 关键词一条没召回：「没讲到」由关键词判定，向量不能把它翻过来。
-        let mut empty = Retrieved { windows: Vec::new(), slides: Vec::new() };
-        augment_with_semantic(&mut empty, &segments, &[hit_at("v", 600_000, 605_000, "步子迈小一点更稳")]);
+        let mut empty = Retrieved {
+            windows: Vec::new(),
+            slides: Vec::new(),
+        };
+        augment_with_semantic(
+            &mut empty,
+            &segments,
+            &[hit_at("v", 600_000, 605_000, "步子迈小一点更稳")],
+        );
         assert!(empty.is_empty());
 
         let mut retrieved = Retrieved {
-            windows: vec![Window { score: 1.0, start_ms: 0, end_ms: 35_000, text: "[00:00] 学习率太大会震荡".into() }],
+            windows: vec![Window {
+                score: 1.0,
+                start_ms: 0,
+                end_ms: 35_000,
+                text: "[00:00] 学习率太大会震荡".into(),
+            }],
             slides: Vec::new(),
         };
         augment_with_semantic(
             &mut retrieved,
             &segments,
-            &[hit_at("v", 0, 5_000, "学习率太大会震荡"), hit_at("v", 600_000, 605_000, "步子迈小一点更稳")],
+            &[
+                hit_at("v", 0, 5_000, "学习率太大会震荡"),
+                hit_at("v", 600_000, 605_000, "步子迈小一点更稳"),
+            ],
         );
         assert_eq!(retrieved.windows.len(), 2, "重叠的那块跳过，不重叠的补进来");
         assert!(retrieved.windows[1].text.contains("步子迈小一点更稳"));
-        assert!(retrieved.windows[0].start_ms < retrieved.windows[1].start_ms, "补完仍按时间排");
+        assert!(
+            retrieved.windows[0].start_ms < retrieved.windows[1].start_ms,
+            "补完仍按时间排"
+        );
     }
 
     #[test]
     fn semantic_lines_supplement_course_context_without_repeating_cited_spots() {
-        let titles: std::collections::HashMap<String, String> = [("v".to_string(), "第3讲".to_string())].into();
+        let titles: std::collections::HashMap<String, String> =
+            [("v".to_string(), "第3讲".to_string())].into();
         let mut context = String::new();
         let mut citations = Vec::new();
-        augment_scope_with_semantic(&mut context, &mut citations, &titles, &[hit_at("v", 0, 5_000, "x")]);
-        assert!(context.is_empty() && citations.is_empty(), "课程里关键词没命中时不补");
+        augment_scope_with_semantic(
+            &mut context,
+            &mut citations,
+            &titles,
+            &[hit_at("v", 0, 5_000, "x")],
+        );
+        assert!(
+            context.is_empty() && citations.is_empty(),
+            "课程里关键词没命中时不补"
+        );
 
         let mut context = "〈第3讲 00:01〉学习率".to_string();
         let mut citations = vec![Citation {
-            index: 1, text: "学习率".into(), start_ms: 1_000, end_ms: 2_000,
-            video_id: Some("v".into()), video_title: Some("第3讲".into()), slide_image: None, slide_page: None,
+            index: 1,
+            text: "学习率".into(),
+            start_ms: 1_000,
+            end_ms: 2_000,
+            video_id: Some("v".into()),
+            video_title: Some("第3讲".into()),
+            slide_image: None,
+            slide_page: None,
         }];
         augment_scope_with_semantic(
             &mut context,
             &mut citations,
             &titles,
-            &[hit_at("v", 0, 5_000, "已经引用过的一块"), hit_at("v", 60_000, 65_000, "步子迈小一点")],
+            &[
+                hit_at("v", 0, 5_000, "已经引用过的一块"),
+                hit_at("v", 60_000, 65_000, "步子迈小一点"),
+            ],
         );
         assert_eq!(citations.len(), 2);
         assert_eq!(citations[1].text, "步子迈小一点");
-        assert_eq!(citations.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            citations.iter().map(|c| c.index).collect::<Vec<_>>(),
+            [1, 2]
+        );
         assert!(context.contains("〈第3讲 01:00〉步子迈小一点"));
     }
 
     #[tokio::test]
     async fn hybrid_search_finds_by_meaning_but_the_assistant_still_sees_zero_keyword_hits() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
-        semantic::test_support::use_fake_cloud(&db).await;
-        let course = crate::commands::courses::create_course(&db, "c".into(), dir.path().to_string_lossy().into())
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
             .await
             .unwrap();
+        semantic::test_support::use_fake_cloud(&db).await;
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
         let path = dir.path().join("a.mp4");
         std::fs::write(&path, b"x").unwrap();
-        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None).await.unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None)
+            .await
+            .unwrap();
         let pad = "。".repeat(semantic::CHUNK_MIN_CHARS);
-        for (i, line) in ["学习率设得太大，参数会来回震荡", "模型在训练集上死记硬背"].iter().enumerate() {
+        for (i, line) in ["学习率设得太大，参数会来回震荡", "模型在训练集上死记硬背"]
+            .iter()
+            .enumerate()
+        {
             sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)")
                 .bind(&video.id)
                 .bind(i as i64)
@@ -2803,14 +3031,23 @@ mod tests {
 
         // 「泛化」一个字都没在讲稿里出现过：关键词零命中，按意思能找到第二段。
         // 向量检索没有阈值，两块都会列出来；意思对上的那块排第一。
-        let found = hybrid_search_scope(&db, &videos, "泛化能力差怎么办", 5, false).await.unwrap();
+        let found = hybrid_search_scope(&db, &videos, "泛化能力差怎么办", 5, false)
+            .await
+            .unwrap();
         assert_eq!(found.len(), 2);
         assert!(found[0].text.starts_with("模型在训练集上死记硬背"));
         assert_eq!(found[0].video_title.as_deref(), Some("第1讲"));
-        assert!(hybrid_search_scope(&db, &videos, "泛化能力差怎么办", 5, true).await.unwrap().is_empty());
+        assert!(
+            hybrid_search_scope(&db, &videos, "泛化能力差怎么办", 5, true)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         // 关键词命中时：命中的那条在前，意思相近的另一段补在后面。
-        let mixed = hybrid_search_scope(&db, &videos, "学习率和泛化", 5, true).await.unwrap();
+        let mixed = hybrid_search_scope(&db, &videos, "学习率和泛化", 5, true)
+            .await
+            .unwrap();
         assert_eq!(mixed.len(), 2);
         assert!(mixed[0].text.contains("学习率"));
         assert!(mixed[1].text.contains("死记硬背"));

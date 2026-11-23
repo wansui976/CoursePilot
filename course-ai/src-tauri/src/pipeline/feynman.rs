@@ -23,7 +23,12 @@ pub enum FeynmanTopic {
     /// 课程知识点。
     Concept { concept_id: String },
     /// 视频里的一章（或任意一段）。
-    Range { video_id: String, start_ms: i64, end_ms: i64, title: String },
+    Range {
+        video_id: String,
+        start_ms: i64,
+        end_ms: i64,
+        title: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,12 +86,19 @@ impl FeynmanTopic {
     pub fn key(&self) -> String {
         match self {
             FeynmanTopic::Concept { concept_id } => format!("concept:{concept_id}"),
-            FeynmanTopic::Range { video_id, start_ms, .. } => format!("range:{video_id}:{start_ms}"),
+            FeynmanTopic::Range {
+                video_id, start_ms, ..
+            } => format!("range:{video_id}:{start_ms}"),
         }
     }
 }
 
-async fn lines_between(db: &Db, video_id: &str, from: i64, to: i64) -> AppResult<Vec<(String, i64, String)>> {
+async fn lines_between(
+    db: &Db,
+    video_id: &str,
+    from: i64,
+    to: i64,
+) -> AppResult<Vec<(String, i64, String)>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT start_ms, text FROM transcripts WHERE video_id=? AND start_ms>=? AND start_ms<? ORDER BY start_ms",
     )
@@ -95,7 +107,10 @@ async fn lines_between(db: &Db, video_id: &str, from: i64, to: i64) -> AppResult
     .bind(to)
     .fetch_all(&db.pool)
     .await?;
-    Ok(rows.into_iter().map(|(ms, text)| (video_id.to_string(), ms, text)).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(ms, text)| (video_id.to_string(), ms, text))
+        .collect())
 }
 
 async fn load_material(db: &Db, topic: &FeynmanTopic) -> AppResult<Material> {
@@ -117,11 +132,28 @@ async fn load_material(db: &Db, topic: &FeynmanTopic) -> AppResult<Material> {
             .await?;
             let mut lines = Vec::new();
             for (video_id, start_ms) in occurrences {
-                lines.extend(lines_between(db, &video_id, start_ms - 10_000, start_ms + OCCURRENCE_WINDOW_MS).await?);
+                lines.extend(
+                    lines_between(
+                        db,
+                        &video_id,
+                        start_ms - 10_000,
+                        start_ms + OCCURRENCE_WINDOW_MS,
+                    )
+                    .await?,
+                );
             }
-            Ok(Material { title: name, lines, reference: explanation })
+            Ok(Material {
+                title: name,
+                lines,
+                reference: explanation,
+            })
         }
-        FeynmanTopic::Range { video_id, start_ms, end_ms, title } => Ok(Material {
+        FeynmanTopic::Range {
+            video_id,
+            start_ms,
+            end_ms,
+            title,
+        } => Ok(Material {
             title: title.clone(),
             lines: lines_between(db, video_id, *start_ms, *end_ms).await?,
             reference: None,
@@ -150,14 +182,21 @@ fn material_text(material: &Material) -> (String, Vec<String>) {
     (out, videos)
 }
 
-pub fn feynman_request(model: &str, title: &str, reference: Option<&str>, material: &str, explanation: &str) -> ChatRequest {
+pub fn feynman_request(
+    model: &str,
+    title: &str,
+    reference: Option<&str>,
+    material: &str,
+    explanation: &str,
+) -> ChatRequest {
     let reference = reference
         .filter(|text| !text.trim().is_empty())
         .map(|text| format!("\n课程对这个知识点的解释：\n{text}\n"))
         .unwrap_or_default();
-    let system = "你是一位耐心的老师，用费曼学习法检查学生对一个知识点的理解。只依据给出的课程原文判断，\
+    let system =
+        "你是一位耐心的老师，用费曼学习法检查学生对一个知识点的理解。只依据给出的课程原文判断，\
                   课程里没讲的内容不算漏讲。只输出 JSON，不要代码围栏。"
-        .to_string();
+            .to_string();
     let user = format!(
         "知识点：{title}\n{reference}\n课程原文（每行 [视频编号 mm:ss] 文本）：\n{material}\n\
          学生用自己的话讲的：\n「{explanation}」\n\n\
@@ -222,7 +261,10 @@ fn resolve_ref(raw: &str, videos: &[String]) -> (Option<String>, Option<i64>) {
         _ => return (None, None),
     };
     let video_id = match video {
-        Some(tag) => tag[1..].parse::<usize>().ok().and_then(|n| videos.get(n.wrapping_sub(1)).cloned()),
+        Some(tag) => tag[1..]
+            .parse::<usize>()
+            .ok()
+            .and_then(|n| videos.get(n.wrapping_sub(1)).cloned()),
         None => videos.first().cloned(),
     };
     let ms = {
@@ -243,7 +285,12 @@ pub fn parse_feynman(content: &str, videos: &[String]) -> AppResult<FeynmanResul
     let raw: RawResult = parse_lenient_json(content)?;
     let keep = |text: &str| !text.trim().is_empty();
     Ok(FeynmanResult {
-        covered: raw.covered.into_iter().filter(|c| keep(&c.point)).take(8).collect(),
+        covered: raw
+            .covered
+            .into_iter()
+            .filter(|c| keep(&c.point))
+            .take(8)
+            .collect(),
         missed: raw
             .missed
             .into_iter()
@@ -251,7 +298,11 @@ pub fn parse_feynman(content: &str, videos: &[String]) -> AppResult<FeynmanResul
             .take(8)
             .map(|m| {
                 let (video_id, ref_ms) = resolve_ref(&m.r#ref, videos);
-                MissedPoint { point: m.inner.point, video_id, ref_ms }
+                MissedPoint {
+                    point: m.inner.point,
+                    video_id,
+                    ref_ms,
+                }
             })
             .collect(),
         wrong: raw
@@ -261,7 +312,12 @@ pub fn parse_feynman(content: &str, videos: &[String]) -> AppResult<FeynmanResul
             .take(6)
             .map(|w| {
                 let (video_id, ref_ms) = resolve_ref(&w.r#ref, videos);
-                WrongPoint { quote: w.inner.quote, correction: w.inner.correction, video_id, ref_ms }
+                WrongPoint {
+                    quote: w.inner.quote,
+                    correction: w.inner.correction,
+                    video_id,
+                    ref_ms,
+                }
             })
             .collect(),
         comment: raw.comment.trim().to_string(),
@@ -275,17 +331,32 @@ pub async fn evaluate(
     topic: &FeynmanTopic,
     explanation: &str,
 ) -> AppResult<FeynmanAttempt> {
-    let explanation: String = explanation.trim().chars().take(MAX_EXPLANATION_CHARS).collect();
+    let explanation: String = explanation
+        .trim()
+        .chars()
+        .take(MAX_EXPLANATION_CHARS)
+        .collect();
     if explanation.chars().count() < 4 {
         return Err(AppError::Other("先讲几句再提交吧".into()));
     }
     let material = load_material(db, topic).await?;
     if material.lines.is_empty() && material.reference.is_none() {
-        return Err(AppError::Other("这个话题在课程里还没有可对照的原文（文稿还没出来？）".into()));
+        return Err(AppError::Other(
+            "这个话题在课程里还没有可对照的原文（文稿还没出来？）".into(),
+        ));
     }
     let (text, videos) = material_text(&material);
-    let req = feynman_request(model, &material.title, material.reference.as_deref(), &text, &explanation);
-    let result = crate::pipeline::ai::complete_parsed(provider, &req, |content| parse_feynman(content, &videos)).await?;
+    let req = feynman_request(
+        model,
+        &material.title,
+        material.reference.as_deref(),
+        &text,
+        &explanation,
+    );
+    let result = crate::pipeline::ai::complete_parsed(provider, &req, |content| {
+        parse_feynman(content, &videos)
+    })
+    .await?;
 
     let attempt = FeynmanAttempt {
         id: uuid::Uuid::new_v4().to_string(),
@@ -383,7 +454,8 @@ pub async fn mastery_summary(db: &Db) -> AppResult<(usize, usize)> {
         .iter()
         .flatten()
         .filter(|json| {
-            serde_json::from_str::<FeynmanResult>(json).is_ok_and(|result| clearly_explained(&result))
+            serde_json::from_str::<FeynmanResult>(json)
+                .is_ok_and(|result| clearly_explained(&result))
         })
         .count();
     Ok((mastered, total))
@@ -413,10 +485,19 @@ mod tests {
     #[test]
     fn refs_resolve_to_real_video_ids_and_ms() {
         let videos = vec!["a".to_string(), "b".to_string()];
-        assert_eq!(resolve_ref("v2 07:10", &videos), (Some("b".into()), Some(430_000)));
-        assert_eq!(resolve_ref("[v1 1:02:03]", &videos), (Some("a".into()), Some(3_723_000)));
+        assert_eq!(
+            resolve_ref("v2 07:10", &videos),
+            (Some("b".into()), Some(430_000))
+        );
+        assert_eq!(
+            resolve_ref("[v1 1:02:03]", &videos),
+            (Some("a".into()), Some(3_723_000))
+        );
         // 只给时间：落到第一个视频。
-        assert_eq!(resolve_ref("03:00", &videos), (Some("a".into()), Some(180_000)));
+        assert_eq!(
+            resolve_ref("03:00", &videos),
+            (Some("a".into()), Some(180_000))
+        );
         // 编号越界、时间坏了：只丢引用。
         assert_eq!(resolve_ref("v9 03:00", &videos), (None, Some(180_000)));
         assert_eq!(resolve_ref("", &videos), (None, None));
@@ -432,7 +513,14 @@ mod tests {
         }"#;
         let result = parse_feynman(content, &["vid".to_string()]).unwrap();
         assert_eq!(result.covered.len(), 1);
-        assert_eq!(result.missed, vec![MissedPoint { point: "学习率过大会震荡".into(), video_id: Some("vid".into()), ref_ms: Some(430_000) }]);
+        assert_eq!(
+            result.missed,
+            vec![MissedPoint {
+                point: "学习率过大会震荡".into(),
+                video_id: Some("vid".into()),
+                ref_ms: Some(430_000)
+            }]
+        );
         assert_eq!(result.wrong.len(), 1);
         assert_eq!(result.wrong[0].ref_ms, Some(450_000));
         assert!(result.comment.starts_with("讲清了"));
@@ -440,9 +528,19 @@ mod tests {
 
     #[test]
     fn prompt_grounds_judgement_in_course_text_and_forbids_nitpicking() {
-        let req = feynman_request("m", "梯度下降", Some("沿负梯度迭代"), "[v1 00:10] 原文", "我的理解");
+        let req = feynman_request(
+            "m",
+            "梯度下降",
+            Some("沿负梯度迭代"),
+            "[v1 00:10] 原文",
+            "我的理解",
+        );
         let user = &req.messages[0].content;
-        assert!(req.system.as_ref().unwrap().contains("只依据给出的课程原文"));
+        assert!(req
+            .system
+            .as_ref()
+            .unwrap()
+            .contains("只依据给出的课程原文"));
         assert!(user.contains("不要为了挑错而挑错"));
         assert!(user.contains("沿负梯度迭代"));
         assert!(user.contains("我的理解"));
@@ -450,16 +548,30 @@ mod tests {
 
     #[test]
     fn topic_keys_group_attempts() {
-        assert_eq!(FeynmanTopic::Concept { concept_id: "k1".into() }.key(), "concept:k1");
         assert_eq!(
-            FeynmanTopic::Range { video_id: "v".into(), start_ms: 5, end_ms: 9, title: "t".into() }.key(),
+            FeynmanTopic::Concept {
+                concept_id: "k1".into()
+            }
+            .key(),
+            "concept:k1"
+        );
+        assert_eq!(
+            FeynmanTopic::Range {
+                video_id: "v".into(),
+                start_ms: 5,
+                end_ms: 9,
+                title: "t".into()
+            }
+            .key(),
             "range:v:5"
         );
     }
     #[tokio::test]
     async fn mastery_summary_counts_only_attempts_that_explain_clearly() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         let course = crate::commands::courses::create_course(
             &db,
             "c".into(),
@@ -498,7 +610,9 @@ mod tests {
     #[tokio::test]
     async fn orphan_attempts_are_pruned_so_the_table_does_not_grow_forever() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("t.db")).await.unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
         let course = crate::commands::courses::create_course(
             &db,
             "c".into(),

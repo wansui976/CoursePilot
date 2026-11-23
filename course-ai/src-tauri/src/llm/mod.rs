@@ -578,7 +578,10 @@ pub enum Provider {
 pub fn is_deepseek_official(base_url: &str) -> bool {
     reqwest::Url::parse(base_url.trim())
         .ok()
-        .and_then(|url| url.host_str().map(|host| host.eq_ignore_ascii_case("api.deepseek.com")))
+        .and_then(|url| {
+            url.host_str()
+                .map(|host| host.eq_ignore_ascii_case("api.deepseek.com"))
+        })
         .unwrap_or(false)
 }
 
@@ -743,8 +746,17 @@ impl Provider {
                 max_tokens,
                 thinking,
             } => {
-                openai::complete_stream(base_url, api_key, client, req, cancel, on_piece, *max_tokens, *thinking)
-                    .await?
+                openai::complete_stream(
+                    base_url,
+                    api_key,
+                    client,
+                    req,
+                    cancel,
+                    on_piece,
+                    *max_tokens,
+                    *thinking,
+                )
+                .await?
             }
             Provider::Anthropic {
                 base_url,
@@ -752,8 +764,16 @@ impl Provider {
                 client,
                 max_tokens,
             } => {
-                anthropic::complete_stream(base_url, api_key, client, req, *max_tokens, cancel, on_piece)
-                    .await?
+                anthropic::complete_stream(
+                    base_url,
+                    api_key,
+                    client,
+                    req,
+                    *max_tokens,
+                    cancel,
+                    on_piece,
+                )
+                .await?
             }
             Provider::Gemini {
                 base_url,
@@ -761,15 +781,24 @@ impl Provider {
                 client,
                 max_tokens,
             } => {
-                gemini::complete_stream(base_url, api_key, client, req, *max_tokens, cancel, on_piece)
-                    .await?
+                gemini::complete_stream(
+                    base_url,
+                    api_key,
+                    client,
+                    req,
+                    *max_tokens,
+                    cancel,
+                    on_piece,
+                )
+                .await?
             }
             Provider::Ollama {
                 base_url,
                 client,
                 max_tokens,
             } => {
-                ollama::complete_stream(base_url, client, req, cancel, on_piece, *max_tokens).await?
+                ollama::complete_stream(base_url, client, req, cancel, on_piece, *max_tokens)
+                    .await?
             }
             Provider::Azure {
                 endpoint,
@@ -832,7 +861,6 @@ impl Provider {
         Ok(outcome)
     }
 
-
     /// 文本嵌入。OpenAI 兼容端点用 `/embeddings`；
     /// Mock 返回确定性向量（相似文本→相似向量），便于离线单测 RAG。
     pub async fn embed(&self, model: &str, inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
@@ -857,8 +885,14 @@ impl Provider {
                     model,
                     api_version
                 );
-                openai::embed_at(&url, openai::Auth::Header("api-key", api_key), client, model, inputs)
-                    .await
+                openai::embed_at(
+                    &url,
+                    openai::Auth::Header("api-key", api_key),
+                    client,
+                    model,
+                    inputs,
+                )
+                .await
             }
             Provider::Anthropic { .. } | Provider::Gemini { .. } | Provider::Ollama { .. } => {
                 Err(crate::error::AppError::Other(
@@ -908,11 +942,23 @@ mod tests {
             max_tokens: None,
             thinking: false,
         };
-        assert_eq!(openai("https://api.deepseek.com").billing(), Billing::DeepSeek);
-        assert_eq!(openai("https://API.DeepSeek.com/v1/").billing(), Billing::DeepSeek);
-        assert_eq!(openai("https://api.siliconflow.cn/v1").billing(), Billing::Catalog);
+        assert_eq!(
+            openai("https://api.deepseek.com").billing(),
+            Billing::DeepSeek
+        );
+        assert_eq!(
+            openai("https://API.DeepSeek.com/v1/").billing(),
+            Billing::DeepSeek
+        );
+        assert_eq!(
+            openai("https://api.siliconflow.cn/v1").billing(),
+            Billing::Catalog
+        );
         // 主机名里带 deepseek 字样的别家网关不算。
-        assert_eq!(openai("https://api.deepseek.com.example.org").billing(), Billing::Catalog);
+        assert_eq!(
+            openai("https://api.deepseek.com.example.org").billing(),
+            Billing::Catalog
+        );
         assert_eq!(openai("not a url").billing(), Billing::Catalog);
         let anthropic = Provider::Anthropic {
             base_url: "https://api.deepseek.com/anthropic".into(),

@@ -271,7 +271,12 @@ pub fn repair_json_numbers(input: &str) -> String {
             continue;
         }
         let start = i;
-        while i < chars.len() && matches!(fold(chars[i]), '0'..='9' | '+' | '-' | '.' | ':' | 'e' | 'E') {
+        while i < chars.len()
+            && matches!(
+                fold(chars[i]),
+                '0'..='9' | '+' | '-' | '.' | ':' | 'e' | 'E'
+            )
+        {
             i += 1;
         }
         let token: String = chars[start..i].iter().map(|&c| fold(c)).collect();
@@ -284,9 +289,13 @@ fn fix_number_token(token: &str, millis_key: bool) -> String {
     if token.contains(':') {
         let parts: Vec<&str> = token.split(':').collect();
         let clock = (2..=3).contains(&parts.len())
-            && parts.iter().all(|p| !p.is_empty() && p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit()));
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit()));
         if clock && millis_key {
-            let seconds = parts.iter().fold(0i64, |acc, p| acc * 60 + p.parse::<i64>().unwrap_or(0));
+            let seconds = parts
+                .iter()
+                .fold(0i64, |acc, p| acc * 60 + p.parse::<i64>().unwrap_or(0));
             return (seconds * 1000).to_string();
         }
         return format!("\"{token}\"");
@@ -349,7 +358,9 @@ pub(crate) async fn complete_parsed<T>(
     };
     tracing::warn!(label = req.label, error = %err, "模型输出解析失败，带上错误重问一次");
     let mut retry = req.clone();
-    retry.messages.push(crate::llm::ChatMessage::assistant(resp.content));
+    retry
+        .messages
+        .push(crate::llm::ChatMessage::assistant(resp.content));
     retry.messages.push(crate::llm::ChatMessage::user(format!(
         "你上一次的输出没法按要求解析：{err}。请按原来的要求重新完整输出一遍：只输出 JSON，\
          不要任何解释、注释或代码围栏；数字直接写普通阿拉伯数字（不要前导零、不要写成 mm:ss）。"
@@ -357,7 +368,9 @@ pub(crate) async fn complete_parsed<T>(
     let resp = provider.complete(&retry).await?;
     ensure_not_truncated(&resp)?;
     parse(&resp.content).map_err(|second| {
-        AppError::Pipeline(format!("模型返回的结果格式不对，让它改了一次还是解析不了：{second}"))
+        AppError::Pipeline(format!(
+            "模型返回的结果格式不对，让它改了一次还是解析不了：{second}"
+        ))
     })
 }
 
@@ -508,7 +521,9 @@ fn validate_question(raw: &serde_json::Value) -> Option<QuizQuestion> {
             (Some(options), answer)
         }
         // 改错 / 简答：要自己写，答案是一段文字（改正后的说法 / 参考答案）。
-        QuizKind::Correct | QuizKind::Short => (None, QuizAnswer::One(non_empty_string(Some(answer_raw))?)),
+        QuizKind::Correct | QuizKind::Short => {
+            (None, QuizAnswer::One(non_empty_string(Some(answer_raw))?))
+        }
     };
     // 逐项解析和选项对不上就不要：错位的解析比没有更糟（说的是另一个选项）。
     let option_notes = options.as_ref().and_then(|options| {
@@ -778,8 +793,9 @@ const DIGEST_CHUNK_BACKOFF_SECS: &[u64] = &[0, 0, 0];
 /// 工具定义和输出。上限 400K 字符，避免超大窗口模型一次吞掉整份长讲座。
 fn context_budget_chars(model: &str) -> usize {
     match crate::llm::catalog::lookup(model).and_then(|entry| entry.context) {
-        Some(tokens) => (tokens as usize * 3 / 5)
-            .clamp(MIN_CONTEXT_BUDGET_CHARS, MAX_CONTEXT_BUDGET_CHARS),
+        Some(tokens) => {
+            (tokens as usize * 3 / 5).clamp(MIN_CONTEXT_BUDGET_CHARS, MAX_CONTEXT_BUDGET_CHARS)
+        }
         None => CONTEXT_BUDGET_CHARS,
     }
 }
@@ -1127,11 +1143,13 @@ pub async fn generate_quiz_with(
     report(progress, AT_STORE, "写入题库");
     let now = chrono::Utc::now().timestamp_millis();
     let mut tx = db.begin_write().await?;
-    let existing: Option<String> = sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
-        .bind(video_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-    let json = crate::pipeline::quiz::merge_set(existing.as_deref(), fresh, prefs.style, now, append)?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT questions_json FROM quizzes WHERE video_id=?")
+            .bind(video_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let json =
+        crate::pipeline::quiz::merge_set(existing.as_deref(), fresh, prefs.style, now, append)?;
     sqlx::query(
         "INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,?,?)
          ON CONFLICT(video_id) DO UPDATE SET questions_json=excluded.questions_json, generated_at=excluded.generated_at",
@@ -1481,7 +1499,13 @@ mod tests {
         // 26 秒的短视频（真机上测出来的）：原来按 45 秒合并，整篇并成 [00:00] 一块，
         // 生成的章节全在 00:00，摘要和笔记的出处也都指向开头。
         let (db, vid, _d) = seed_video_with_transcript().await;
-        for (idx, start) in [(1_i64, 3_000_i64), (2, 7_000), (3, 11_000), (4, 14_000), (5, 21_000)] {
+        for (idx, start) in [
+            (1_i64, 3_000_i64),
+            (2, 7_000),
+            (3, 11_000),
+            (4, 14_000),
+            (5, 21_000),
+        ] {
             sqlx::query(
                 "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)",
             )
@@ -1640,18 +1664,26 @@ mod tests {
         seed_long_transcript(&db, &vid, 500).await;
         // 没有缓存好的提要：退回纯检索，而不是对着一个问题现场分块压缩好几分钟。
         assert!(ask_lecture_prefix(&db, "m", &vid).await.unwrap().is_none());
-        let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM transcript_digests WHERE video_id=?")
-            .bind(&vid)
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let stored: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM transcript_digests WHERE video_id=?")
+                .bind(&vid)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert_eq!(stored, 0, "提问不该顺手生成提要");
 
         // 产物生成时压好了提要：问答就用它，前缀和产物用的一致。
-        let provider = Provider::Mock { canned: "要点：这一块讲了什么。".into() };
-        let input = budgeted_context(&db, &provider, "m", &vid, None).await.unwrap();
+        let provider = Provider::Mock {
+            canned: "要点：这一块讲了什么。".into(),
+        };
+        let input = budgeted_context(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         let prefix = ask_lecture_prefix(&db, "m", &vid).await.unwrap().unwrap();
-        assert_eq!(prefix, crate::llm::prompts::lecture_cacheable_context(&input.context));
+        assert_eq!(
+            prefix,
+            crate::llm::prompts::lecture_cacheable_context(&input.context)
+        );
 
         // 换成窗口更大的模型：全文放得下就用全文，不拿另一个模型压的提要凑数。
         let full = lecture_context(&db, &vid).await.unwrap();
@@ -1670,13 +1702,20 @@ mod tests {
         let full = lecture_context(&db, &vid).await.unwrap();
         assert!(full.chars().count() > ASK_PREFIX_MAX_CHARS);
         assert!(full.chars().count() <= context_budget_chars("deepseek-flash"));
-        assert!(ask_lecture_prefix(&db, "deepseek-flash", &vid).await.unwrap().is_none());
+        assert!(ask_lecture_prefix(&db, "deepseek-flash", &vid)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
     async fn a_lecture_with_no_transcript_has_no_prefix() {
         let (db, vid, _d) = seed_video_with_transcript().await;
-        sqlx::query("DELETE FROM transcripts WHERE video_id=?").bind(&vid).execute(&db.pool).await.unwrap();
+        sqlx::query("DELETE FROM transcripts WHERE video_id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
         assert!(ask_lecture_prefix(&db, "m", &vid).await.unwrap().is_none());
     }
 
@@ -1915,8 +1954,12 @@ mod tests {
         assert_eq!((drafts[0].start_ms, drafts[0].end_ms), (12_000, 30_000));
         assert_eq!((drafts[1].start_ms, drafts[1].end_ms), (90_000, 3_723_000));
 
-        let v: serde_json::Value = parse_lenient_json(r#"{"a":.5,"b":12.,"c":-007,"d":0,"e":1e05,"at":12:30}"#).unwrap();
-        assert_eq!(v, serde_json::json!({"a":0.5,"b":12,"c":-7,"d":0,"e":1e5,"at":"12:30"}));
+        let v: serde_json::Value =
+            parse_lenient_json(r#"{"a":.5,"b":12.,"c":-007,"d":0,"e":1e05,"at":12:30}"#).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"a":0.5,"b":12,"c":-7,"d":0,"e":1e5,"at":"12:30"})
+        );
     }
 
     #[test]
@@ -1935,11 +1978,16 @@ mod tests {
     }
 
     fn scripted(replies: Vec<crate::llm::ChatResponse>) -> Provider {
-        Provider::Scripted { steps: std::sync::Mutex::new(replies) }
+        Provider::Scripted {
+            steps: std::sync::Mutex::new(replies),
+        }
     }
 
     fn reply(content: &str) -> crate::llm::ChatResponse {
-        crate::llm::ChatResponse { content: content.into(), ..Default::default() }
+        crate::llm::ChatResponse {
+            content: content.into(),
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
@@ -1947,12 +1995,19 @@ mod tests {
         let (db, vid, _d) = seed_video_with_transcript().await;
         let good = r#"[{"title":"开场","summary":"导论","start_ms":0,"end_ms":5000}]"#;
         let provider = scripted(vec![reply("不是 JSON"), reply(good)]);
-        let n = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap();
+        let n = generate_chapters(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap();
         assert_eq!(n, 1);
 
         let provider = scripted(vec![reply("不是 JSON"), reply("还不是"), reply(good)]);
-        let err = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap_err();
-        assert!(err.to_string().contains("格式不对"), "只改一次，两次都坏才报错：{err}");
+        let err = generate_chapters(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("格式不对"),
+            "只改一次，两次都坏才报错：{err}"
+        );
     }
 
     #[tokio::test]
@@ -1965,13 +2020,16 @@ mod tests {
         };
         let good = reply(r#"[{"title":"开场","summary":"","start_ms":0,"end_ms":5000}]"#);
         let provider = scripted(vec![cut, good]);
-        let err = generate_chapters(&db, &provider, "m", &vid, None).await.unwrap_err();
+        let err = generate_chapters(&db, &provider, "m", &vid, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, AppError::Permanent(_)), "{err:?}");
         assert!(err.to_string().contains("单次输出上限"), "{err}");
-        let Provider::Scripted { steps } = &provider else { unreachable!() };
+        let Provider::Scripted { steps } = &provider else {
+            unreachable!()
+        };
         assert_eq!(steps.lock().unwrap().len(), 1, "截断了不重问");
     }
-
 
     #[test]
     fn parses_chapters_array() {
@@ -2033,7 +2091,10 @@ mod tests {
         ]"#;
         let questions = validate_quiz(raw).unwrap();
         assert_eq!(questions[0].option_notes.as_ref().unwrap().len(), 2);
-        assert!(questions[1].option_notes.is_none(), "对不上的逐项解析不要，免得张冠李戴");
+        assert!(
+            questions[1].option_notes.is_none(),
+            "对不上的逐项解析不要，免得张冠李戴"
+        );
     }
 
     #[test]

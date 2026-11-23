@@ -53,7 +53,9 @@ impl RemoteSource {
             RemoteAuth::Bearer(token) => request.bearer_auth(token),
             RemoteAuth::Basic { user, password } => request.basic_auth(user, Some(password)),
             RemoteAuth::Headers(headers) => {
-                headers.iter().fold(request, |request, (name, value)| request.header(name.as_str(), value.as_str()))
+                headers.iter().fold(request, |request, (name, value)| {
+                    request.header(name.as_str(), value.as_str())
+                })
             }
         }
     }
@@ -69,11 +71,17 @@ pub struct MediaServer {
 
 impl MediaServer {
     pub fn register(&self, id: &str, path: PathBuf) {
-        self.registry.lock().unwrap().insert(id.to_string(), Source::File(path));
+        self.registry
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), Source::File(path));
     }
 
     pub fn register_remote(&self, id: &str, source: RemoteSource) {
-        self.registry.lock().unwrap().insert(id.to_string(), Source::Remote(source));
+        self.registry
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), Source::Remote(source));
     }
 
     pub fn url(&self, id: &str) -> String {
@@ -90,7 +98,10 @@ fn host_is_loopback(host: Option<&str>) -> bool {
     } else {
         host.rsplit_once(':').map_or(host, |(name, _)| name)
     };
-    matches!(name.to_ascii_lowercase().as_str(), "127.0.0.1" | "localhost" | "::1")
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "127.0.0.1" | "localhost" | "::1"
+    )
 }
 
 /// 绑定随机端口并在后台 accept 循环。返回带端口的句柄。
@@ -123,7 +134,9 @@ pub(crate) struct RequestHead {
 }
 
 /// 读请求头（到 \r\n\r\n 为止；头部很小，超过 16 KB 就不读了）。连接没发东西就关了返回 None。
-pub(crate) async fn read_head<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::Result<Option<RequestHead>> {
+pub(crate) async fn read_head<S: AsyncRead + Unpin>(
+    stream: &mut S,
+) -> std::io::Result<Option<RequestHead>> {
     let mut buf = Vec::new();
     let mut tmp = [0_u8; 1024];
     loop {
@@ -160,12 +173,20 @@ pub(crate) async fn read_head<S: AsyncRead + Unpin>(stream: &mut S) -> std::io::
 
 pub(crate) async fn respond_empty<S: AsyncWrite + Unpin>(stream: &mut S, status: &str) {
     let _ = stream
-        .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes())
+        .write_all(
+            format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
         .await;
 }
 
-async fn handle<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, registry: Registry) -> std::io::Result<()> {
-    let Some(request) = read_head(&mut stream).await? else { return Ok(()) };
+async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    registry: Registry,
+) -> std::io::Result<()> {
+    let Some(request) = read_head(&mut stream).await? else {
+        return Ok(());
+    };
 
     // 只认发往本机地址的请求。挡的是 DNS 重绑定：别的网页把自己的域名解析到 127.0.0.1，
     // 浏览器会把这个服务当成「同源」，就能用 fetch 读走视频。那时请求的 Host 头是对方的域名。
@@ -179,8 +200,24 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, registry: Regi
     let id = target.strip_prefix("/m/").unwrap_or("");
     let source = registry.lock().unwrap().get(id).cloned();
     match source {
-        Some(Source::File(path)) => serve_file(&mut stream, &path, &request.method, request.range.as_deref()).await,
-        Some(Source::Remote(remote)) => proxy(&mut stream, &remote, &request.method, request.range.as_deref()).await,
+        Some(Source::File(path)) => {
+            serve_file(
+                &mut stream,
+                &path,
+                &request.method,
+                request.range.as_deref(),
+            )
+            .await
+        }
+        Some(Source::Remote(remote)) => {
+            proxy(
+                &mut stream,
+                &remote,
+                &request.method,
+                request.range.as_deref(),
+            )
+            .await
+        }
         None => {
             respond_empty(&mut stream, "404 Not Found").await;
             Ok(())
@@ -260,7 +297,11 @@ async fn proxy<S: AsyncWrite + Unpin>(
     range_header: Option<&str>,
 ) -> std::io::Result<()> {
     let head = method.eq_ignore_ascii_case("HEAD");
-    let method = if head { reqwest::Method::HEAD } else { reqwest::Method::GET };
+    let method = if head {
+        reqwest::Method::HEAD
+    } else {
+        reqwest::Method::GET
+    };
     let mut request = remote.authorize(remote.client.request(method, &remote.url));
     if let Some(range) = range_header {
         request = request.header(reqwest::header::RANGE, range);
@@ -279,8 +320,16 @@ async fn proxy<S: AsyncWrite + Unpin>(
         status.as_u16(),
         status.canonical_reason().unwrap_or(""),
     );
-    for name in [reqwest::header::CONTENT_TYPE, reqwest::header::CONTENT_LENGTH, reqwest::header::CONTENT_RANGE] {
-        if let Some(value) = response.headers().get(&name).and_then(|value| value.to_str().ok()) {
+    for name in [
+        reqwest::header::CONTENT_TYPE,
+        reqwest::header::CONTENT_LENGTH,
+        reqwest::header::CONTENT_RANGE,
+    ] {
+        if let Some(value) = response
+            .headers()
+            .get(&name)
+            .and_then(|value| value.to_str().ok())
+        {
             header.push_str(&format!("{name}: {value}\r\n"));
         }
     }
@@ -436,10 +485,22 @@ mod tests {
 
     #[test]
     fn only_loopback_hosts_are_served() {
-        for ok in [Some("127.0.0.1"), Some("127.0.0.1:51234"), Some("localhost:80"), Some("LOCALHOST"), Some("[::1]:9000"), None] {
+        for ok in [
+            Some("127.0.0.1"),
+            Some("127.0.0.1:51234"),
+            Some("localhost:80"),
+            Some("LOCALHOST"),
+            Some("[::1]:9000"),
+            None,
+        ] {
             assert!(host_is_loopback(ok), "{ok:?}");
         }
-        for bad in [Some("evil.example:51234"), Some("127.0.0.1.evil.example"), Some("localhost.evil.example:1"), Some("")] {
+        for bad in [
+            Some("evil.example:51234"),
+            Some("127.0.0.1.evil.example"),
+            Some("localhost.evil.example:1"),
+            Some(""),
+        ] {
             assert!(!host_is_loopback(bad), "{bad:?}");
         }
     }
@@ -452,7 +513,9 @@ mod tests {
         std::fs::write(&path, b"fake-mp4-bytes").unwrap();
         let server = start().await.unwrap();
         server.register("vid1", path);
-        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port)).await.unwrap();
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+            .await
+            .unwrap();
         stream
             .write_all(b"GET /m/vid1 HTTP/1.1\r\nHost: rebound.example:8080\r\n\r\n")
             .await

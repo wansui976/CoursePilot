@@ -100,7 +100,10 @@ pub fn missing_files(models_root: &Path) -> Vec<(PathBuf, &'static ModelFile)> {
 /// sherpa-onnx 带的 onnxruntime 放在哪：安装包里 macOS 在 Contents/Frameworks，
 /// Windows / Linux 在可执行文件旁边；开发时（target/debug）也在可执行文件旁边。
 fn runtime_candidates() -> Vec<PathBuf> {
-    let Some(exe_dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) else {
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
         return Vec::new();
     };
     #[cfg(target_os = "macos")]
@@ -148,7 +151,9 @@ type EngineCache = Mutex<Option<(PathBuf, Arc<PaddleOcr>)>>;
 fn cached(dir: &Path) -> AppResult<Arc<PaddleOcr>> {
     static CACHE: OnceLock<EngineCache> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(None));
-    let mut slot = cache.lock().map_err(|_| AppError::Pipeline("OCR 模型缓存损坏".into()))?;
+    let mut slot = cache
+        .lock()
+        .map_err(|_| AppError::Pipeline("OCR 模型缓存损坏".into()))?;
     if let Some((cached_dir, engine)) = slot.as_ref() {
         if cached_dir == dir {
             return Ok(engine.clone());
@@ -163,11 +168,16 @@ impl PaddleOcr {
     pub fn load(dir: &Path) -> AppResult<Self> {
         let env = environment()?;
         let session = |name: &str| -> AppResult<Session> {
-            let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(4);
+            let threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .min(4);
             Session::builder(env)
                 .and_then(|builder| builder.with_intra_threads(threads).map_err(Into::into))
                 .and_then(|mut builder| builder.commit_from_file(dir.join(name)))
-                .map_err(|error| AppError::Pipeline(format!("加载 PaddleOCR 模型 {name} 失败：{error}")))
+                .map_err(|error| {
+                    AppError::Pipeline(format!("加载 PaddleOCR 模型 {name} 失败：{error}"))
+                })
         };
         let dict_text = std::fs::read_to_string(dir.join(DICT_FILE))?;
         let mut dict: Vec<String> = dict_text
@@ -175,7 +185,11 @@ impl PaddleOcr {
             .map(|line| line.trim_end_matches('\r').to_string())
             .collect();
         dict.push(" ".into());
-        Ok(Self { det: Mutex::new(session("det.onnx")?), rec: Mutex::new(session("rec.onnx")?), dict })
+        Ok(Self {
+            det: Mutex::new(session("det.onnx")?),
+            rec: Mutex::new(session("rec.onnx")?),
+            dict,
+        })
     }
 
     pub fn recognize(&self, image: &RgbImage) -> AppResult<String> {
@@ -185,7 +199,10 @@ impl PaddleOcr {
             let crop = crop_quad(image, &quad);
             if let Some((text, score)) = self.read_line(&crop)? {
                 if score >= REC_MIN_SCORE && !text.trim().is_empty() {
-                    lines.push(TextBox { quad, text: text.trim().to_string() });
+                    lines.push(TextBox {
+                        quad,
+                        text: text.trim().to_string(),
+                    });
                 }
             }
         }
@@ -209,7 +226,10 @@ impl PaddleOcr {
         }
         let tensor = Tensor::from_array(([1usize, 3, det_h as usize, det_w as usize], input))
             .map_err(|error| AppError::Pipeline(format!("PaddleOCR 检测输入：{error}")))?;
-        let mut det = self.det.lock().map_err(|_| AppError::Pipeline("OCR 检测模型被占用".into()))?;
+        let mut det = self
+            .det
+            .lock()
+            .map_err(|_| AppError::Pipeline("OCR 检测模型被占用".into()))?;
         let outputs = det
             .run(ort::inputs![tensor])
             .map_err(|error| AppError::Pipeline(format!("PaddleOCR 检测失败：{error}")))?;
@@ -218,7 +238,13 @@ impl PaddleOcr {
             .map_err(|error| AppError::Pipeline(format!("PaddleOCR 检测输出：{error}")))?;
         let map_h = shape[shape.len() - 2] as u32;
         let map_w = shape[shape.len() - 1] as u32;
-        Ok(boxes_from_map(prob, map_w, map_h, width as f32 / map_w as f32, height as f32 / map_h as f32))
+        Ok(boxes_from_map(
+            prob,
+            map_w,
+            map_h,
+            width as f32 / map_w as f32,
+            height as f32 / map_h as f32,
+        ))
     }
 
     /// 一个文字条 → (文字, 平均置信度)。条太小（宽或高不到 2 像素）返回 None。
@@ -227,7 +253,8 @@ impl PaddleOcr {
         if w < 2 || h < 2 {
             return Ok(None);
         }
-        let target_w = ((REC_HEIGHT as f32 * w as f32 / h as f32).ceil() as u32).clamp(8, REC_MAX_WIDTH);
+        let target_w =
+            ((REC_HEIGHT as f32 * w as f32 / h as f32).ceil() as u32).clamp(8, REC_MAX_WIDTH);
         let resized = imageops::resize(crop, target_w, REC_HEIGHT, imageops::FilterType::Triangle);
         let plane = (target_w * REC_HEIGHT) as usize;
         let mut input = vec![0f32; plane * 3];
@@ -237,9 +264,13 @@ impl PaddleOcr {
                 input[c * plane + i] = (bgr[c] as f32 / 255.0 - 0.5) / 0.5;
             }
         }
-        let tensor = Tensor::from_array(([1usize, 3, REC_HEIGHT as usize, target_w as usize], input))
-            .map_err(|error| AppError::Pipeline(format!("PaddleOCR 识别输入：{error}")))?;
-        let mut rec = self.rec.lock().map_err(|_| AppError::Pipeline("OCR 识别模型被占用".into()))?;
+        let tensor =
+            Tensor::from_array(([1usize, 3, REC_HEIGHT as usize, target_w as usize], input))
+                .map_err(|error| AppError::Pipeline(format!("PaddleOCR 识别输入：{error}")))?;
+        let mut rec = self
+            .rec
+            .lock()
+            .map_err(|_| AppError::Pipeline("OCR 识别模型被占用".into()))?;
         let outputs = rec
             .run(ort::inputs![tensor])
             .map_err(|error| AppError::Pipeline(format!("PaddleOCR 识别失败：{error}")))?;
@@ -304,7 +335,11 @@ fn boxes_from_map(
     scale_y: f32,
 ) -> Vec<[(f32, f32); 4]> {
     let mask = GrayImage::from_fn(map_w, map_h, |x, y| {
-        Luma([if prob[(y * map_w + x) as usize] > DET_THRESH { 255 } else { 0 }])
+        Luma([if prob[(y * map_w + x) as usize] > DET_THRESH {
+            255
+        } else {
+            0
+        }])
     });
     let contours = imageproc::contours::find_contours::<i32>(&mask);
     let mut boxes = Vec::new();
@@ -328,10 +363,12 @@ fn boxes_from_map(
             continue;
         }
         let ordered = order_corners(expanded);
-        boxes.push(ordered.map(|(x, y)| (
-            (x * scale_x).clamp(0.0, map_w as f32 * scale_x - 1.0),
-            (y * scale_y).clamp(0.0, map_h as f32 * scale_y - 1.0),
-        )));
+        boxes.push(ordered.map(|(x, y)| {
+            (
+                (x * scale_x).clamp(0.0, map_w as f32 * scale_x - 1.0),
+                (y * scale_y).clamp(0.0, map_h as f32 * scale_y - 1.0),
+            )
+        }));
     }
     boxes.sort_by(|a, b| {
         let (ay, by) = (a[0].1, b[0].1);
@@ -369,7 +406,11 @@ fn box_score(prob: &[f32], map_w: u32, map_h: u32, c: &[(f32, f32); 4]) -> f32 {
             }
         }
     }
-    if n == 0 { 0.0 } else { sum / n as f32 }
+    if n == 0 {
+        0.0
+    } else {
+        sum / n as f32
+    }
 }
 
 /// 点在凸四边形内（含边上）。
@@ -396,8 +437,14 @@ fn unclip(c: &[(f32, f32); 4], ratio: f32) -> [(f32, f32); 4] {
     let (w, h) = rect_sides(c);
     let d = (w * h * ratio) / (2.0 * (w + h));
     let center = ((c[0].0 + c[2].0) / 2.0, (c[0].1 + c[2].1) / 2.0);
-    let ux = ((c[1].0 - c[0].0) / w.max(1e-6), (c[1].1 - c[0].1) / w.max(1e-6));
-    let uy = ((c[2].0 - c[1].0) / h.max(1e-6), (c[2].1 - c[1].1) / h.max(1e-6));
+    let ux = (
+        (c[1].0 - c[0].0) / w.max(1e-6),
+        (c[1].1 - c[0].1) / w.max(1e-6),
+    );
+    let uy = (
+        (c[2].0 - c[1].0) / h.max(1e-6),
+        (c[2].1 - c[1].1) / h.max(1e-6),
+    );
     let (hw, hh) = (w / 2.0 + d, h / 2.0 + d);
     [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].map(|(sx, sy): (f32, f32)| {
         (
@@ -409,22 +456,51 @@ fn unclip(c: &[(f32, f32); 4], ratio: f32) -> [(f32, f32); 4] {
 
 /// 四个角排成 左上、右上、右下、左下。
 fn order_corners(c: [(f32, f32); 4]) -> [(f32, f32); 4] {
-    let tl = *c.iter().min_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1))).unwrap();
-    let br = *c.iter().max_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1))).unwrap();
-    let tr = *c.iter().min_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0))).unwrap();
-    let bl = *c.iter().max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0))).unwrap();
+    let tl = *c
+        .iter()
+        .min_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)))
+        .unwrap();
+    let br = *c
+        .iter()
+        .max_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)))
+        .unwrap();
+    let tr = *c
+        .iter()
+        .min_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))
+        .unwrap();
+    let bl = *c
+        .iter()
+        .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))
+        .unwrap();
     [tl, tr, br, bl]
 }
 
 /// 把四边形透视拉正成矩形条；竖排（高是宽的 1.5 倍以上）转 90° 成横条。
 fn crop_quad(image: &RgbImage, quad: &[(f32, f32); 4]) -> RgbImage {
-    let w = dist(quad[0], quad[1]).max(dist(quad[3], quad[2])).round().max(1.0) as u32;
-    let h = dist(quad[0], quad[3]).max(dist(quad[1], quad[2])).round().max(1.0) as u32;
-    let dst = [(0.0, 0.0), (w as f32, 0.0), (w as f32, h as f32), (0.0, h as f32)];
+    let w = dist(quad[0], quad[1])
+        .max(dist(quad[3], quad[2]))
+        .round()
+        .max(1.0) as u32;
+    let h = dist(quad[0], quad[3])
+        .max(dist(quad[1], quad[2]))
+        .round()
+        .max(1.0) as u32;
+    let dst = [
+        (0.0, 0.0),
+        (w as f32, 0.0),
+        (w as f32, h as f32),
+        (0.0, h as f32),
+    ];
     let mut out = RgbImage::new(w, h);
     // 输出像素 → 原图像素：warp 需要的是「把原图坐标映到输出坐标」的变换。
     if let Some(projection) = Projection::from_control_points(*quad, dst) {
-        warp_into(image, projection, Interpolation::Bilinear, Border::Constant(Rgb([255, 255, 255])), &mut out);
+        warp_into(
+            image,
+            projection,
+            Interpolation::Bilinear,
+            Border::Constant(Rgb([255, 255, 255])),
+            &mut out,
+        );
     }
     if h as f32 >= w as f32 * 1.5 {
         imageops::rotate270(&out)
@@ -443,10 +519,11 @@ fn ctc_decode(probs: &[f32], steps: usize, classes: usize, dict: &[String]) -> (
     let mut previous = 0usize;
     for t in 0..steps {
         let row = &probs[t * classes..(t + 1) * classes];
-        let (best, p) = row
-            .iter()
-            .enumerate()
-            .fold((0usize, f32::MIN), |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc });
+        let (best, p) =
+            row.iter().enumerate().fold(
+                (0usize, f32::MIN),
+                |acc, (i, &v)| if v > acc.1 { (i, v) } else { acc },
+            );
         if best != 0 && best != previous {
             if let Some(ch) = dict.get(best - 1) {
                 text.push_str(ch);
@@ -472,7 +549,9 @@ fn join_lines(mut boxes: Vec<TextBox>) -> String {
     let mut rows: Vec<Vec<TextBox>> = Vec::new();
     for item in boxes {
         let joins = rows.last().is_some_and(|row| {
-            let (rt, rb) = row.iter().fold((f32::MAX, f32::MIN), |(t, b), x| (t.min(top(x)), b.max(bottom(x))));
+            let (rt, rb) = row.iter().fold((f32::MAX, f32::MIN), |(t, b), x| {
+                (t.min(top(x)), b.max(bottom(x)))
+            });
             let overlap = rb.min(bottom(&item)) - rt.max(top(&item));
             overlap > 0.5 * (bottom(&item) - top(&item)).min(rb - rt)
         });
@@ -485,7 +564,10 @@ fn join_lines(mut boxes: Vec<TextBox>) -> String {
     rows.into_iter()
         .map(|mut row| {
             row.sort_by(|a, b| a.quad[0].0.total_cmp(&b.quad[0].0));
-            row.into_iter().map(|b| b.text).collect::<Vec<_>>().join(" ")
+            row.into_iter()
+                .map(|b| b.text)
+                .collect::<Vec<_>>()
+                .join(" ")
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -506,7 +588,14 @@ mod tests {
     fn ctc_drops_blanks_and_repeats() {
         let dict: Vec<String> = ["梯", "度", " "].iter().map(|s| s.to_string()).collect();
         // 4 类：空白、梯、度、空格。序列：梯 梯 空白 梯 度 度 → 「梯梯度」
-        let rows = [[0.1, 0.9, 0.0, 0.0], [0.1, 0.8, 0.1, 0.0], [0.9, 0.05, 0.05, 0.0], [0.0, 0.7, 0.3, 0.0], [0.0, 0.1, 0.9, 0.0], [0.0, 0.0, 0.8, 0.2]];
+        let rows = [
+            [0.1, 0.9, 0.0, 0.0],
+            [0.1, 0.8, 0.1, 0.0],
+            [0.9, 0.05, 0.05, 0.0],
+            [0.0, 0.7, 0.3, 0.0],
+            [0.0, 0.1, 0.9, 0.0],
+            [0.0, 0.0, 0.8, 0.2],
+        ];
         let probs: Vec<f32> = rows.iter().flatten().copied().collect();
         let (text, score) = ctc_decode(&probs, rows.len(), 4, &dict);
         assert_eq!(text, "梯梯度");
@@ -518,7 +607,10 @@ mod tests {
         let rect = [(10.0, 10.0), (110.0, 10.0), (110.0, 30.0), (10.0, 30.0)];
         let out = unclip(&rect, 1.5);
         // d = 100*20*1.5 / (2*120) = 12.5
-        assert_eq!(order_corners(out), [(-2.5, -2.5), (122.5, -2.5), (122.5, 42.5), (-2.5, 42.5)]);
+        assert_eq!(
+            order_corners(out),
+            [(-2.5, -2.5), (122.5, -2.5), (122.5, 42.5), (-2.5, 42.5)]
+        );
     }
 
     #[test]
@@ -527,7 +619,11 @@ mod tests {
             quad: [(x, y), (x + 50.0, y), (x + 50.0, y + 20.0), (x, y + 20.0)],
             text: text.into(),
         };
-        let out = join_lines(vec![b(200.0, 12.0, "下降"), b(10.0, 10.0, "梯度"), b(10.0, 60.0, "学习率")]);
+        let out = join_lines(vec![
+            b(200.0, 12.0, "下降"),
+            b(10.0, 10.0, "梯度"),
+            b(10.0, 60.0, "学习率"),
+        ]);
         assert_eq!(out, "梯度 下降\n学习率");
     }
 
@@ -536,7 +632,9 @@ mod tests {
     #[test]
     #[ignore]
     fn reads_a_rendered_slide() {
-        let Ok(dir) = std::env::var("PADDLE_OCR_MODELS") else { return };
+        let Ok(dir) = std::env::var("PADDLE_OCR_MODELS") else {
+            return;
+        };
         let image = std::env::var("PADDLE_OCR_IMAGE").expect("PADDLE_OCR_IMAGE");
         let engine = PaddleOcr::load(Path::new(&dir)).expect("load");
         let picture = image::open(image).unwrap().to_rgb8();
@@ -551,7 +649,10 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_models() {
-        let (Ok(models), Ok(images)) = (std::env::var("PADDLE_OCR_BENCH"), std::env::var("PADDLE_OCR_IMAGES")) else {
+        let (Ok(models), Ok(images)) = (
+            std::env::var("PADDLE_OCR_BENCH"),
+            std::env::var("PADDLE_OCR_IMAGES"),
+        ) else {
             return;
         };
         for spec in models.split(';').filter(|s| !s.is_empty()) {

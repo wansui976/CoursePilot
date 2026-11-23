@@ -57,10 +57,11 @@ const SNAPSHOT_SOURCES: &[(&str, &str, &str)] = &[
 pub async fn enqueue_snapshot(db: &crate::db::Db) -> AppResult<()> {
     let now = chrono::Utc::now().timestamp_millis();
     let mut tx = db.begin_write().await?;
-    let device: String = sqlx::query_scalar("SELECT device_id FROM sync_device_state WHERE singleton=1")
-        .fetch_optional(&mut *tx)
-        .await?
-        .unwrap_or_default();
+    let device: String =
+        sqlx::query_scalar("SELECT device_id FROM sync_device_state WHERE singleton=1")
+            .fetch_optional(&mut *tx)
+            .await?
+            .unwrap_or_default();
     for (record_type, table, id_column) in SNAPSHOT_SOURCES {
         sqlx::query(&format!(
             "INSERT INTO sync_outbox(record_type,record_id,operation,changed_at)
@@ -88,28 +89,42 @@ pub async fn enqueue_snapshot(db: &crate::db::Db) -> AppResult<()> {
 }
 
 fn artifact_of(record_type: &str) -> Option<&'static str> {
-    VIDEO_TYPES.iter().find(|(name, _)| *name == record_type).and_then(|(_, artifact)| *artifact)
+    VIDEO_TYPES
+        .iter()
+        .find(|(name, _)| *name == record_type)
+        .and_then(|(_, artifact)| *artifact)
 }
 
-async fn source_of(tx: &mut Transaction<'_, Sqlite>, video_id: &str, artifact: Option<&str>) -> AppResult<Value> {
-    let Some(artifact) = artifact else { return Ok(Value::Null) };
-    let row: Option<(String, i64)> =
-        sqlx::query_as("SELECT fingerprint, generated_at FROM ai_artifact_sources WHERE video_id=? AND artifact=?")
-            .bind(video_id)
-            .bind(artifact)
-            .fetch_optional(&mut **tx)
-            .await?;
+async fn source_of(
+    tx: &mut Transaction<'_, Sqlite>,
+    video_id: &str,
+    artifact: Option<&str>,
+) -> AppResult<Value> {
+    let Some(artifact) = artifact else {
+        return Ok(Value::Null);
+    };
+    let row: Option<(String, i64)> = sqlx::query_as(
+        "SELECT fingerprint, generated_at FROM ai_artifact_sources WHERE video_id=? AND artifact=?",
+    )
+    .bind(video_id)
+    .bind(artifact)
+    .fetch_optional(&mut **tx)
+    .await?;
     Ok(row
         .map(|(fingerprint, generated_at)| json!({"fingerprint": fingerprint, "generatedAt": generated_at}))
         .unwrap_or(Value::Null))
 }
 
 /// 本机有文件的视频的封面路径（没有文件的设备不往外发封面：它的封面本来就是收来的）。
-async fn local_cover_path(tx: &mut Transaction<'_, Sqlite>, video_id: &str) -> AppResult<Option<std::path::PathBuf>> {
-    let row: Option<(String, String)> = sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
-        .bind(video_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+async fn local_cover_path(
+    tx: &mut Transaction<'_, Sqlite>,
+    video_id: &str,
+) -> AppResult<Option<std::path::PathBuf>> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+            .bind(video_id)
+            .fetch_optional(&mut **tx)
+            .await?;
     Ok(row
         .filter(|(file_path, data_dir)| !file_path.is_empty() && !data_dir.is_empty())
         .map(|(_, data_dir)| std::path::Path::new(&data_dir).join("cover.jpg")))
@@ -141,11 +156,16 @@ pub async fn enqueue_cover_snapshot(db: &crate::db::Db) -> AppResult<usize> {
     Ok(ids.len())
 }
 
-async fn enqueue_covers_in(tx: &mut Transaction<'_, Sqlite>, ids: &[String], now: i64) -> AppResult<()> {
-    let device: String = sqlx::query_scalar("SELECT device_id FROM sync_device_state WHERE singleton=1")
-        .fetch_optional(&mut **tx)
-        .await?
-        .unwrap_or_default();
+async fn enqueue_covers_in(
+    tx: &mut Transaction<'_, Sqlite>,
+    ids: &[String],
+    now: i64,
+) -> AppResult<()> {
+    let device: String =
+        sqlx::query_scalar("SELECT device_id FROM sync_device_state WHERE singleton=1")
+            .fetch_optional(&mut **tx)
+            .await?
+            .unwrap_or_default();
     for id in ids {
         sqlx::query(
             "INSERT INTO sync_outbox(record_type,record_id,operation,changed_at) VALUES (?,?,'save',?)
@@ -172,16 +192,24 @@ async fn enqueue_covers_in(tx: &mut Transaction<'_, Sqlite>, ids: &[String], now
 }
 
 /// 出件：从本地表拼出整条记录。记录已经不存在（内容被删光）时返回 None，外发会转成删除。
-pub async fn payload(tx: &mut Transaction<'_, Sqlite>, record_type: &str, id: &str) -> AppResult<Option<Value>> {
+pub async fn payload(
+    tx: &mut Transaction<'_, Sqlite>,
+    record_type: &str,
+    id: &str,
+) -> AppResult<Option<Value>> {
     if record_type == COVER {
-        let Some(path) = local_cover_path(tx, id).await? else { return Ok(None) };
+        let Some(path) = local_cover_path(tx, id).await? else {
+            return Ok(None);
+        };
         let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
         if size == 0 || size > COVER_MAX_BYTES {
             return Ok(None);
         }
         let bytes = std::fs::read(&path)?;
         use base64::Engine as _;
-        return Ok(Some(json!({"videoID": id, "jpeg": base64::engine::general_purpose::STANDARD.encode(bytes)})));
+        return Ok(Some(
+            json!({"videoID": id, "jpeg": base64::engine::general_purpose::STANDARD.encode(bytes)}),
+        ));
     }
     let source = source_of(tx, id, artifact_of(record_type)).await?;
     let value = match record_type {
@@ -213,18 +241,23 @@ pub async fn payload(tx: &mut Transaction<'_, Sqlite>, record_type: &str, id: &s
             }
             let chapters: Vec<Value> = rows
                 .into_iter()
-                .map(|(title, summary, start, end, order)| json!([title, summary, start, end, order]))
+                .map(|(title, summary, start, end, order)| {
+                    json!([title, summary, start, end, order])
+                })
                 .collect();
             json!({"videoID": id, "chapters": chapters, "source": source})
         }
         "Summary" | "Quiz" | "Mindmap" | "Highlights" => {
             let (table, column) = single_table(record_type);
-            let row: Option<(String, i64)> =
-                sqlx::query_as(&format!("SELECT {column}, generated_at FROM {table} WHERE video_id=?"))
-                    .bind(id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
-            let Some((content, generated_at)) = row else { return Ok(None) };
+            let row: Option<(String, i64)> = sqlx::query_as(&format!(
+                "SELECT {column}, generated_at FROM {table} WHERE video_id=?"
+            ))
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            let Some((content, generated_at)) = row else {
+                return Ok(None);
+            };
             json!({"videoID": id, "content": content, "generatedAt": generated_at, "source": source})
         }
         COURSE_KNOWLEDGE => {
@@ -278,13 +311,19 @@ pub enum ContentOutcome {
     Parked,
 }
 
-async fn local_stamp(tx: &mut Transaction<'_, Sqlite>, record_type: &str, id: &str) -> AppResult<(i64, String)> {
-    Ok(sqlx::query_as("SELECT updated_at, device FROM sync_content_stamps WHERE record_type=? AND record_id=?")
-        .bind(record_type)
-        .bind(id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .unwrap_or((0, String::new())))
+async fn local_stamp(
+    tx: &mut Transaction<'_, Sqlite>,
+    record_type: &str,
+    id: &str,
+) -> AppResult<(i64, String)> {
+    Ok(sqlx::query_as(
+        "SELECT updated_at, device FROM sync_content_stamps WHERE record_type=? AND record_id=?",
+    )
+    .bind(record_type)
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .unwrap_or((0, String::new())))
 }
 
 async fn set_stamp(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> AppResult<()> {
@@ -303,23 +342,39 @@ async fn set_stamp(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) ->
 
 /// 对端的版本比本地新吗？（墙钟, 设备）字典序比较，两台设备得出同一个胜者。
 async fn remote_wins(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> AppResult<bool> {
-    let (local_ms, local_device) = local_stamp(tx, &envelope.record_type, &envelope.record_id).await?;
+    let (local_ms, local_device) =
+        local_stamp(tx, &envelope.record_type, &envelope.record_id).await?;
     Ok((envelope.updated_at, envelope.version.device.as_str()) > (local_ms, local_device.as_str()))
 }
 
 async fn exists(tx: &mut Transaction<'_, Sqlite>, table: &str, id: &str) -> AppResult<bool> {
-    Ok(sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?)"))
-        .bind(id)
-        .fetch_one(&mut **tx)
-        .await?)
+    Ok(
+        sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id=?)"))
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await?,
+    )
 }
 
-async fn write_source(tx: &mut Transaction<'_, Sqlite>, video_id: &str, record_type: &str, source: Option<&Value>) -> AppResult<()> {
-    let Some(artifact) = artifact_of(record_type) else { return Ok(()) };
+async fn write_source(
+    tx: &mut Transaction<'_, Sqlite>,
+    video_id: &str,
+    record_type: &str,
+    source: Option<&Value>,
+) -> AppResult<()> {
+    let Some(artifact) = artifact_of(record_type) else {
+        return Ok(());
+    };
     match source.filter(|value| !value.is_null()) {
         Some(source) => {
-            let fingerprint = source.get("fingerprint").and_then(Value::as_str).unwrap_or_default();
-            let generated_at = source.get("generatedAt").and_then(Value::as_i64).unwrap_or(0);
+            let fingerprint = source
+                .get("fingerprint")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let generated_at = source
+                .get("generatedAt")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
             sqlx::query(
                 "INSERT INTO ai_artifact_sources(video_id,artifact,fingerprint,generated_at) VALUES (?,?,?,?)
                  ON CONFLICT(video_id,artifact) DO UPDATE SET fingerprint=excluded.fingerprint, generated_at=excluded.generated_at",
@@ -343,7 +398,10 @@ async fn write_source(tx: &mut Transaction<'_, Sqlite>, video_id: &str, record_t
 }
 
 /// 合并一条保存信封（调用方已经在回声抑制的事务里）。
-pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> AppResult<ContentOutcome> {
+pub async fn save(
+    tx: &mut Transaction<'_, Sqlite>,
+    envelope: &SyncEnvelope,
+) -> AppResult<ContentOutcome> {
     let id = envelope.record_id.as_str();
     let payload = &envelope.payload;
     let owner_ready = if envelope.record_type == COURSE_KNOWLEDGE {
@@ -360,11 +418,13 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
     match envelope.record_type.as_str() {
         COVER => {
             use base64::Engine as _;
-            let row: Option<(String, String)> = sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
-                .bind(id)
-                .fetch_optional(&mut **tx)
-                .await?;
-            let Some((file_path, data_dir)) = row.filter(|(_, data_dir)| !data_dir.is_empty()) else {
+            let row: Option<(String, String)> =
+                sqlx::query_as("SELECT file_path, data_dir FROM videos WHERE id=?")
+                    .bind(id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            let Some((file_path, data_dir)) = row.filter(|(_, data_dir)| !data_dir.is_empty())
+            else {
                 return Ok(ContentOutcome::Skipped);
             };
             let cover = std::path::Path::new(&data_dir).join("cover.jpg");
@@ -386,8 +446,16 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
             std::fs::rename(&temporary, &cover)?;
         }
         "Transcript" => {
-            sqlx::query("DELETE FROM transcripts WHERE video_id=?").bind(id).execute(&mut **tx).await?;
-            for segment in payload.get("segments").and_then(Value::as_array).into_iter().flatten() {
+            sqlx::query("DELETE FROM transcripts WHERE video_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
+            for segment in payload
+                .get("segments")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 sqlx::query(
                     "INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text,words_json) VALUES (?,?,?,?,?,?)",
                 )
@@ -407,8 +475,16 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
                 .await?;
         }
         "Chapters" => {
-            sqlx::query("DELETE FROM chapters WHERE video_id=?").bind(id).execute(&mut **tx).await?;
-            for chapter in payload.get("chapters").and_then(Value::as_array).into_iter().flatten() {
+            sqlx::query("DELETE FROM chapters WHERE video_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
+            for chapter in payload
+                .get("chapters")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 sqlx::query(
                     "INSERT INTO chapters(video_id,title,summary,start_ms,end_ms,order_index) VALUES (?,?,?,?,?,?)",
                 )
@@ -439,8 +515,16 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
         COURSE_KNOWLEDGE => {
             // 知识点 id 跨设备保持不变：费曼复述的记录按「concept:<id>」引用它们。
             // 删知识点只会级联删出处（下面整份重写），不会碰到用户自己的东西。
-            sqlx::query("DELETE FROM concepts WHERE course_id=?").bind(id).execute(&mut **tx).await?;
-            for concept in payload.get("concepts").and_then(Value::as_array).into_iter().flatten() {
+            sqlx::query("DELETE FROM concepts WHERE course_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
+            for concept in payload
+                .get("concepts")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 sqlx::query(
                     "INSERT INTO concepts(id,course_id,name,created_at,explanation,explanation_source) VALUES (?,?,?,?,?,?)
                      ON CONFLICT(id) DO UPDATE SET course_id=excluded.course_id, name=excluded.name,
@@ -457,7 +541,12 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
                 .await?;
             }
             // 出处指向的视频这台设备上可能还没有（还没同步到）：只记有的，等视频到了下一轮整条再来。
-            for occurrence in payload.get("occurrences").and_then(Value::as_array).into_iter().flatten() {
+            for occurrence in payload
+                .get("occurrences")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
                 sqlx::query(
                     "INSERT OR IGNORE INTO concept_occurrences(concept_id,video_id,start_ms)
                      SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM videos WHERE id=?) AND EXISTS(SELECT 1 FROM concepts WHERE id=?)",
@@ -499,27 +588,45 @@ pub async fn save(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> 
 }
 
 /// 合并一条删除信封：对端更新地删掉了（比如清空重来），本地没有更晚的版本就跟着删。
-pub async fn delete(tx: &mut Transaction<'_, Sqlite>, envelope: &SyncEnvelope) -> AppResult<ContentOutcome> {
+pub async fn delete(
+    tx: &mut Transaction<'_, Sqlite>,
+    envelope: &SyncEnvelope,
+) -> AppResult<ContentOutcome> {
     if !remote_wins(tx, envelope).await? {
         return Ok(ContentOutcome::Skipped);
     }
     let id = envelope.record_id.as_str();
     match envelope.record_type.as_str() {
         "Transcript" => {
-            sqlx::query("DELETE FROM transcripts WHERE video_id=?").bind(id).execute(&mut **tx).await?;
+            sqlx::query("DELETE FROM transcripts WHERE video_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
         }
         "Chapters" => {
-            sqlx::query("DELETE FROM chapters WHERE video_id=?").bind(id).execute(&mut **tx).await?;
+            sqlx::query("DELETE FROM chapters WHERE video_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
             write_source(tx, id, "Chapters", None).await?;
         }
         "Summary" | "Quiz" | "Mindmap" | "Highlights" => {
             let (table, _) = single_table(&envelope.record_type);
-            sqlx::query(&format!("DELETE FROM {table} WHERE video_id=?")).bind(id).execute(&mut **tx).await?;
+            sqlx::query(&format!("DELETE FROM {table} WHERE video_id=?"))
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
             write_source(tx, id, &envelope.record_type, None).await?;
         }
         COURSE_KNOWLEDGE => {
-            sqlx::query("DELETE FROM concepts WHERE course_id=?").bind(id).execute(&mut **tx).await?;
-            sqlx::query("DELETE FROM course_knowledge_overviews WHERE course_id=?").bind(id).execute(&mut **tx).await?;
+            sqlx::query("DELETE FROM concepts WHERE course_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query("DELETE FROM course_knowledge_overviews WHERE course_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
         }
         _ => return Ok(ContentOutcome::Skipped),
     }

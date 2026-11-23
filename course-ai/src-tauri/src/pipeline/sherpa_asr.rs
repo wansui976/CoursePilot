@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use sherpa_onnx::{
-    LinearResampler, OfflineRecognizer, OfflineRecognizerConfig, OfflineQwen3ASRModelConfig,
+    LinearResampler, OfflineQwen3ASRModelConfig, OfflineRecognizer, OfflineRecognizerConfig,
     OfflineSenseVoiceModelConfig, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
@@ -57,7 +57,11 @@ fn performance_cores() -> Option<usize> {
 ///   浮点误差就可能让个别字走另一条路（3 路 × 2 线程 100 秒，但错误率 10.5% → 11.6%），
 ///   所以每路线程数保持不变，只加路数。多一路约多占 0.4 GB；手机上内存本来就紧，只开一路。
 fn parallelism(kind: SherpaKind) -> (usize, i32) {
-    let env = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<usize>().ok());
+    let env = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+    };
     let budget = core_budget();
     let mobile = cfg!(any(target_os = "android", target_os = "ios"));
     let (workers, threads) = match kind {
@@ -92,7 +96,10 @@ impl Drop for StopOnDrop {
     }
 }
 
-pub async fn transcribe(job: SherpaJob, progress: super::ai::Progress<'_>) -> AppResult<WhisperJson> {
+pub async fn transcribe(
+    job: SherpaJob,
+    progress: super::ai::Progress<'_>,
+) -> AppResult<WhisperJson> {
     let stop = Arc::new(AtomicBool::new(false));
     let _guard = StopOnDrop(stop.clone());
     let done = Arc::new(AtomicU64::new(0f64.to_bits()));
@@ -124,7 +131,11 @@ pub async fn transcribe(job: SherpaJob, progress: super::ai::Progress<'_>) -> Ap
     Ok(json)
 }
 
-fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> AppResult<WhisperJson> {
+fn transcribe_blocking(
+    job: &SherpaJob,
+    done: &AtomicU64,
+    stop: &AtomicBool,
+) -> AppResult<WhisperJson> {
     let samples = load_16k_mono(&job.audio, stop)?;
     let samples = samples.as_slice();
     let started = std::time::Instant::now();
@@ -132,8 +143,13 @@ fn transcribe_blocking(job: &SherpaJob, done: &AtomicU64, stop: &AtomicBool) -> 
     let vad_s = started.elapsed().as_secs_f64();
 
     let (workers, threads) = parallelism(job.model.kind);
-    let recognizer = OfflineRecognizer::create(&recognizer_config(job, threads))
-        .ok_or_else(|| AppError::Pipeline(format!("加载 {} 失败，模型文件可能不完整，重新下载试试", job.model.display_name)))?;
+    let recognizer =
+        OfflineRecognizer::create(&recognizer_config(job, threads)).ok_or_else(|| {
+            AppError::Pipeline(format!(
+                "加载 {} 失败，模型文件可能不完整，重新下载试试",
+                job.model.display_name
+            ))
+        })?;
 
     let load_s = started.elapsed().as_secs_f64() - vad_s;
     let results = decode_parallel(&recognizer, samples, &segments, workers, done, stop)?;
@@ -184,11 +200,20 @@ fn decode_parallel(
                 if let Some(result) = stream.get_result() {
                     let start_ms = start as i64 * 1000 / SAMPLE_RATE as i64;
                     let end_ms = end as i64 * 1000 / SAMPLE_RATE as i64;
-                    let lines = to_segments(&result.text, &result.tokens, result.timestamps.as_deref(), start_ms, end_ms);
+                    let lines = to_segments(
+                        &result.text,
+                        &result.tokens,
+                        result.timestamps.as_deref(),
+                        start_ms,
+                        end_ms,
+                    );
                     results.lock().unwrap()[index] = lines;
                 }
                 let count = finished.fetch_add(1, Ordering::SeqCst) + 1;
-                done.store((count as f64 / segments.len() as f64).to_bits(), Ordering::Relaxed);
+                done.store(
+                    (count as f64 / segments.len() as f64).to_bits(),
+                    Ordering::Relaxed,
+                );
             });
         }
     });
@@ -219,14 +244,22 @@ pub(crate) fn load_16k_mono(path: &Path, stop: &AtomicBool) -> AppResult<Vec<i16
         .then(|| LinearResampler::create(format.sample_rate as i32, SAMPLE_RATE))
         .flatten();
     if format.sample_rate != SAMPLE_RATE as u32 && resampler.is_none() {
-        return Err(AppError::Pipeline(format!("没法把 {} Hz 的音频重采样到 16kHz", format.sample_rate)));
+        return Err(AppError::Pipeline(format!(
+            "没法把 {} Hz 的音频重采样到 16kHz",
+            format.sample_rate
+        )));
     }
     file.seek(SeekFrom::Start(format.data_offset))?;
     let mut reader = std::io::BufReader::new(file).take(format.data_len);
-    let estimate = format.data_len / format.block_align() as u64 * SAMPLE_RATE as u64 / format.sample_rate as u64;
+    let estimate = format.data_len / format.block_align() as u64 * SAMPLE_RATE as u64
+        / format.sample_rate as u64;
     let mut out: Vec<i16> = Vec::with_capacity(estimate as usize + SAMPLE_RATE as usize);
     let mut push = |samples: &[f32]| {
-        out.extend(samples.iter().map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16));
+        out.extend(
+            samples
+                .iter()
+                .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16),
+        );
     };
     // 一次读一秒左右，按整帧切。
     let block = format.block_align() * format.sample_rate as usize;
@@ -256,7 +289,11 @@ pub(crate) fn load_16k_mono(path: &Path, stop: &AtomicBool) -> AppResult<Vec<i16
 }
 
 /// silero VAD 切出语音段，返回采样点区间。
-pub(crate) fn speech_segments(vad_model: &Path, samples: &[i16], stop: &AtomicBool) -> AppResult<Vec<(usize, usize)>> {
+pub(crate) fn speech_segments(
+    vad_model: &Path,
+    samples: &[i16],
+    stop: &AtomicBool,
+) -> AppResult<Vec<(usize, usize)>> {
     let config = VadModelConfig {
         silero_vad: SileroVadModelConfig {
             model: Some(vad_model.to_string_lossy().into_owned()),
@@ -351,8 +388,11 @@ pub(crate) fn to_segments(
         return Vec::new();
     }
     let chars: Vec<char> = text.chars().collect();
-    let token_times = timestamps.and_then(|times| local_asr::token_char_times(&text, tokens, times));
-    let at = |idx: usize| local_asr::char_time_ms(idx, chars.len(), start_ms, end_ms, token_times.as_deref());
+    let token_times =
+        timestamps.and_then(|times| local_asr::token_char_times(&text, tokens, times));
+    let at = |idx: usize| {
+        local_asr::char_time_ms(idx, chars.len(), start_ms, end_ms, token_times.as_deref())
+    };
     let sentences = local_asr::split_sentences(&text);
     let count = sentences.len();
     sentences
@@ -362,7 +402,11 @@ pub(crate) fn to_segments(
             text: chars[a..b].iter().collect::<String>().trim().to_string(),
             offsets: Offsets {
                 from: if i == 0 { start_ms } else { at(a) },
-                to: if i + 1 == count { end_ms } else { at(b).max(at(a)) },
+                to: if i + 1 == count {
+                    end_ms
+                } else {
+                    at(b).max(at(a))
+                },
             },
             tokens: Vec::new(),
         })
@@ -397,7 +441,13 @@ mod tests {
         assert!(to_segments("<|zh|><|nospeech|>", &[], None, 0, 1_000).is_empty());
     }
 
-    fn write_wav(path: &Path, channels: u16, rate: u32, frames: usize, value: impl Fn(usize) -> i16) {
+    fn write_wav(
+        path: &Path,
+        channels: u16,
+        rate: u32,
+        frames: usize,
+        value: impl Fn(usize) -> i16,
+    ) {
         let mut data = Vec::with_capacity(frames * channels as usize * 2);
         for i in 0..frames {
             for _ in 0..channels {
@@ -430,9 +480,16 @@ mod tests {
             ((i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin() * 16_000.0) as i16
         });
         let samples = load_16k_mono(&path, &AtomicBool::new(false)).unwrap();
-        assert!((samples.len() as i64 - 48_000).abs() < 400, "{}", samples.len());
+        assert!(
+            (samples.len() as i64 - 48_000).abs() < 400,
+            "{}",
+            samples.len()
+        );
         let peak = samples.iter().map(|s| s.unsigned_abs()).max().unwrap();
-        assert!((14_000..18_000).contains(&peak), "峰值保住，没被混音或重采样削掉：{peak}");
+        assert!(
+            (14_000..18_000).contains(&peak),
+            "峰值保住，没被混音或重采样削掉：{peak}"
+        );
     }
 
     #[test]
@@ -459,7 +516,9 @@ mod tests {
     #[tokio::test]
     async fn transcribes_speech_and_skips_the_silence_with_a_local_model() {
         let app_data = dirs_app_data();
-        let Some(app_data) = app_data.filter(|dir| local_asr::is_installed(dir, &local_asr::SENSE_VOICE)) else {
+        let Some(app_data) =
+            app_data.filter(|dir| local_asr::is_installed(dir, &local_asr::SENSE_VOICE))
+        else {
             eprintln!("skip: SenseVoice 没装");
             return;
         };
@@ -467,8 +526,17 @@ mod tests {
         let wav = work.path().join("audio.wav");
         let a = work.path().join("a.aiff");
         let b = work.path().join("b.aiff");
-        for (out, text) in [(&a, "我们来看梯度下降，学习率决定每一步走多远。"), (&b, "好，板书写完了，我们接着往下推导。")] {
-            assert!(std::process::Command::new("say").args(["-v", "Tingting", "-o"]).arg(out).arg(text).status().unwrap().success());
+        for (out, text) in [
+            (&a, "我们来看梯度下降，学习率决定每一步走多远。"),
+            (&b, "好，板书写完了，我们接着往下推导。"),
+        ] {
+            assert!(std::process::Command::new("say")
+                .args(["-v", "Tingting", "-o"])
+                .arg(out)
+                .arg(text)
+                .status()
+                .unwrap()
+                .success());
         }
         let ffmpeg = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None).unwrap();
         let status = std::process::Command::new(ffmpeg)
@@ -484,9 +552,13 @@ mod tests {
         let stereo = work.path().join("stereo.wav");
         let ffmpeg = crate::sidecar::resolve(&crate::sidecar::FFMPEG, None).unwrap();
         assert!(std::process::Command::new(&ffmpeg)
-            .args(["-v", "error", "-y", "-i"]).arg(&wav)
-            .args(["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"]).arg(&stereo)
-            .status().unwrap().success());
+            .args(["-v", "error", "-y", "-i"])
+            .arg(&wav)
+            .args(["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"])
+            .arg(&stereo)
+            .status()
+            .unwrap()
+            .success());
         let stereo_job = SherpaJob {
             audio: stereo,
             model: &local_asr::SENSE_VOICE,
@@ -495,7 +567,13 @@ mod tests {
             language: Some("zh".into()),
             hotwords: None,
         };
-        let stereo_text: String = transcribe(stereo_job, None).await.unwrap().transcription.iter().map(|s| s.text.clone()).collect();
+        let stereo_text: String = transcribe(stereo_job, None)
+            .await
+            .unwrap()
+            .transcription
+            .iter()
+            .map(|s| s.text.clone())
+            .collect();
         assert!(stereo_text.contains("梯度下降"), "{stereo_text}");
 
         let job = SherpaJob {
@@ -524,7 +602,10 @@ mod tests {
     async fn real_lecture_through_the_app_path() {
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let wav = PathBuf::from(std::env::var("SHERPA_E2E_WAV").expect("SHERPA_E2E_WAV"));
-        let model = local_asr::find(&std::env::var("SHERPA_E2E_MODEL").unwrap_or_else(|_| "sensevoice".into())).unwrap();
+        let model = local_asr::find(
+            &std::env::var("SHERPA_E2E_MODEL").unwrap_or_else(|_| "sensevoice".into()),
+        )
+        .unwrap();
         let app_data = dirs_app_data().unwrap();
         let job = SherpaJob {
             audio: wav,
@@ -536,7 +617,11 @@ mod tests {
         };
         let started = std::time::Instant::now();
         let json = transcribe(job, None).await.unwrap();
-        eprintln!("{} 行，用时 {:.1}s", json.transcription.len(), started.elapsed().as_secs_f64());
+        eprintln!(
+            "{} 行，用时 {:.1}s",
+            json.transcription.len(),
+            started.elapsed().as_secs_f64()
+        );
         if let Ok(out) = std::env::var("SHERPA_E2E_OUT") {
             std::fs::write(out, serde_json::to_string(&json).unwrap()).unwrap();
         }
@@ -544,6 +629,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     fn dirs_app_data() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/dev.courseai.app"))
+        std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join("Library/Application Support/dev.courseai.app"))
     }
 }

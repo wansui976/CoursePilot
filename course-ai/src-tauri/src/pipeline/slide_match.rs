@@ -128,7 +128,9 @@ fn robust_similarity_z(a: &[f32], b: &[f32]) -> f32 {
         }
     }
     cells.sort_by(|x, y| x.total_cmp(y));
-    let keep = ((cells.len() as f32) * (1.0 - DROP_WORST_CELLS)).round().max(1.0) as usize;
+    let keep = ((cells.len() as f32) * (1.0 - DROP_WORST_CELLS))
+        .round()
+        .max(1.0) as usize;
     let mse = cells[..keep].iter().sum::<f32>() / keep as f32;
     // 单位方差的两组数：均方差 = 2(1 - 相关系数)。
     1.0 - mse / 2.0
@@ -152,7 +154,8 @@ pub fn rank(query: &Signature, candidates: &[Option<Signature>]) -> Vec<(usize, 
     let rects = crop_hypotheses();
     let z = |v: Vec<f32>| zscore(&v);
     let query_full = z(sample(&query.0, FULL));
-    let query_crops: Vec<Option<Vec<f32>>> = rects.iter().map(|r| z(sample(&query.0, *r))).collect();
+    let query_crops: Vec<Option<Vec<f32>>> =
+        rects.iter().map(|r| z(sample(&query.0, *r))).collect();
     let score = |a: &Option<Vec<f32>>, b: &Option<Vec<f32>>| match (a, b) {
         (Some(a), Some(b)) => robust_similarity_z(a, b),
         _ => 0.0,
@@ -205,11 +208,18 @@ pub fn decode_data_url(url: &str) -> Option<Vec<u8>> {
 fn signature_from_gray(gray: &GrayImage) -> Option<Signature> {
     let (x0, y0, x1, y1) = content_bounds(gray);
     let cropped = image::imageops::crop_imm(gray, x0, y0, x1 - x0, y1 - y0).to_image();
-    let small =
-        image::imageops::resize(&cropped, STORE_W as u32, STORE_H as u32, FilterType::Triangle);
+    let small = image::imageops::resize(
+        &cropped,
+        STORE_W as u32,
+        STORE_H as u32,
+        FilterType::Triangle,
+    );
     let values: Vec<u8> = small.pixels().map(|p| p.0[0]).collect();
     let mean = values.iter().map(|&v| f32::from(v)).sum::<f32>() / values.len() as f32;
-    let spread = (values.iter().map(|&v| (f32::from(v) - mean).powi(2)).sum::<f32>()
+    let spread = (values
+        .iter()
+        .map(|&v| (f32::from(v) - mean).powi(2))
+        .sum::<f32>()
         / values.len() as f32)
         .sqrt();
     // 纯色图（黑屏、白屏）没有可比的内容：和谁比都会是噪声。
@@ -273,8 +283,16 @@ fn content_bounds(gray: &GrayImage) -> (u32, u32, u32, u32) {
     let bottom = trim_from_edge(h, |k| row(h - 1 - k));
     let left = trim_from_edge(w, col);
     let right = trim_from_edge(w, |k| col(w - 1 - k));
-    let (y0, y1) = if top + bottom + 2 <= h { (top, h - bottom) } else { (0, h) };
-    let (x0, x1) = if left + right + 2 <= w { (left, w - right) } else { (0, w) };
+    let (y0, y1) = if top + bottom + 2 <= h {
+        (top, h - bottom)
+    } else {
+        (0, h)
+    };
+    let (x0, x1) = if left + right + 2 <= w {
+        (left, w - right)
+    } else {
+        (0, w)
+    };
     (x0, y0, x1, y1)
 }
 
@@ -395,14 +413,16 @@ async fn load_slides(
     };
     rows.unwrap_or_default()
         .into_iter()
-        .map(|(video_id, video_title, page_no, start_ms, end_ms, image_path)| SlideRow {
-            video_id,
-            video_title,
-            page_no,
-            start_ms,
-            end_ms,
-            image_path,
-        })
+        .map(
+            |(video_id, video_title, page_no, start_ms, end_ms, image_path)| SlideRow {
+                video_id,
+                video_title,
+                page_no,
+                start_ms,
+                end_ms,
+                image_path,
+            },
+        )
         .collect()
 }
 
@@ -515,7 +535,10 @@ pub async fn describe_matches(
             lines.push(format!("{label}：读不出画面（可能是纯色图），没法比对。"));
             continue;
         }
-        let in_video = ranked_in_video.get_mut(index).map(std::mem::take).unwrap_or_default();
+        let in_video = ranked_in_video
+            .get_mut(index)
+            .map(std::mem::take)
+            .unwrap_or_default();
         let in_course = ranked_in_course.get(index).cloned().unwrap_or_default();
         let (slides, ranked, with_video) = match judge(&in_video) {
             Verdict::Found(_) => (&video_slides, in_video, false),
@@ -524,7 +547,10 @@ pub async fn describe_matches(
         };
         let line = match judge(&ranked) {
             Verdict::Found(pages) if pages.len() == 1 => {
-                format!("{label}就是{}。", describe_page(&slides[pages[0]], with_video))
+                format!(
+                    "{label}就是{}。",
+                    describe_page(&slides[pages[0]], with_video)
+                )
             }
             Verdict::Found(pages) => format!(
                 "{label}对上的画面在视频里出现了不止一次（同一页课件，老师翻回来重讲或边讲边写），\
@@ -620,7 +646,12 @@ async fn rank_all(queries: &[Option<Signature>], slides: &[SlideRow]) -> Vec<Vec
         let candidates = slide_signatures(&paths);
         queries
             .iter()
-            .map(|query| query.as_ref().map(|q| rank(q, &candidates)).unwrap_or_default())
+            .map(|query| {
+                query
+                    .as_ref()
+                    .map(|q| rank(q, &candidates))
+                    .unwrap_or_default()
+            })
             .collect()
     })
     .await
@@ -678,14 +709,20 @@ mod tests {
 
     #[test]
     fn data_urls_decode() {
-        assert_eq!(decode_data_url("data:image/png;base64,aGk=").unwrap(), b"hi");
+        assert_eq!(
+            decode_data_url("data:image/png;base64,aGk=").unwrap(),
+            b"hi"
+        );
         assert!(decode_data_url("https://example.com/a.png").is_none());
     }
 
     fn png_data_url(image: &GrayImage) -> String {
         let mut bytes = Vec::new();
         image::DynamicImage::ImageLuma8(image.clone())
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .unwrap();
         format!(
             "data:image/png;base64,{}",
@@ -711,7 +748,11 @@ mod tests {
         let video = crate::commands::videos::add_local_video(&db, &course.id, file, None)
             .await
             .unwrap();
-        for (page, start, end) in [(0_i64, 0_i64, 65_000_i64), (1, 65_000, 130_000), (2, 130_000, 200_000)] {
+        for (page, start, end) in [
+            (0_i64, 0_i64, 65_000_i64),
+            (1, 65_000, 130_000),
+            (2, 130_000, 200_000),
+        ] {
             let path = dir.path().join(format!("{page}.png"));
             image::DynamicImage::ImageLuma8(slide(page as u32 * 3 + 1, 640, 360))
                 .save(&path)
@@ -737,17 +778,27 @@ mod tests {
             0,
             55,
         );
-        let text = describe_matches(&db, &[png_data_url(&shot)], Some(&video.id), Some(&course.id))
-            .await
-            .unwrap();
+        let text = describe_matches(
+            &db,
+            &[png_data_url(&shot)],
+            Some(&video.id),
+            Some(&course.id),
+        )
+        .await
+        .unwrap();
         assert!(text.contains("课件第 2 页，出现于 01:05"), "{text}");
         assert!(text.contains("停留到 02:10"), "{text}");
 
         // 一张和课件毫无关系的图：老实说对不上，不硬凑一页。
         let unrelated = ImageBuffer::from_fn(400, 300, |x, y| Luma([((x * y) % 251) as u8]));
-        let text = describe_matches(&db, &[png_data_url(&unrelated)], Some(&video.id), Some(&course.id))
-            .await
-            .unwrap();
+        let text = describe_matches(
+            &db,
+            &[png_data_url(&unrelated)],
+            Some(&video.id),
+            Some(&course.id),
+        )
+        .await
+        .unwrap();
         assert!(text.contains("没有对上"), "{text}");
     }
 
@@ -757,9 +808,14 @@ mod tests {
         let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
             .await
             .unwrap();
-        let text = describe_matches(&db, &[png_data_url(&slide(1, 64, 36))], Some("v"), Some("c"))
-            .await
-            .unwrap();
+        let text = describe_matches(
+            &db,
+            &[png_data_url(&slide(1, 64, 36))],
+            Some("v"),
+            Some("c"),
+        )
+        .await
+        .unwrap();
         assert!(text.contains("还没有抽取课件页"), "{text}");
     }
 
@@ -775,7 +831,9 @@ mod tests {
         ) else {
             return;
         };
-        let db = crate::db::Db::connect_and_migrate(Path::new(&db_path)).await.unwrap();
+        let db = crate::db::Db::connect_and_migrate(Path::new(&db_path))
+            .await
+            .unwrap();
         let course: Option<String> = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
             .bind(&video)
             .fetch_optional(&db.pool)
@@ -804,14 +862,18 @@ mod tests {
         ) else {
             return;
         };
-        let db = crate::db::Db::connect_and_migrate(Path::new(&db_path)).await.unwrap();
+        let db = crate::db::Db::connect_and_migrate(Path::new(&db_path))
+            .await
+            .unwrap();
         let slides = load_slides(&db, Some(&video), None).await;
         let paths: Vec<String> = slides.iter().map(|s| s.image_path.clone()).collect();
         let sigs = slide_signatures(&paths);
         let (mut ok, mut total, mut reported) = (0, 0, 0);
         for (i, row) in slides.iter().enumerate() {
             let frame = Path::new(&frames).join(format!("{}.png", row.page_no));
-            let Some(query) = signature_from_file(&frame) else { continue };
+            let Some(query) = signature_from_file(&frame) else {
+                continue;
+            };
             total += 1;
             let ranked = rank(&query, &sigs);
             let top = ranked[0].0;
@@ -871,7 +933,10 @@ mod tests {
         let pick = |q: f32| best[((best.len() - 1) as f32 * q) as usize];
         println!(
             "cross best: min {:.3} median {:.3} p90 {:.3} max {:.3}",
-            pick(0.0), pick(0.5), pick(0.9), pick(1.0)
+            pick(0.0),
+            pick(0.5),
+            pick(0.9),
+            pick(1.0)
         );
     }
 
@@ -919,7 +984,8 @@ mod tests {
                 // C：只框了中间（四周各裁掉 1/30）。
                 _ => {
                     let crop =
-                        image::imageops::crop_imm(&img, w / 30, h / 30, w - w / 15, h - h / 15).to_image();
+                        image::imageops::crop_imm(&img, w / 30, h / 30, w - w / 15, h - h / 15)
+                            .to_image();
                     image::imageops::resize(&crop, 900, 506, FilterType::Triangle)
                 }
             };
@@ -928,7 +994,11 @@ mod tests {
             };
             total += 1;
             let scored = rank(&shot, &sigs);
-            let self_score = scored.iter().find(|(j, _)| *j == i).map(|(_, s)| *s).unwrap_or(0.0);
+            let self_score = scored
+                .iter()
+                .find(|(j, _)| *j == i)
+                .map(|(_, s)| *s)
+                .unwrap_or(0.0);
             worst_self = worst_self.min(self_score);
             // 和自己几乎一样的页（逐行出现的动画页）算对：它们本来就分不出。
             let near_dupe = |j: usize| sigs[j].as_ref().is_some_and(|s| s.similarity(own) > 0.97);
@@ -946,6 +1016,8 @@ mod tests {
                 best_other = best_other.max(other.1);
             }
         }
-        println!("top1 {top1}/{total}  worst self score {worst_self:.3}  best non-dupe {best_other:.3}");
+        println!(
+            "top1 {top1}/{total}  worst self score {worst_self:.3}  best non-dupe {best_other:.3}"
+        );
     }
 }

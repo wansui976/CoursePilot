@@ -102,7 +102,9 @@ mod tests {
         )
         .await
         .unwrap();
-        put(&db, &[entry("a:1", Some("uno")), entry("a:2", None)]).await.unwrap();
+        put(&db, &[entry("a:1", Some("uno")), entry("a:2", None)])
+            .await
+            .unwrap();
 
         let rows = load(&db, &["a:".to_string()]).await.unwrap();
         assert_eq!(rows, vec![("a:1".to_string(), "uno".to_string())]);
@@ -112,7 +114,9 @@ mod tests {
     #[tokio::test]
     async fn prefix_wildcards_are_literal() {
         let db = fresh_db().await;
-        put(&db, &[entry("a_1", Some("x")), entry("ab1", Some("y"))]).await.unwrap();
+        put(&db, &[entry("a_1", Some("x")), entry("ab1", Some("y"))])
+            .await
+            .unwrap();
         let rows = load(&db, &["a_".to_string()]).await.unwrap();
         assert_eq!(rows, vec![("a_1".to_string(), "x".to_string())]);
     }

@@ -29,8 +29,9 @@ const KEYRING_SERVICE: &str = "dev.courseai.app";
 /// 而不是「始终允许」时，下一次读还会再弹——助手连问几句就弹几次。开发版是 ad-hoc 签名，
 /// 每次重编之后系统都不认之前的授权，同样会弹。读到一次就记在内存里，一次运行最多问一次；
 /// 写入和删除都会同步更新这份缓存，改了 Key 立即生效。
-static KEYRING_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
-    std::sync::LazyLock::new(Default::default);
+static KEYRING_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::LazyLock::new(Default::default);
 
 fn cached_secret(account: &str) -> Option<String> {
     KEYRING_CACHE.lock().ok()?.get(account).cloned()
@@ -53,7 +54,10 @@ fn cache_secret(account: &str, value: Option<&str>) {
 /// 写入「成功」，下一次 `Entry::new` 就读不到——Android 上存的每一把密钥都随手丢了，
 /// 设置页刚填完的 Key、ASR 凭证全部读不到，云端功能一律报「未配置」。
 fn keyring_backed(os: &str) -> bool {
-    matches!(os, "macos" | "ios" | "windows" | "linux" | "freebsd" | "openbsd")
+    matches!(
+        os,
+        "macos" | "ios" | "windows" | "linux" | "freebsd" | "openbsd"
+    )
 }
 
 /// 单元测试中关闭系统钥匙串，全部走 settings 回退；没有真正钥匙串的系统同样只用 settings 表。

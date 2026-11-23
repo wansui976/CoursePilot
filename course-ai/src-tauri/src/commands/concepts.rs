@@ -78,7 +78,14 @@ pub async fn cmd_analyze_course_concepts(
         // 后台任务不继承调用方的范围，在这里包：知识分析的用量记到这门课上。
         let result = crate::usage_log::scoped(
             crate::usage_log::UsageScope::course(&course_id),
-            concepts::analyze_course_concepts(&db, &provider, &chat_model, &course_id, &cancel, &mut on_progress),
+            concepts::analyze_course_concepts(
+                &db,
+                &provider,
+                &chat_model,
+                &course_id,
+                &cancel,
+                &mut on_progress,
+            ),
         )
         .await;
         match result {

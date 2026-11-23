@@ -641,3 +641,11 @@ export interface MistakeCard {
   lapses: number;
   streak: number;
 }
+
+/** 一个知识点的掌握情况（收集册）：卡数、复习过的卡数、复习过的卡现在平均还记得多少（0..1）。 */
+export interface ConceptMastery {
+  concept_id: string;
+  cards: number;
+  reviewed: number;
+  retention: number | null;
+}

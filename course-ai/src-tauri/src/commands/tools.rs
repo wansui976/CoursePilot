@@ -212,13 +212,22 @@ pub async fn cmd_ocr_image(state: State<'_, AppState>, image: String) -> AppResu
         }
         "deepseek" => {
             let config = deepseek_ocr_config(&state.db).await?;
-            return deepseek_ocr::run_deepseek_ocr(&bytes, &config.api_key, &config.base_url, &config.model)
-                .await;
+            return deepseek_ocr::run_deepseek_ocr(
+                &bytes,
+                &config.api_key,
+                &config.base_url,
+                &config.model,
+            )
+            .await;
         }
         _ => {}
     }
     // 本地引擎认文件：落到临时目录，认完删掉。
-    let ext = if image.starts_with("data:image/jpeg") { "jpg" } else { "png" };
+    let ext = if image.starts_with("data:image/jpeg") {
+        "jpg"
+    } else {
+        "png"
+    };
     let path = std::env::temp_dir().join(format!("courseai-ocr-{}.{ext}", uuid::Uuid::new_v4()));
     tokio::fs::write(&path, &bytes).await?;
     let langs = ocr_langs(&state.db).await;
@@ -238,7 +247,8 @@ pub async fn cmd_find_explanations(
     if text.trim().is_empty() && image.is_none() {
         return Err(AppError::Other("先拍一道题，或者输入题目文字".into()));
     }
-    crate::pipeline::explain::find_explanations(&state.db, &course_id, &text, image.as_deref()).await
+    crate::pipeline::explain::find_explanations(&state.db, &course_id, &text, image.as_deref())
+        .await
 }
 
 /// 下载 B 站 / URL 视频到课程目录并登记。可选清晰度上限与字幕轨。
@@ -299,8 +309,14 @@ async fn import_webdav_file(
     // 课程没有目录时，下载队列按空目录拼出来的是相对路径：换到实际下载的地方。
     let staging = staging
         .filter(|path| path.is_absolute())
-        .unwrap_or_else(|| out_dir.join(".courseai-import").join(uuid::Uuid::new_v4().to_string()));
-    let file = crate::webdav_import::download(&state.db, &url, &out_dir, &staging, on_event, begin_import).await?;
+        .unwrap_or_else(|| {
+            out_dir
+                .join(".courseai-import")
+                .join(uuid::Uuid::new_v4().to_string())
+        });
+    let file =
+        crate::webdav_import::download(&state.db, &url, &out_dir, &staging, on_event, begin_import)
+            .await?;
     let mut video = add_local_video(&state.db, course_id, file, None).await?;
     sqlx::query("UPDATE videos SET source_type=?, source_uri=?, app_owned_file=1 WHERE id=?")
         .bind(crate::webdav_import::SOURCE_TYPE)
@@ -331,8 +347,20 @@ pub async fn import_url_with(
     begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<Video> {
     // 网盘（WebDAV）上的文件：不走 yt-dlp，直接按 HTTP 下（手机上也能下）。
-    if crate::webdav_import::source_for_url(&state.db, &url).await?.is_some() {
-        return import_webdav_file(&app, state, &course_id, url, staging, on_event, begin_import).await;
+    if crate::webdav_import::source_for_url(&state.db, &url)
+        .await?
+        .is_some()
+    {
+        return import_webdav_file(
+            &app,
+            state,
+            &course_id,
+            url,
+            staging,
+            on_event,
+            begin_import,
+        )
+        .await;
     }
     if is_mobile_os(std::env::consts::OS) {
         return Err(crate::error::AppError::Config(

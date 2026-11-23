@@ -32,7 +32,15 @@ pub async fn cmd_translate_transcript(
     };
     let result = crate::usage_log::scoped(
         crate::usage_log::UsageScope::video(&video_id),
-        translate_video(&state.db, &provider, &model, &video_id, &lang, &cancel, &mut on_progress),
+        translate_video(
+            &state.db,
+            &provider,
+            &model,
+            &video_id,
+            &lang,
+            &cancel,
+            &mut on_progress,
+        ),
     )
     .await;
     state.unregister_cancel(&request_id, &cancel);

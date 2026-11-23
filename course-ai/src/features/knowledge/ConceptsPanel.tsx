@@ -41,6 +41,7 @@ import {
 import { formatMs, formatRelativeTime } from "@/lib/time";
 import { displayTitle } from "@/lib/videoTitle";
 import { ViewHeader } from "@/ui/view-header";
+import { CollectionBook } from "./CollectionBook";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Skeleton } from "@/ui/skeleton";
@@ -334,14 +335,15 @@ function ConceptSources({
 }
 
 /** 课程级知识页：总览、主题分组、可核验出处与按概念复习。 */
-type KnowledgeSection = "concepts" | "review";
+type KnowledgeSection = "concepts" | "book" | "review";
 
 const sectionStorageKey = (courseId: string) => `ca.knowledge.section.${courseId}`;
 
 /** 「知识点 | 复习资料」按课程记在本次会话里：回看视频、从后台任务「查看」回来时还在原处。 */
 function readSection(courseId: string): KnowledgeSection {
   try {
-    return sessionStorage.getItem(sectionStorageKey(courseId)) === "review" ? "review" : "concepts";
+    const saved = sessionStorage.getItem(sectionStorageKey(courseId));
+    return saved === "review" || saved === "book" ? saved : "concepts";
   } catch {
     return "concepts";
   }
@@ -384,6 +386,7 @@ export function ConceptsPanel({
   const summarizeStartingCourse = useRef<string | null>(null);
   // 正在按概念复习的目标（打开全屏 ReviewSession）。
   const [reviewing, setReviewing] = useState<{ conceptId: string; name: string } | null>(null);
+  const [reviewingMistakes, setReviewingMistakes] = useState(false);
   // 课程 AI 问答抽屉是否展开（背景为整门课的总览+知识点）。
   const [chatOpen, setChatOpen] = useState(false);
   const [section, setSection] = useState<KnowledgeSection>(() => readSection(courseId));
@@ -756,7 +759,9 @@ export function ConceptsPanel({
 
       <Tabs
         value={section}
-        onValueChange={(value) => changeSection(value === "review" ? "review" : "concepts")}
+        onValueChange={(value) =>
+          changeSection(value === "review" || value === "book" ? value : "concepts")
+        }
         className="flex min-h-0 flex-1 flex-col"
       >
       <TabsList aria-label={t("reviewBook.tabsLabel")} className="ca-study-tabs-band block">
@@ -764,11 +769,25 @@ export function ConceptsPanel({
           <TabsTrigger value="concepts" className="ca-study-tab ca-touch-44">
             {t("reviewBook.tabConcepts")}
           </TabsTrigger>
+          <TabsTrigger value="book" className="ca-study-tab ca-touch-44">
+            {t("collection.tab")}
+          </TabsTrigger>
           <TabsTrigger value="review" className="ca-study-tab ca-touch-44">
             {t("reviewBook.tabReview")}
           </TabsTrigger>
         </div>
       </TabsList>
+      <TabsContent value="book" className="flex min-h-0 flex-1 overflow-y-auto focus-visible:outline-none">
+        <CollectionBook
+          courseId={courseId}
+          groups={knowledge?.groups ?? []}
+          onOpenConcept={(conceptId) => {
+            setExpanded((prev) => new Set(prev).add(conceptId));
+            changeSection("concepts");
+          }}
+          onReviewMistakes={() => setReviewingMistakes(true)}
+        />
+      </TabsContent>
       <TabsContent value="review" className="flex min-h-0 flex-1 focus-visible:outline-none">
         <ReviewBookPanel courseId={courseId} onJump={(videoId, startMs) => onJump(videoId, startMs)} />
       </TabsContent>
@@ -1322,6 +1341,19 @@ export function ConceptsPanel({
                 card.source_ms,
                 concept ? navigationStateFor(concept) : undefined,
               );
+            }
+          }}
+        />
+      )}
+
+      {reviewingMistakes && (
+        <ReviewSession
+          mistakes={{ courseId }}
+          onClose={() => setReviewingMistakes(false)}
+          onJump={(card) => {
+            if (card.video_id && card.source_ms != null) {
+              setReviewingMistakes(false);
+              onJump(card.video_id, card.source_ms);
             }
           }}
         />

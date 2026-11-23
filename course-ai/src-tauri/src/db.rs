@@ -49,7 +49,9 @@ impl Db {
     /// 两边都拿着读锁互等（死锁）——两种情况 SQLite 都直接报 database is locked，**不走**
     /// busy_timeout 的等待。IMMEDIATE 把争抢挪到 BEGIN 这一步，在这里排队是会等的。
     /// 所有写库的事务都用它；纯读不需要事务。
-    pub async fn begin_write(&self) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
+    pub async fn begin_write(
+        &self,
+    ) -> Result<sqlx::Transaction<'static, sqlx::Sqlite>, sqlx::Error> {
         self.pool.begin_with("BEGIN IMMEDIATE").await
     }
 
@@ -169,7 +171,11 @@ mod tests {
             .fetch_one(&db.pool)
             .await
             .unwrap();
-        let expected = if cfg!(target_os = "ios") { "truncate" } else { "wal" };
+        let expected = if cfg!(target_os = "ios") {
+            "truncate"
+        } else {
+            "wal"
+        };
         assert_eq!(mode.0.to_lowercase(), expected);
     }
 
@@ -374,7 +380,9 @@ mod tests {
     /// SELECT 旧题 → UPSERT），延迟事务下后写的那个直接报错、不等 busy_timeout。
     #[tokio::test]
     async fn concurrent_read_then_write_transactions_wait_instead_of_failing() {
-        let db = Db::connect_and_migrate(&test_db_path("begin-write")).await.unwrap();
+        let db = Db::connect_and_migrate(&test_db_path("begin-write"))
+            .await
+            .unwrap();
         sqlx::query("CREATE TABLE t(id TEXT PRIMARY KEY, v INTEGER)")
             .execute(&db.pool)
             .await
@@ -396,7 +404,10 @@ mod tests {
         let (a, b) = tokio::join!(run(db.clone(), "a", 0), run(db.clone(), "b", 20));
         a.unwrap();
         b.unwrap();
-        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM t").fetch_one(&db.pool).await.unwrap();
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM t")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
         assert_eq!(rows, 2);
     }
 }

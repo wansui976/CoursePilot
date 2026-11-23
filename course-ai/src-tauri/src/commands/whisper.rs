@@ -70,7 +70,10 @@ pub async fn cmd_get_models_dir(
     let (size_bytes, legacy_bytes) = tokio::task::spawn_blocking({
         let root = root.clone();
         move || {
-            let legacy = model_store::legacy_dirs(&root).iter().map(|d| model_store::dir_size(d)).sum();
+            let legacy = model_store::legacy_dirs(&root)
+                .iter()
+                .map(|d| model_store::dir_size(d))
+                .sum();
             (model_store::models_size(&root), legacy)
         }
     })
@@ -93,7 +96,9 @@ pub async fn cmd_delete_legacy_models(
 ) -> AppResult<ModelsDir> {
     use crate::keep_alive::{is_active, Kind};
     if is_active(Kind::ModelDownload) || is_active(Kind::Processing) {
-        return Err(AppError::Config("有模型在下载或视频在处理，等它们结束后再删".into()));
+        return Err(AppError::Config(
+            "有模型在下载或视频在处理，等它们结束后再删".into(),
+        ));
     }
     let root = model_store::models_root(&state.db, &app_data(&app)?).await?;
     for dir in model_store::legacy_dirs(&root) {
@@ -107,7 +112,9 @@ pub async fn cmd_delete_legacy_models(
 pub async fn delete_model(root: &Path, id: &str) -> AppResult<()> {
     use crate::keep_alive::{is_active, Kind};
     if is_active(Kind::ModelDownload) || is_active(Kind::Processing) {
-        return Err(AppError::Config("有模型在下载或视频在处理，等它们结束后再删".into()));
+        return Err(AppError::Config(
+            "有模型在下载或视频在处理，等它们结束后再删".into(),
+        ));
     }
     let model = local_asr::find(id).ok_or_else(|| AppError::NotFound(format!("model {id}")))?;
     let dir = local_asr::model_dir(root, model);
@@ -152,13 +159,19 @@ pub async fn cmd_paddle_ocr_status(
 /// 下载 PaddleOCR 模型（两个 onnx + 字典，约 30MB）。进度走 `ocr-model:download` 事件，
 /// 下载、校验、续传和语音识别模型是同一套。
 #[tauri::command]
-pub async fn cmd_download_paddle_ocr(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub async fn cmd_download_paddle_ocr(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
     paddle::download(&app, &state).await
 }
 
 /// 删掉 PaddleOCR 模型。设置里正选着它的话改回系统 OCR，免得下一页课件直接报「模型还没下载」。
 #[tauri::command]
-pub async fn cmd_delete_paddle_ocr(app: tauri::AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub async fn cmd_delete_paddle_ocr(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
     paddle::delete(&app, &state).await
 }
 
@@ -185,11 +198,20 @@ mod paddle {
         let emit = |received: u64, done: bool| {
             app.emit(
                 "ocr-model:download",
-                DownloadEvent { id: "paddle".into(), received, total, done, error: None },
+                DownloadEvent {
+                    id: "paddle".into(),
+                    received,
+                    total,
+                    done,
+                    error: None,
+                },
             )
             .ok();
         };
-        download_files(&client, paddle_ocr::DISPLAY_NAME, missing, |received| emit(received, false)).await?;
+        download_files(&client, paddle_ocr::DISPLAY_NAME, missing, |received| {
+            emit(received, false)
+        })
+        .await?;
         emit(total, true);
         Ok(())
     }
@@ -213,11 +235,18 @@ mod paddle {
     use super::*;
 
     pub async fn status(_app: &tauri::AppHandle, _state: &AppState) -> AppResult<PaddleOcrStatus> {
-        Ok(PaddleOcrStatus { available: false, installed: false, download_size: 0, size_on_disk: 0 })
+        Ok(PaddleOcrStatus {
+            available: false,
+            installed: false,
+            download_size: 0,
+            size_on_disk: 0,
+        })
     }
 
     pub async fn download(_app: &tauri::AppHandle, _state: &AppState) -> AppResult<()> {
-        Err(AppError::Other("这台设备用系统自带的 OCR，不需要下载 PaddleOCR".into()))
+        Err(AppError::Other(
+            "这台设备用系统自带的 OCR，不需要下载 PaddleOCR".into(),
+        ))
     }
 
     pub async fn delete(_app: &tauri::AppHandle, _state: &AppState) -> AppResult<()> {
@@ -255,7 +284,8 @@ pub async fn cmd_set_models_dir(
     };
     if !model_store::same_dir(&new_root, &old_root) {
         model_store::validate_new_root(&new_root, &old_root)?;
-        let _keep_alive = crate::keep_alive::hold(Kind::ModelDownload, "move-models", "搬移识别模型");
+        let _keep_alive =
+            crate::keep_alive::hold(Kind::ModelDownload, "move-models", "搬移识别模型");
         let (from, to, handle) = (old_root.clone(), new_root.clone(), app.clone());
         tokio::task::spawn_blocking(move || {
             let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -276,7 +306,8 @@ pub async fn cmd_set_models_dir(
     } else {
         new_root.to_string_lossy().to_string()
     };
-    crate::commands::settings::set_setting(&state.db, model_store::MODELS_DIR_SETTING, &value).await?;
+    crate::commands::settings::set_setting(&state.db, model_store::MODELS_DIR_SETTING, &value)
+        .await?;
     cmd_get_models_dir(app, state).await
 }
 
@@ -346,7 +377,10 @@ async fn download_sherpa_model(
         )
         .ok();
     };
-    download_files(&client, model.display_name, missing, |received| emit(received, false)).await?;
+    download_files(&client, model.display_name, missing, |received| {
+        emit(received, false)
+    })
+    .await?;
     emit(total, true);
     Ok(())
 }
@@ -385,7 +419,8 @@ pub(crate) async fn download_files(
         let mut ok = false;
         'rounds: for _ in 0..DOWNLOAD_ROUNDS {
             for url in file.urls {
-                match fetch_verified(client, url, &path, file, |got| progress(finished + got)).await {
+                match fetch_verified(client, url, &path, file, |got| progress(finished + got)).await
+                {
                     Ok(()) => {
                         ok = true;
                         break 'rounds;
@@ -464,7 +499,10 @@ async fn fetch_verified(
             .error_for_status()
             .map_err(|error| AppError::Other(error.to_string()))?;
         let mut out = if have > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-            tokio::fs::OpenOptions::new().append(true).open(&tmp).await?
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(&tmp)
+                .await?
         } else {
             // 没要 Range，或者这个源不支持 Range、把整份又发了一遍：从头写。
             hasher = Sha256::new();
@@ -476,7 +514,13 @@ async fn fetch_verified(
         loop {
             let next = tokio::time::timeout(STALL_TIMEOUT, stream.next())
                 .await
-                .map_err(|_| AppError::Other(format!("{} 下载卡住超过 {} 秒", file.path, STALL_TIMEOUT.as_secs())))?;
+                .map_err(|_| {
+                    AppError::Other(format!(
+                        "{} 下载卡住超过 {} 秒",
+                        file.path,
+                        STALL_TIMEOUT.as_secs()
+                    ))
+                })?;
             let Some(chunk) = next else { break };
             let bytes = chunk.map_err(|error| AppError::Other(error.to_string()))?;
             hasher.update(&bytes);
@@ -490,7 +534,10 @@ async fn fetch_verified(
         out.flush().await?;
         drop(out);
         if have < file.size {
-            return Err(AppError::Other(format!("{} 只下到 {have} / {} 字节，连接就断了", file.path, file.size)));
+            return Err(AppError::Other(format!(
+                "{} 只下到 {have} / {} 字节，连接就断了",
+                file.path, file.size
+            )));
         }
     }
 
@@ -519,22 +566,36 @@ mod tests {
     #[ignore]
     async fn paddle_end_to_end() {
         use crate::pipeline::paddle_ocr;
-        let image = std::env::var("PADDLE_OCR_IMAGE")
-            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ocr-slide.png").to_string());
+        let image = std::env::var("PADDLE_OCR_IMAGE").unwrap_or_else(|_| {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/ocr-slide.png").to_string()
+        });
         let app_data = tempfile::tempdir().unwrap();
-        let db = crate::db::Db::connect_and_migrate(&app_data.path().join("t.db")).await.unwrap();
+        let db = crate::db::Db::connect_and_migrate(&app_data.path().join("t.db"))
+            .await
+            .unwrap();
         model_store::remember_app_data(app_data.path());
         let root = model_store::current_models_root(&db).await.unwrap();
         assert!(!paddle_ocr::is_installed(&root));
-        let client = reqwest::Client::builder().user_agent(DOWNLOAD_USER_AGENT).build().unwrap();
-        download_files(&client, paddle_ocr::DISPLAY_NAME, paddle_ocr::missing_files(&root), |_| {})
-            .await
+        let client = reqwest::Client::builder()
+            .user_agent(DOWNLOAD_USER_AGENT)
+            .build()
             .unwrap();
+        download_files(
+            &client,
+            paddle_ocr::DISPLAY_NAME,
+            paddle_ocr::missing_files(&root),
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert!(paddle_ocr::is_installed(&root));
-        crate::commands::settings::set_setting(&db, "ocr_backend", "paddle").await.unwrap();
-        let text = crate::commands::tools::run_local_ocr(&db, std::path::Path::new(&image), "chi_sim+eng")
+        crate::commands::settings::set_setting(&db, "ocr_backend", "paddle")
             .await
             .unwrap();
+        let text =
+            crate::commands::tools::run_local_ocr(&db, std::path::Path::new(&image), "chi_sim+eng")
+                .await
+                .unwrap();
         eprintln!("{text}");
         assert!(text.contains("梯度下降"), "{text}");
     }
@@ -555,7 +616,9 @@ mod tests {
         delete_model(root.path(), "qwen3-asr").await.unwrap();
         assert!(!local_asr::model_dir(root.path(), qwen).exists());
         // 另一个模型和共用的 VAD 都还在。
-        assert!(local_asr::model_dir(root.path(), sense).join("model.bin").exists());
+        assert!(local_asr::model_dir(root.path(), sense)
+            .join("model.bin")
+            .exists());
         assert!(vad.exists());
         // 再删一次（已经不在了）不报错；不认识的模型报错。
         delete_model(root.path(), "qwen3-asr").await.unwrap();
@@ -572,7 +635,9 @@ mod tests {
         let seen = ranges.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
                 let seen = seen.clone();
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
@@ -580,22 +645,35 @@ mod tests {
                     let request = String::from_utf8_lossy(&buf[..n]).to_string();
                     let from = request
                         .lines()
-                        .find_map(|line| line.to_ascii_lowercase().strip_prefix("range: bytes=").map(str::to_owned))
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("range: bytes=")
+                                .map(str::to_owned)
+                        })
                         .map(|range| {
                             seen.lock().unwrap().push(range.clone());
                             range.trim_end_matches('-').trim().parse::<usize>().unwrap()
                         });
                     let reply = if request.starts_with("GET /404") {
-                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_vec()
                     } else if request.starts_with("GET /stall") {
                         // 发出响应头和一半内容后既不发也不断开：模拟半路卡死的源。
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        let mut r = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes();
                         r.extend_from_slice(&body[..body.len() / 2]);
                         let _ = socket.write_all(&r).await;
                         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
                         return;
                     } else if request.starts_with("GET /half") {
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        let mut r = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes();
                         r.extend_from_slice(&body[..body.len() / 2]);
                         r
                     } else if let Some(from) = from {
@@ -609,7 +687,11 @@ mod tests {
                         r.extend_from_slice(&body[from..]);
                         r
                     } else {
-                        let mut r = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                        let mut r = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .into_bytes();
                         r.extend_from_slice(body);
                         r
                     };
@@ -620,9 +702,16 @@ mod tests {
         (format!("http://{addr}"), ranges)
     }
 
-    fn leak_file(path: &'static str, body: &[u8], urls: Vec<String>) -> &'static local_asr::ModelFile {
+    fn leak_file(
+        path: &'static str,
+        body: &[u8],
+        urls: Vec<String>,
+    ) -> &'static local_asr::ModelFile {
         use sha2::{Digest, Sha256};
-        let urls: Vec<&'static str> = urls.into_iter().map(|u| &*Box::leak(u.into_boxed_str())).collect();
+        let urls: Vec<&'static str> = urls
+            .into_iter()
+            .map(|u| &*Box::leak(u.into_boxed_str()))
+            .collect();
         Box::leak(Box::new(local_asr::ModelFile {
             path,
             sha256: Box::leak(format!("{:x}", Sha256::digest(body)).into_boxed_str()),
@@ -634,13 +723,22 @@ mod tests {
     #[tokio::test]
     async fn a_failing_source_falls_through_to_the_next_and_the_file_lands_verified() {
         let (base, _) = serve(b"model bytes").await;
-        let file = leak_file("m/model.onnx", b"model bytes", vec![format!("{base}/404/a"), format!("{base}/ok/a")]);
+        let file = leak_file(
+            "m/model.onnx",
+            b"model bytes",
+            vec![format!("{base}/404/a"), format!("{base}/ok/a")],
+        );
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("m/model.onnx");
         let seen = std::sync::Mutex::new(Vec::new());
-        download_files(&reqwest::Client::new(), "测试模型", vec![(target.clone(), file)], |n| seen.lock().unwrap().push(n))
-            .await
-            .unwrap();
+        download_files(
+            &reqwest::Client::new(),
+            "测试模型",
+            vec![(target.clone(), file)],
+            |n| seen.lock().unwrap().push(n),
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"model bytes");
         assert_eq!(*seen.lock().unwrap().last().unwrap(), 11);
         assert!(!dir.path().join("m/model.onnx.part").exists());
@@ -649,7 +747,11 @@ mod tests {
     #[tokio::test]
     async fn a_source_that_stalls_midway_times_out_and_the_next_source_resumes_it() {
         let (base, ranges) = serve(b"model bytes").await;
-        let file = leak_file("model.onnx", b"model bytes", vec![format!("{base}/stall/a"), format!("{base}/ok/a")]);
+        let file = leak_file(
+            "model.onnx",
+            b"model bytes",
+            vec![format!("{base}/stall/a"), format!("{base}/ok/a")],
+        );
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("model.onnx");
         let client = download_client(std::time::Duration::from_millis(300)).unwrap();
@@ -671,9 +773,14 @@ mod tests {
         let file = leak_file("model.onnx", b"model bytes", vec![format!("{base}/ok/a")]);
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("model.onnx");
-        let error = download_files(&reqwest::Client::new(), "测试模型", vec![(target.clone(), file)], |_| {})
-            .await
-            .unwrap_err();
+        let error = download_files(
+            &reqwest::Client::new(),
+            "测试模型",
+            vec![(target.clone(), file)],
+            |_| {},
+        )
+        .await
+        .unwrap_err();
         assert!(error.to_string().contains("所有下载源都失败"), "{error}");
         assert!(!target.exists());
         assert!(!dir.path().join("model.onnx.part").exists());
@@ -687,7 +794,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let missing = local_asr::missing_files(dir.path(), &local_asr::SENSE_VOICE);
         let started = std::time::Instant::now();
-        download_files(&reqwest::Client::new(), "SenseVoice", missing, |_| {}).await.unwrap();
+        download_files(&reqwest::Client::new(), "SenseVoice", missing, |_| {})
+            .await
+            .unwrap();
         assert!(local_asr::is_installed(dir.path(), &local_asr::SENSE_VOICE));
         eprintln!("下载 + 校验用时 {:.0}s", started.elapsed().as_secs_f64());
     }
@@ -697,14 +806,26 @@ mod tests {
         const BODY: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
         let (base, ranges) = serve(BODY).await;
         // 第一个源发到一半就断；第二个源应该带着 Range 从断点接着下，而不是从头。
-        let file = leak_file("model.onnx", BODY, vec![format!("{base}/half/a"), format!("{base}/ok/a")]);
+        let file = leak_file(
+            "model.onnx",
+            BODY,
+            vec![format!("{base}/half/a"), format!("{base}/ok/a")],
+        );
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("model.onnx");
-        download_files(&reqwest::Client::new(), "测试模型", vec![(target.clone(), file)], |_| {})
-            .await
-            .unwrap();
+        download_files(
+            &reqwest::Client::new(),
+            "测试模型",
+            vec![(target.clone(), file)],
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), BODY);
-        assert_eq!(*ranges.lock().unwrap(), vec![format!("{}-", BODY.len() / 2)]);
+        assert_eq!(
+            *ranges.lock().unwrap(),
+            vec![format!("{}-", BODY.len() / 2)]
+        );
     }
 
     #[tokio::test]
@@ -715,11 +836,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("model.onnx");
         std::fs::write(part_path(&target), &BODY[..8]).unwrap();
-        download_files(&reqwest::Client::new(), "测试模型", vec![(target.clone(), file)], |_| {})
-            .await
-            .unwrap();
+        download_files(
+            &reqwest::Client::new(),
+            "测试模型",
+            vec![(target.clone(), file)],
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), BODY);
         assert_eq!(*ranges.lock().unwrap(), vec!["8-".to_string()]);
     }
-
 }

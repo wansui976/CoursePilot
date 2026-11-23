@@ -6,7 +6,10 @@
 //! 全部从 cards / card_schedule / study_events 现算，不新增表、不改写任何数据。
 
 use crate::commands::courses::AppState;
-use crate::commands::srs::{step_review, ScheduleState, DECAY, FACTOR};
+use crate::commands::srs::{
+    concept_for_card, course_occurrences_by_video, occ_for, retrievability, step_review,
+    ScheduleState, DAY_MS, DECAY, FACTOR,
+};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use serde::Serialize;
@@ -215,6 +218,64 @@ pub async fn mistake_cards(db: &Db, course_id: Option<&str>) -> AppResult<Vec<Mi
         .collect())
 }
 
+/// 一个知识点的掌握情况（收集册用）：有几张卡、复习过几张、复习过的卡现在平均还记得多少。
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ConceptMastery {
+    pub concept_id: String,
+    pub cards: i64,
+    pub reviewed: i64,
+    /// 复习过的卡的平均当前记忆（0..1）；一张都没复习过时为 None。
+    pub retention: Option<f64>,
+}
+
+pub async fn concept_mastery(db: &Db, course_id: &str, now: i64) -> AppResult<Vec<ConceptMastery>> {
+    let by_video = course_occurrences_by_video(db, course_id).await?;
+    let cards: Vec<(Option<String>, Option<i64>, f64, Option<i64>)> = sqlx::query_as(
+        "SELECT c.video_id, c.source_ms, s.stability, s.last_reviewed
+         FROM cards c JOIN card_schedule s ON s.card_id = c.id
+         LEFT JOIN videos v ON v.id = c.video_id
+         WHERE COALESCE(v.course_id, c.course_id) = ?
+           AND (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))",
+    )
+    .bind(course_id)
+    .fetch_all(&db.pool)
+    .await?;
+    // concept → (卡数, 复习过的卡数, 复习过的卡的记忆之和)
+    let mut tally: HashMap<String, (i64, i64, f64)> = HashMap::new();
+    for (video_id, source_ms, stability, last_reviewed) in cards {
+        let occ = occ_for(&by_video, video_id.as_deref());
+        let Some(concept_id) = concept_for_card(source_ms, occ) else {
+            continue;
+        };
+        let entry = tally.entry(concept_id).or_default();
+        entry.0 += 1;
+        if let Some(last) = last_reviewed {
+            let days = (now - last) as f64 / DAY_MS as f64;
+            entry.1 += 1;
+            entry.2 += retrievability(days, stability);
+        }
+    }
+    let mut out: Vec<ConceptMastery> = tally
+        .into_iter()
+        .map(|(concept_id, (cards, reviewed, sum))| ConceptMastery {
+            concept_id,
+            cards,
+            reviewed,
+            retention: (reviewed > 0).then(|| sum / reviewed as f64),
+        })
+        .collect();
+    out.sort_by(|a, b| a.concept_id.cmp(&b.concept_id));
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn cmd_concept_mastery(
+    state: State<'_, AppState>,
+    course_id: String,
+) -> AppResult<Vec<ConceptMastery>> {
+    concept_mastery(&state.db, &course_id, chrono::Utc::now().timestamp_millis()).await
+}
+
 #[tauri::command]
 pub async fn cmd_card_marks(
     state: State<'_, AppState>,
@@ -237,6 +298,35 @@ pub async fn cmd_mistake_cards(
     course_id: Option<String>,
 ) -> AppResult<Vec<MistakeCard>> {
     mistake_cards(&state.db, course_id.as_deref()).await
+}
+
+/// 复习错题本里的一张卡：错题可能还没到期，按「提前复习」走同一套 FSRS 递推。
+/// 只接受确实在错题本里的卡，免得被当成任意卡的提前复习入口。
+#[tauri::command]
+pub async fn cmd_review_mistake(
+    state: State<'_, AppState>,
+    card_id: String,
+    rating: i64,
+) -> AppResult<()> {
+    review_mistake(
+        &state.db,
+        &card_id,
+        rating,
+        chrono::Utc::now().timestamp_millis(),
+    )
+    .await
+}
+
+pub async fn review_mistake(db: &Db, card_id: &str, rating: i64, now: i64) -> AppResult<()> {
+    let lapses: Option<i64> =
+        sqlx::query_scalar("SELECT lapses FROM card_schedule WHERE card_id = ?")
+            .bind(card_id)
+            .fetch_optional(&db.pool)
+            .await?;
+    if lapses.unwrap_or(0) == 0 {
+        return Err(AppError::NotFound(format!("mistake card {card_id}")));
+    }
+    crate::commands::srs::review_card(db, card_id, rating, now).await
 }
 
 #[cfg(test)]
@@ -280,6 +370,60 @@ mod tests {
             .unwrap();
         generate_cards_from_quiz(db, &vid).await.unwrap();
         vid
+    }
+
+    #[tokio::test]
+    async fn only_real_mistakes_can_be_reviewed_early() {
+        let db = fresh_db().await;
+        let vid = seed_video_with_quiz(&db).await;
+        let now = chrono::Utc::now().timestamp_millis();
+        let fine = quiz_card_id(&vid, "Q1");
+        let missed = quiz_card_id(&vid, "Q2");
+        review_card(&db, &missed, 1, now).await.unwrap();
+
+        assert!(review_mistake(&db, &fine, 3, now + 1000).await.is_err());
+        review_mistake(&db, &missed, 3, now + 1000).await.unwrap();
+        assert_eq!(mistake_cards(&db, None).await.unwrap()[0].streak, 1);
+    }
+
+    #[tokio::test]
+    async fn mastery_averages_current_recall_per_concept() {
+        let db = fresh_db().await;
+        let vid = seed_video_with_quiz(&db).await;
+        let course_id: String = sqlx::query_scalar("SELECT course_id FROM videos WHERE id=?")
+            .bind(&vid)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO concepts(id,course_id,name,created_at) VALUES ('k1',?,'梯度',0)")
+            .bind(&course_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO concept_occurrences(concept_id,video_id,start_ms) VALUES ('k1',?,1000)",
+        )
+        .bind(&vid)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        review_card(&db, &quiz_card_id(&vid, "Q1"), 3, now)
+            .await
+            .unwrap();
+
+        let mastery = concept_mastery(&db, &course_id, now).await.unwrap();
+        assert_eq!(mastery.len(), 1);
+        assert_eq!((mastery[0].cards, mastery[0].reviewed), (2, 1));
+        assert!(
+            (mastery[0].retention.unwrap() - 1.0).abs() < 1e-6,
+            "刚复习完记忆是 100%"
+        );
+
+        let later = concept_mastery(&db, &course_id, now + 30 * DAY_MS)
+            .await
+            .unwrap();
+        assert!(later[0].retention.unwrap() < 0.9, "一个月不复习就褪色");
     }
 
     #[test]

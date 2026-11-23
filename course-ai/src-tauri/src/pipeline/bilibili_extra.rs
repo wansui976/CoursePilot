@@ -5,8 +5,8 @@
 //! 两者都只对 `bilibili` 视频有效；本地视频与 URL 视频没有这些数据。
 //! 抓取是「尽力而为」：失败只记日志、返回空，不让播放器报错。
 
-use crate::error::{AppError, AppResult};
 use crate::db::Db;
+use crate::error::{AppError, AppResult};
 use serde::Serialize;
 use std::io::Read;
 
@@ -155,18 +155,8 @@ fn decode_entities(s: &str) -> String {
 fn parse_danmaku_attrs(attrs: &str, raw_text: &str) -> Option<DanmakuEntry> {
     let mut fields = attrs.split(',');
     let secs: f64 = fields.next()?.trim().parse().ok()?;
-    let mode_raw: i64 = fields
-        .next()
-        .unwrap_or("1")
-        .trim()
-        .parse()
-        .unwrap_or(1);
-    let font_size: i64 = fields
-        .next()
-        .unwrap_or("25")
-        .trim()
-        .parse()
-        .unwrap_or(25);
+    let mode_raw: i64 = fields.next().unwrap_or("1").trim().parse().unwrap_or(1);
+    let font_size: i64 = fields.next().unwrap_or("25").trim().parse().unwrap_or(25);
     let color: i64 = fields
         .next()
         .unwrap_or("16777215")
@@ -234,7 +224,10 @@ async fn bilibili_view(bvid: &str, cookies: Option<&str>) -> AppResult<(String, 
     let url = format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
     let (status, body) = http_get(&url, cookies).await?;
     let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-        AppError::Pipeline(format!("bilibili view decode: {e}；响应：{}", truncate(&body, 300)))
+        AppError::Pipeline(format!(
+            "bilibili view decode: {e}；响应：{}",
+            truncate(&body, 300)
+        ))
     })?;
     let code = v["code"].as_i64().unwrap_or(-1);
     let message = v["message"].as_str().unwrap_or("");
@@ -293,11 +286,9 @@ pub async fn bilibili_login_state(cookies: &str) -> Option<bool> {
 /// 会把 tokio worker 卡住，连带拖慢同一时刻的其他任务。
 pub async fn login_state_from_setting(raw: Option<&str>) -> Option<bool> {
     let owned = raw.map(str::to_owned);
-    let header = tokio::task::spawn_blocking(move || {
-        cookie_header_from_setting(owned.as_deref())
-    })
-    .await
-    .ok()??;
+    let header = tokio::task::spawn_blocking(move || cookie_header_from_setting(owned.as_deref()))
+        .await
+        .ok()??;
     bilibili_login_state(&header).await
 }
 
@@ -438,9 +429,8 @@ async fn fetch_all_root_comments(
     let mut emotes = Vec::new();
     let mut next: i64 = 0;
     for _page in 0..MAX_ROOT_PAGES {
-        let url = format!(
-            "https://api.bilibili.com/x/v2/reply/main?oid={aid}&type=1&mode=3&next={next}"
-        );
+        let url =
+            format!("https://api.bilibili.com/x/v2/reply/main?oid={aid}&type=1&mode=3&next={next}");
         let Ok((status, body)) = http_get(&url, cookies).await else {
             break;
         };
@@ -672,14 +662,24 @@ pub async fn ensure_comments(
     let mut pending: Vec<(Option<String>, Option<String>, i64, CommentEntry)> = Vec::new();
     let mut reply_budget = MAX_REPLY_REQUESTS;
     for (root_sort, (root_rpid, entry)) in roots.iter().enumerate() {
-        pending.push((Some(root_rpid.clone()), None, root_sort as i64, entry.clone()));
+        pending.push((
+            Some(root_rpid.clone()),
+            None,
+            root_sort as i64,
+            entry.clone(),
+        ));
         if entry.reply_count > 0 && reply_budget > 0 {
             let (replies, reply_emotes) =
                 fetch_comment_replies(&aid, root_rpid, cookies, &mut reply_budget).await;
             emotes.extend(reply_emotes);
             for (reply_sort, reply) in replies.into_iter().enumerate() {
                 // 回复一律挂在根评论下平铺展示；rpid 保持自身 id，parent 指向根。
-                pending.push((reply.rpid.clone(), Some(root_rpid.clone()), reply_sort as i64, reply));
+                pending.push((
+                    reply.rpid.clone(),
+                    Some(root_rpid.clone()),
+                    reply_sort as i64,
+                    reply,
+                ));
             }
         }
     }
@@ -718,20 +718,29 @@ pub async fn ensure_comments(
     emotes.sort_by(|a, b| a.text.cmp(&b.text));
     emotes.dedup_by(|a, b| a.text == b.text);
     for emote in &emotes {
-        sqlx::query("INSERT OR REPLACE INTO video_emotes(video_id,emote_text,url,size) VALUES (?,?,?,?)")
-            .bind(video_id)
-            .bind(&emote.text)
-            .bind(&emote.url)
-            .bind(emote.size)
-            .execute(&mut *tx)
-            .await?;
-    }
-    sqlx::query("INSERT OR REPLACE INTO video_emotes(video_id,emote_text,url,size) VALUES (?, '', '', 0)")
+        sqlx::query(
+            "INSERT OR REPLACE INTO video_emotes(video_id,emote_text,url,size) VALUES (?,?,?,?)",
+        )
         .bind(video_id)
+        .bind(&emote.text)
+        .bind(&emote.url)
+        .bind(emote.size)
         .execute(&mut *tx)
         .await?;
+    }
+    sqlx::query(
+        "INSERT OR REPLACE INTO video_emotes(video_id,emote_text,url,size) VALUES (?, '', '', 0)",
+    )
+    .bind(video_id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
-    tracing::info!(video_id, roots = roots.len(), emotes = emotes.len(), "评论区缓存完成");
+    tracing::info!(
+        video_id,
+        roots = roots.len(),
+        emotes = emotes.len(),
+        "评论区缓存完成"
+    );
     Ok(())
 }
 
@@ -750,7 +759,7 @@ mod tests {
   <d p="99.90,1,25,16777215,1511413804,0,jkl,4">&lt;角标&gt;</d>
   <d p="1.00,1,25,16777215,1511413805,0,mno,5"></d>
 </i>"#
-        .to_string()
+            .to_string()
     }
 
     #[test]
@@ -871,7 +880,10 @@ mod tests {
                        broken-tab-less-line\n";
 
         let header = parse_netscape_cookies(content).unwrap();
-        assert_eq!(header, "buvid3=E4D5A45Dinfoc; SESSDATA=aaa==; b_nut=1775722522");
+        assert_eq!(
+            header,
+            "buvid3=E4D5A45Dinfoc; SESSDATA=aaa==; b_nut=1775722522"
+        );
 
         // 只有注释/空行 → 解析不出任何 cookie。
         assert_eq!(parse_netscape_cookies("# only comment\n\n"), None);
@@ -890,7 +902,10 @@ mod tests {
         assert_eq!(cookie_header_from_setting(Some("")), None);
         assert_eq!(cookie_header_from_setting(None), None);
         // 不存在的路径 → None。
-        assert_eq!(cookie_header_from_setting(Some("/no/such/cookies.txt")), None);
+        assert_eq!(
+            cookie_header_from_setting(Some("/no/such/cookies.txt")),
+            None
+        );
 
         // 路径分支：读到真实文件时解析出 Cookie 头。
         let mut path = std::env::temp_dir();

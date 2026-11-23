@@ -515,6 +515,18 @@ export const scenes = [
     },
   },
   {
+    // 知识点收集册：点亮 / 褪色 / 待点亮 / 剪影四种卡面，下面是这门课的错题本。
+    name: "collection",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "知识点" }).click();
+      await page.getByRole("tab", { name: "收集册" }).click();
+      await page.locator(".ca-book-grid").first().waitFor();
+      await shot();
+    },
+  },
+  {
     name: "review-book",
     devices: ALL,
     run: async ({ page, shot }) => {
@@ -631,7 +643,11 @@ export const scenes = [
       await page.getByRole("button", { name: "开始复习" }).first().click();
       await shot();
       await page.getByRole("button", { name: /显示答案/ }).first().click();
+      await page.waitForTimeout(600);
       await shot("answer");
+      await page.getByRole("button", { name: "记忆曲线" }).click();
+      await page.locator(".ca-curve svg").waitFor();
+      await shot("curve");
     },
   },
   {

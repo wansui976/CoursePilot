@@ -133,14 +133,17 @@ fn snippet(text: &str, query: &str) -> Option<String> {
 }
 
 fn contains_ascii_ci(text: &str, query: &str) -> bool {
-    text.to_ascii_lowercase().contains(&query.to_ascii_lowercase())
+    text.to_ascii_lowercase()
+        .contains(&query.to_ascii_lowercase())
 }
 
 /// 文件夹自己加上它下面所有层级的文件夹（parent 已由 list_folders 归一化）。
 fn subtree(folders: &[Folder], root: &str) -> HashSet<String> {
     crate::commands::folders::subtree_of(
         root,
-        folders.iter().map(|folder| (folder.id.as_str(), folder.parent_id.as_deref())),
+        folders
+            .iter()
+            .map(|folder| (folder.id.as_str(), folder.parent_id.as_deref())),
     )
 }
 
@@ -266,10 +269,11 @@ pub async fn cmd_search_course(
     folder_id: Option<String>,
     query: String,
 ) -> AppResult<SearchResult> {
-    let include_transcripts = crate::commands::settings::get_setting(&state.db, SEARCH_TRANSCRIPTS_KEY)
-        .await?
-        .as_deref()
-        == Some("true");
+    let include_transcripts =
+        crate::commands::settings::get_setting(&state.db, SEARCH_TRANSCRIPTS_KEY)
+            .await?
+            .as_deref()
+            == Some("true");
     search_course(
         &state.db,
         &course_id,
@@ -338,10 +342,15 @@ mod tests {
     #[test]
     fn markdown_is_flattened_for_snippets() {
         assert_eq!(
-            plain_text("## 要点\n\n- **反向传播**：见 [推导](https://x/y)\n![图](a.png)\n> 引用 `代码`"),
+            plain_text(
+                "## 要点\n\n- **反向传播**：见 [推导](https://x/y)\n![图](a.png)\n> 引用 `代码`"
+            ),
             "要点 - 反向传播：见 推导 引用 代码"
         );
-        assert_eq!(snippet("abc Gradient Descent xyz", "gradient"), Some("abc Gradient Descent xyz".into()));
+        assert_eq!(
+            snippet("abc Gradient Descent xyz", "gradient"),
+            Some("abc Gradient Descent xyz".into())
+        );
         let long = format!("{}关键{}", "前".repeat(50), "后".repeat(50));
         let cut = snippet(&long, "关键").unwrap();
         assert!(cut.starts_with('…') && cut.ends_with('…'), "{cut}");
@@ -353,7 +362,10 @@ mod tests {
     #[tokio::test]
     async fn searches_titles_and_notes_but_transcripts_only_when_asked() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let a = video(&db, &course, "01 梯度下降", 0).await;
         let b = video(&db, &course, "02 反向传播", 1).await;
         let c = video(&db, &course, "03 卷积", 2).await;
@@ -361,14 +373,22 @@ mod tests {
         line(&db, &c, 65_000, "这里的梯度下降和第一讲一样").await;
         line(&db, &c, 90_000, "再看一次梯度下降").await;
 
-        let result = search_course(&db, &course, None, "梯度下降", false).await.unwrap();
+        let result = search_course(&db, &course, None, "梯度下降", false)
+            .await
+            .unwrap();
         // 标题命中在前，笔记命中随后；文稿没开不搜。
         assert_eq!(titles(&result), ["01 梯度下降", "02 反向传播"]);
         assert!(result.hits[0].title_match && result.hits[0].note_snippet.is_none());
-        assert!(result.hits[1].note_snippet.as_deref().unwrap().contains("梯度下降"));
+        assert!(result.hits[1]
+            .note_snippet
+            .as_deref()
+            .unwrap()
+            .contains("梯度下降"));
         assert!(!result.transcripts_included);
 
-        let result = search_course(&db, &course, None, "梯度下降", true).await.unwrap();
+        let result = search_course(&db, &course, None, "梯度下降", true)
+            .await
+            .unwrap();
         assert_eq!(titles(&result), ["01 梯度下降", "02 反向传播", "03 卷积"]);
         let hit = &result.hits[2];
         assert_eq!(hit.transcript_count, 2);
@@ -379,9 +399,14 @@ mod tests {
     #[tokio::test]
     async fn scopes_to_a_folder_and_everything_under_it() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let ch = create_folder(&db, &course, None, "ch").await.unwrap();
-        let sub = create_folder(&db, &course, Some(ch.id.clone()), "sub").await.unwrap();
+        let sub = create_folder(&db, &course, Some(ch.id.clone()), "sub")
+            .await
+            .unwrap();
         let root = video(&db, &course, "根目录 矩阵", 0).await;
         let inner = video(&db, &course, "章内 矩阵", 1).await;
         let deeper = video(&db, &course, "子节 矩阵", 2).await;
@@ -389,12 +414,20 @@ mod tests {
             kind: ItemKind::Video,
             id: id.into(),
         };
-        move_items(&db, &course, Some(ch.id.clone()), vec![v(&inner)]).await.unwrap();
-        move_items(&db, &course, Some(sub.id.clone()), vec![v(&deeper)]).await.unwrap();
+        move_items(&db, &course, Some(ch.id.clone()), vec![v(&inner)])
+            .await
+            .unwrap();
+        move_items(&db, &course, Some(sub.id.clone()), vec![v(&deeper)])
+            .await
+            .unwrap();
 
-        let all = search_course(&db, &course, None, "矩阵", false).await.unwrap();
+        let all = search_course(&db, &course, None, "矩阵", false)
+            .await
+            .unwrap();
         assert_eq!(all.hits.len(), 3);
-        let in_ch = search_course(&db, &course, Some(&ch.id), "矩阵", false).await.unwrap();
+        let in_ch = search_course(&db, &course, Some(&ch.id), "矩阵", false)
+            .await
+            .unwrap();
         // 教材顺序：sub 建在 inner 移进来之前，所以子节在前。根目录的不在范围内。
         assert_eq!(titles(&in_ch), ["子节 矩阵", "章内 矩阵"]);
         assert_eq!(in_ch.hits[0].folder_id.as_deref(), Some(sub.id.as_str()));
@@ -404,7 +437,10 @@ mod tests {
     #[tokio::test]
     async fn ignores_matches_hidden_in_markdown_syntax_and_trashed_videos() {
         let db = fresh_db().await;
-        let course = create_course(&db, "C".into(), "/c".into()).await.unwrap().id;
+        let course = create_course(&db, "C".into(), "/c".into())
+            .await
+            .unwrap()
+            .id;
         let a = video(&db, &course, "a", 0).await;
         let b = video(&db, &course, "b", 1).await;
         note(&db, &a, "![](images/eigen.png) 正文没有这个词").await;
@@ -414,9 +450,15 @@ mod tests {
             .execute(&db.pool)
             .await
             .unwrap();
-        let result = search_course(&db, &course, None, "EIGEN", false).await.unwrap();
+        let result = search_course(&db, &course, None, "EIGEN", false)
+            .await
+            .unwrap();
         assert!(result.hits.is_empty(), "{result:?}");
         // 空查询直接返回空。
-        assert!(search_course(&db, &course, None, "  ", true).await.unwrap().hits.is_empty());
+        assert!(search_course(&db, &course, None, "  ", true)
+            .await
+            .unwrap()
+            .hits
+            .is_empty());
     }
 }

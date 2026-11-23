@@ -314,10 +314,19 @@ async fn run_batch<'a, T: ToolBox>(
     state: &mut ToolLoopState,
 ) {
     enum Pending<'a> {
-        Run { call: &'a ToolCall },
-        Rejected { call: &'a ToolCall, outcome: ToolOutcome },
-        Canceled { call: &'a ToolCall },
-        Exhausted { call: &'a ToolCall },
+        Run {
+            call: &'a ToolCall,
+        },
+        Rejected {
+            call: &'a ToolCall,
+            outcome: ToolOutcome,
+        },
+        Canceled {
+            call: &'a ToolCall,
+        },
+        Exhausted {
+            call: &'a ToolCall,
+        },
     }
 
     // 第一遍只做决定、不落结果：占位与执行结果都留到最后统一按调用序号写回，
@@ -370,11 +379,17 @@ async fn run_batch<'a, T: ToolBox>(
             }
             Pending::Rejected { call, outcome } => (call, Some(outcome)),
             Pending::Canceled { call } => {
-                messages.push(ChatMessage::tool_result(&call.id, "已取消，未执行。".to_string()));
+                messages.push(ChatMessage::tool_result(
+                    &call.id,
+                    "已取消，未执行。".to_string(),
+                ));
                 continue;
             }
             Pending::Exhausted { call } => {
-                messages.push(ChatMessage::tool_result(&call.id, TOOL_BUDGET_EXHAUSTED.to_string()));
+                messages.push(ChatMessage::tool_result(
+                    &call.id,
+                    TOOL_BUDGET_EXHAUSTED.to_string(),
+                ));
                 continue;
             }
         };
@@ -438,9 +453,7 @@ async fn complete_stream_with_retry(
             emitted.store(true, Ordering::SeqCst);
             match piece {
                 crate::llm::StreamPiece::Content(delta) => on_event(AgentEvent::Content(delta)),
-                crate::llm::StreamPiece::Reasoning(delta) => {
-                    on_event(AgentEvent::Reasoning(delta))
-                }
+                crate::llm::StreamPiece::Reasoning(delta) => on_event(AgentEvent::Reasoning(delta)),
             }
         };
         match provider.complete_stream(req, cancel, &mut on_piece).await {
@@ -490,7 +503,10 @@ pub async fn run<T: ToolBox>(
     cancel: &AtomicBool,
     on_event: &mut (dyn FnMut(AgentEvent) + Send),
 ) -> AppResult<AgentOutcome> {
-    run_with_prefix(provider, model, system, None, messages, tools, cancel, on_event).await
+    run_with_prefix(
+        provider, model, system, None, messages, tools, cancel, on_event,
+    )
+    .await
 }
 
 /// 同 [`run`]，但每一轮请求都在 system 最前面带上一段可缓存的前缀（如当前视频的讲稿）。
@@ -619,29 +635,33 @@ pub async fn run_with_prefix<T: ToolBox>(
         on_event(AgentEvent::HitTurnLimit);
         let summary_turn = turns + 1;
         on_event(AgentEvent::TurnStarted(summary_turn));
-        let summary_req =
-            forced_summary_request(model, system.as_deref(), cacheable_context.clone(), messages.clone());
+        let summary_req = forced_summary_request(
+            model,
+            system.as_deref(),
+            cacheable_context.clone(),
+            messages.clone(),
+        );
         // 总结请求同样吃抖动重试：它是封顶后的最后一步，抖动把它打掉用户连兜底都没有。
-        let summary = match complete_stream_with_retry(provider, &summary_req, cancel, on_event).await
-        {
-            Ok(summary) => summary,
-            // 强制总结是封顶后的兜底。它自己失败时不能把前面已经取得的资料和动作
-            // 一起变成命令错误；保留旧结果并让界面明确提示未得出最终结论。
-            Err(_) => {
-                let canceled = cancel.load(Ordering::SeqCst);
-                return Ok(AgentOutcome::finished(
-                    answer,
-                    messages,
-                    summary_turn,
-                    if canceled {
-                        AgentStopReason::Canceled
-                    } else {
-                        AgentStopReason::LimitReached
-                    },
-                    usage,
-                ));
-            }
-        };
+        let summary =
+            match complete_stream_with_retry(provider, &summary_req, cancel, on_event).await {
+                Ok(summary) => summary,
+                // 强制总结是封顶后的兜底。它自己失败时不能把前面已经取得的资料和动作
+                // 一起变成命令错误；保留旧结果并让界面明确提示未得出最终结论。
+                Err(_) => {
+                    let canceled = cancel.load(Ordering::SeqCst);
+                    return Ok(AgentOutcome::finished(
+                        answer,
+                        messages,
+                        summary_turn,
+                        if canceled {
+                            AgentStopReason::Canceled
+                        } else {
+                            AgentStopReason::LimitReached
+                        },
+                        usage,
+                    ));
+                }
+            };
         accumulate_usage(&mut usage, summary.usage);
         // 和工具循环一样，取消时丢掉总结请求吐出的半截内容，不把它写进下一轮历史。
         if cancel.load(Ordering::SeqCst) {
@@ -1148,13 +1168,22 @@ mod tests {
 
         assert_eq!(out.turns, MAX_TURNS + 1, "最后一次只负责总结");
         // 撞上限事件必须先于总结轮开始、先于总结正文：界面据此知道「封顶」早于「完成」。
-        let limit_at = trace.iter().position(|e| e == "limit").expect("要发撞上限事件");
+        let limit_at = trace
+            .iter()
+            .position(|e| e == "limit")
+            .expect("要发撞上限事件");
         let summary_at = trace
             .iter()
             .position(|e| e == format!("turn:{}", MAX_TURNS + 1).as_str())
             .expect("总结轮要单独播报");
-        let text_at = trace.iter().position(|e| e == "text").expect("总结正文要播出");
-        assert!(limit_at < summary_at && summary_at < text_at, "顺序应为 撞上限→总结轮→总结正文，实际 {trace:?}");
+        let text_at = trace
+            .iter()
+            .position(|e| e == "text")
+            .expect("总结正文要播出");
+        assert!(
+            limit_at < summary_at && summary_at < text_at,
+            "顺序应为 撞上限→总结轮→总结正文，实际 {trace:?}"
+        );
         assert_eq!(out.answer, "基于已经查到的资料，最终答案如下");
         assert!(
             !out.hit_turn_limit,
@@ -1811,10 +1840,19 @@ mod tests {
         .unwrap();
 
         // 同一时刻有两个调用在执行——串行实现永远到不了 2。
-        assert_eq!(probe.max_active.load(Ordering::SeqCst), 2, "只读工具应当并发执行");
+        assert_eq!(
+            probe.max_active.load(Ordering::SeqCst),
+            2,
+            "只读工具应当并发执行"
+        );
         assert_eq!(
             trace,
-            ["start:c1", "start:c2", "finish:c1:completed", "finish:c2:completed"],
+            [
+                "start:c1",
+                "start:c2",
+                "finish:c1:completed",
+                "finish:c2:completed"
+            ],
             "事件按调用序号成对：Started 聚簇在前，Finished 保序在后"
         );
         // 工具结果按调用序号写回对话，模型看到的顺序不乱。
@@ -1855,11 +1893,20 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(probe.max_active.load(Ordering::SeqCst), 1, "写操作必须串行，不能并发");
+        assert_eq!(
+            probe.max_active.load(Ordering::SeqCst),
+            1,
+            "写操作必须串行，不能并发"
+        );
         // 串行批次的事件仍严格交错：c1 结束之后 c2 才开始。
         assert_eq!(
             trace,
-            ["start:c1", "finish:c1:completed", "start:c2", "finish:c2:completed"],
+            [
+                "start:c1",
+                "finish:c1:completed",
+                "start:c2",
+                "finish:c2:completed"
+            ],
             "非只读调用逐个执行、事件逐对回收"
         );
         assert_eq!(out.answer, "两个写操作都做完了");
@@ -1899,7 +1946,11 @@ mod tests {
         .unwrap();
 
         // 只读前缀并发到 2；写与之后的单独读都不能再与其他调用重叠。
-        assert_eq!(probe.max_active.load(Ordering::SeqCst), 2, "只有连续只读前缀并发");
+        assert_eq!(
+            probe.max_active.load(Ordering::SeqCst),
+            2,
+            "只有连续只读前缀并发"
+        );
         assert_eq!(
             trace,
             [

@@ -23,7 +23,11 @@ const PAGE_SIZE: usize = 100;
 pub const ROOT: &str = "0";
 
 fn api_base() -> String {
-    test_api().lock().unwrap().clone().unwrap_or_else(|| API.to_string())
+    test_api()
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| API.to_string())
 }
 
 fn test_api() -> &'static Mutex<Option<String>> {
@@ -91,7 +95,11 @@ fn refreshed_cookie(cookie: &str, set_cookies: &[String]) -> Option<String> {
 
 impl Client {
     pub fn new(cookie: &str) -> AppResult<Self> {
-        let cookie = cookie.trim().trim_start_matches("Cookie:").trim().to_string();
+        let cookie = cookie
+            .trim()
+            .trim_start_matches("Cookie:")
+            .trim()
+            .to_string();
         if cookie.is_empty() {
             return Err(AppError::Config("要先填夸克网盘的 Cookie".into()));
         }
@@ -100,7 +108,10 @@ impl Client {
             .timeout(Duration::from_secs(60))
             .build()
             .map_err(|error| AppError::Other(error.to_string()))?;
-        Ok(Self { http, cookie: Mutex::new(cookie) })
+        Ok(Self {
+            http,
+            cookie: Mutex::new(cookie),
+        })
     }
 
     /// 现在的 Cookie（可能已经被接口续过）。
@@ -117,7 +128,13 @@ impl Client {
         ]
     }
 
-    async fn call(&self, method: reqwest::Method, path: &str, query: &[(&str, String)], body: Option<Value>) -> AppResult<Value> {
+    async fn call(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<Value>,
+    ) -> AppResult<Value> {
         let mut request = self
             .http
             .request(method, format!("{}{path}", api_base()))
@@ -130,7 +147,10 @@ impl Client {
         if let Some(body) = body {
             request = request.json(&body);
         }
-        let response = request.send().await.map_err(|error| AppError::Other(format!("连不上夸克网盘：{error}")))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| AppError::Other(format!("连不上夸克网盘：{error}")))?;
         let set_cookies: Vec<String> = response
             .headers()
             .get_all(reqwest::header::SET_COOKIE)
@@ -142,13 +162,23 @@ impl Client {
         }
         let status = response.status();
         let body: Value = response.json().await.unwrap_or(Value::Null);
-        let code = body.get("code").and_then(Value::as_i64).unwrap_or(if status.is_success() { 0 } else { -1 });
+        let code = body
+            .get("code")
+            .and_then(Value::as_i64)
+            .unwrap_or(if status.is_success() { 0 } else { -1 });
         if status == reqwest::StatusCode::UNAUTHORIZED || code == 31001 {
-            return Err(AppError::Config("夸克网盘的登录已失效：在浏览器里重新登录 pan.quark.cn，再复制一份 Cookie".into()));
+            return Err(AppError::Config(
+                "夸克网盘的登录已失效：在浏览器里重新登录 pan.quark.cn，再复制一份 Cookie".into(),
+            ));
         }
         if !status.is_success() || code != 0 {
-            let message = body.get("message").and_then(Value::as_str).unwrap_or("未知错误");
-            return Err(AppError::Other(format!("夸克网盘：{message}（HTTP {status}，code {code}）")));
+            let message = body
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("未知错误");
+            return Err(AppError::Other(format!(
+                "夸克网盘：{message}（HTTP {status}，code {code}）"
+            )));
         }
         Ok(body)
     }
@@ -172,20 +202,31 @@ impl Client {
                     None,
                 )
                 .await?;
-            let list = body.pointer("/data/list").and_then(Value::as_array).cloned().unwrap_or_default();
+            let list = body
+                .pointer("/data/list")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
             let count = list.len();
             files.extend(list.iter().filter_map(|item| {
                 let fid = item.get("fid")?.as_str()?.to_string();
                 let is_file = item.get("file").and_then(Value::as_bool).unwrap_or(true);
                 Some(QuarkFile {
                     fid,
-                    name: unescape_html(item.get("file_name").and_then(Value::as_str).unwrap_or_default()),
+                    name: unescape_html(
+                        item.get("file_name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    ),
                     size: item.get("size").and_then(Value::as_u64).filter(|_| is_file),
                     is_dir: !is_file,
                     is_video: is_file && item.get("category").and_then(Value::as_i64) == Some(1),
                 })
             }));
-            let total = body.pointer("/metadata/_total").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let total = body
+                .pointer("/metadata/_total")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
             if count == 0 || page * PAGE_SIZE >= total {
                 break;
             }
@@ -195,12 +236,21 @@ impl Client {
 
     /// 一个文件的下载链接（有时效，播放 / 下载前现取）。
     pub async fn download_url(&self, fid: &str) -> AppResult<String> {
-        let body = self.call(reqwest::Method::POST, "/file/download", &[], Some(json!({ "fids": [fid] }))).await?;
+        let body = self
+            .call(
+                reqwest::Method::POST,
+                "/file/download",
+                &[],
+                Some(json!({ "fids": [fid] })),
+            )
+            .await?;
         body.pointer("/data/0/download_url")
             .and_then(Value::as_str)
             .filter(|url| !url.is_empty())
             .map(str::to_string)
-            .ok_or_else(|| AppError::Other("夸克网盘没给下载链接（文件可能被删了，或者违规被屏蔽）".into()))
+            .ok_or_else(|| {
+                AppError::Other("夸克网盘没给下载链接（文件可能被删了，或者违规被屏蔽）".into())
+            })
     }
 }
 
@@ -227,7 +277,12 @@ pub(crate) mod fake {
         let drive = Arc::new(Mutex::new(Drive {
             files: files
                 .iter()
-                .map(|(fid, parent, name, dir, bytes)| (fid.to_string(), (parent.to_string(), name.to_string(), *dir, bytes.to_vec())))
+                .map(|(fid, parent, name, dir, bytes)| {
+                    (
+                        fid.to_string(),
+                        (parent.to_string(), name.to_string(), *dir, bytes.to_vec()),
+                    )
+                })
                 .collect(),
             puus: "p1".into(),
             downloads: 0,
@@ -240,7 +295,9 @@ pub(crate) mod fake {
         let own = base.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
                 let drive = shared.clone();
                 let own = own.clone();
                 tokio::spawn(async move {
@@ -252,19 +309,28 @@ pub(crate) mod fake {
                             return;
                         }
                         buf.extend_from_slice(&tmp[..n]);
-                        let Some(split) = buf.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                        let Some(split) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                            continue;
+                        };
                         let head = String::from_utf8_lossy(&buf[..split]).to_string();
                         let length = head
                             .lines()
-                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
                             .unwrap_or(0);
                         if buf.len() >= split + 4 + length {
                             break (head, buf[split + 4..split + 4 + length].to_vec());
                         }
                     };
                     let header = |name: &str| {
-                        head.lines()
-                            .find_map(|l| l.to_ascii_lowercase().starts_with(name).then(|| l[name.len()..].trim().to_string()))
+                        head.lines().find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .starts_with(name)
+                                .then(|| l[name.len()..].trim().to_string())
+                        })
                     };
                     let target = head.split_whitespace().nth(1).unwrap_or("").to_string();
                     let url = reqwest::Url::parse(&format!("http://x{target}")).unwrap();
@@ -274,14 +340,23 @@ pub(crate) mod fake {
                     let (status, extra, payload) = {
                         let mut drive = drive.lock().unwrap();
                         let logged_in = cookie.contains(&format!("__puus={}", drive.puus));
-                        let referer_ok = header("referer:").is_some_and(|r| r.starts_with("https://pan.quark.cn"));
+                        let referer_ok = header("referer:")
+                            .is_some_and(|r| r.starts_with("https://pan.quark.cn"));
                         if !logged_in || !referer_ok {
-                            ("401 Unauthorized", String::new(), br#"{"code":31001,"message":"require login"}"#.to_vec())
+                            (
+                                "401 Unauthorized",
+                                String::new(),
+                                br#"{"code":31001,"message":"require login"}"#.to_vec(),
+                            )
                         } else if url.path() == "/1/clouddrive/file/sort" {
                             assert_eq!(query.get("pr").map(String::as_str), Some("ucpro"));
                             let parent = query.get("pdir_fid").cloned().unwrap_or_default();
-                            let size: usize = query.get("_size").and_then(|v| v.parse().ok()).unwrap_or(100);
-                            let page: usize = query.get("_page").and_then(|v| v.parse().ok()).unwrap_or(1);
+                            let size: usize = query
+                                .get("_size")
+                                .and_then(|v| v.parse().ok())
+                                .unwrap_or(100);
+                            let page: usize =
+                                query.get("_page").and_then(|v| v.parse().ok()).unwrap_or(1);
                             let all: Vec<serde_json::Value> = drive
                                 .files
                                 .iter()
@@ -291,9 +366,16 @@ pub(crate) mod fake {
                                         "size": if *dir { 0 } else { bytes.len() }, "category": if name.ends_with(".mp4") { 1 } else { 4 }})
                                 })
                                 .collect();
-                            let page_items: Vec<_> = all.iter().skip((page - 1) * size).take(size).cloned().collect();
-                            drive.puus = format!("p{}", drive.puus[1..].parse::<u32>().unwrap() + 1);
-                            let set = format!("Set-Cookie: __puus={}; Path=/; HttpOnly\r\n", drive.puus);
+                            let page_items: Vec<_> = all
+                                .iter()
+                                .skip((page - 1) * size)
+                                .take(size)
+                                .cloned()
+                                .collect();
+                            drive.puus =
+                                format!("p{}", drive.puus[1..].parse::<u32>().unwrap() + 1);
+                            let set =
+                                format!("Set-Cookie: __puus={}; Path=/; HttpOnly\r\n", drive.puus);
                             ("200 OK", set, serde_json::to_vec(&serde_json::json!({"code":0,"data":{"list":page_items},"metadata":{"_total":all.len()}})).unwrap())
                         } else if url.path() == "/1/clouddrive/file/download" {
                             let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -301,7 +383,11 @@ pub(crate) mod fake {
                             if drive.files.contains_key(&fid) {
                                 ("200 OK", String::new(), serde_json::to_vec(&serde_json::json!({"code":0,"data":[{"download_url": format!("{own}/dl/{fid}")}]})).unwrap())
                             } else {
-                                ("200 OK", String::new(), br#"{"code":41004,"message":"file not found"}"#.to_vec())
+                                (
+                                    "200 OK",
+                                    String::new(),
+                                    br#"{"code":41004,"message":"file not found"}"#.to_vec(),
+                                )
                             }
                         } else if let Some(fid) = url.path().strip_prefix("/dl/") {
                             drive.downloads += 1;
@@ -310,13 +396,26 @@ pub(crate) mod fake {
                                 drive.drop_next -= 1;
                                 truncate = true;
                             }
-                            let bytes = drive.files.get(fid).map(|f| f.3.clone()).unwrap_or_default();
-                            match header("range:").and_then(|r| r.strip_prefix("bytes=").map(str::to_string)) {
+                            let bytes = drive
+                                .files
+                                .get(fid)
+                                .map(|f| f.3.clone())
+                                .unwrap_or_default();
+                            match header("range:")
+                                .and_then(|r| r.strip_prefix("bytes=").map(str::to_string))
+                            {
                                 Some(range) => {
                                     let (a, b) = range.split_once('-').unwrap();
                                     let start: usize = a.parse().unwrap();
-                                    let end: usize = b.parse().ok().unwrap_or(bytes.len() - 1).min(bytes.len() - 1);
-                                    let set = format!("Content-Range: bytes {start}-{end}/{}\r\n", bytes.len());
+                                    let end: usize = b
+                                        .parse()
+                                        .ok()
+                                        .unwrap_or(bytes.len() - 1)
+                                        .min(bytes.len() - 1);
+                                    let set = format!(
+                                        "Content-Range: bytes {start}-{end}/{}\r\n",
+                                        bytes.len()
+                                    );
                                     ("206 Partial Content", set, bytes[start..=end].to_vec())
                                 }
                                 None => ("200 OK", String::new(), bytes),
@@ -328,7 +427,11 @@ pub(crate) mod fake {
                     let response = format!("HTTP/1.1 {status}\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n", payload.len());
                     let _ = socket.write_all(response.as_bytes()).await;
                     // 断开：说好的长度只发一半就关连接，客户端读到的就是「error decoding response body」。
-                    let sent = if truncate { payload.len() / 2 } else { payload.len() };
+                    let sent = if truncate {
+                        payload.len() / 2
+                    } else {
+                        payload.len()
+                    };
                     let _ = socket.write_all(&payload[..sent]).await;
                 });
             }
@@ -349,7 +452,10 @@ mod tests {
             Some("b-user-id=abc; __puus=new; __pus=keep")
         );
         assert_eq!(refreshed_cookie(cookie, &["other=1".into()]), None);
-        assert_eq!(refreshed_cookie("__puus=same", &["__puus=same".into()]), None);
+        assert_eq!(
+            refreshed_cookie("__puus=same", &["__puus=same".into()]),
+            None
+        );
         assert_eq!(unescape_html("A&amp;B &lt;1&gt;"), "A&B <1>");
         assert!(Client::new("  ").is_err());
     }

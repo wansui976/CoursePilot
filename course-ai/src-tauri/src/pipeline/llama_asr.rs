@@ -74,7 +74,9 @@ pub async fn transcribe(
         .map_err(|e| AppError::Pipeline(format!("本地识别线程异常退出：{e}")))??
     };
     if segments.is_empty() {
-        return Ok(WhisperJson { transcription: Vec::new() });
+        return Ok(WhisperJson {
+            transcription: Vec::new(),
+        });
     }
 
     let model = job.model_dir.join(job.model.files[0].path);
@@ -103,7 +105,8 @@ pub async fn transcribe(
     let results: Vec<AppResult<Vec<WhisperSegment>>> = stream::iter(segments.iter().copied())
         .map(|(start, end)| {
             let (client, server, samples) = (&client, &server, &samples);
-            let (finished, detected, total, device) = (&finished, &detected, segments.len(), &device);
+            let (finished, detected, total, device) =
+                (&finished, &detected, segments.len(), &device);
             let hotwords = job.hotwords.as_deref();
             async move {
                 let wav = wav_bytes(&samples[start..end]);
@@ -340,7 +343,9 @@ impl LlamaServer {
             .await
             .map_err(|e| AppError::Pipeline(format!("识别引擎返回的内容读不了：{e}")))?;
         if !status.is_success() {
-            return Err(AppError::Pipeline(format!("识别引擎出错（{status}）：{value}")));
+            return Err(AppError::Pipeline(format!(
+                "识别引擎出错（{status}）：{value}"
+            )));
         }
         Ok(value["choices"][0]["message"]["content"]
             .as_str()
@@ -407,10 +412,15 @@ mod tests {
             Some("NVIDIA GeForce RTX 3060".into())
         );
         assert_eq!(
-            gpu_device_from_log(&log(&["load: using device MTL0 (Apple M4) - 21845 MiB free"])),
+            gpu_device_from_log(&log(&[
+                "load: using device MTL0 (Apple M4) - 21845 MiB free"
+            ])),
             Some("Apple M4".into())
         );
-        assert_eq!(gpu_device_from_log(&log(&["main: loading model", "using device CPU (Intel)"])), None);
+        assert_eq!(
+            gpu_device_from_log(&log(&["main: loading model", "using device CPU (Intel)"])),
+            None
+        );
         assert_eq!(device_label(None), "CPU");
         assert_eq!(device_label(Some("Apple M4")), "GPU：Apple M4");
     }

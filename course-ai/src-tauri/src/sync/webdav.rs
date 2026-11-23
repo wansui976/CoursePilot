@@ -38,7 +38,9 @@ impl WebDav {
         let parsed = reqwest::Url::parse(base)
             .map_err(|_| AppError::Config(format!("WebDAV 地址不是合法的网址：{base}")))?;
         if !matches!(parsed.scheme(), "https" | "http") {
-            return Err(AppError::Config("WebDAV 地址要以 https:// 或 http:// 开头".into()));
+            return Err(AppError::Config(
+                "WebDAV 地址要以 https:// 或 http:// 开头".into(),
+            ));
         }
         let folder = folder.trim().trim_matches('/');
         let mut root = base.trim_end_matches('/').to_string();
@@ -52,7 +54,12 @@ impl WebDav {
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|error| AppError::Other(error.to_string()))?;
-        Ok(Self { http, root, user: user.to_string(), password: password.to_string() })
+        Ok(Self {
+            http,
+            root,
+            user: user.to_string(),
+            password: password.to_string(),
+        })
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -82,7 +89,9 @@ impl WebDav {
         }
         check(status, "列目录")?;
         let body = response.text().await.map_err(network_error)?;
-        let own = reqwest::Url::parse(&self.url(&dir)).map(|url| url.path().to_string()).unwrap_or_default();
+        let own = reqwest::Url::parse(&self.url(&dir))
+            .map(|url| url.path().to_string())
+            .unwrap_or_default();
         Ok(Some(parse_propfind(&body, &own)))
     }
 
@@ -101,7 +110,10 @@ impl WebDav {
     pub async fn ensure_root(&self) -> AppResult<()> {
         let response = self
             .http
-            .request(Method::from_bytes(b"MKCOL").expect("valid method"), &self.root)
+            .request(
+                Method::from_bytes(b"MKCOL").expect("valid method"),
+                &self.root,
+            )
             .basic_auth(&self.user, Some(&self.password))
             .send()
             .await
@@ -116,10 +128,16 @@ impl WebDav {
     }
 
     async fn ensure_root_levels(&self) -> AppResult<()> {
-        let url = reqwest::Url::parse(&self.root).map_err(|error| AppError::Other(error.to_string()))?;
+        let url =
+            reqwest::Url::parse(&self.root).map_err(|error| AppError::Other(error.to_string()))?;
         let segments: Vec<String> = url
             .path_segments()
-            .map(|parts| parts.filter(|part| !part.is_empty()).map(str::to_string).collect())
+            .map(|parts| {
+                parts
+                    .filter(|part| !part.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
             .unwrap_or_default();
         let mut current = url.clone();
         current.set_path("/");
@@ -130,7 +148,10 @@ impl WebDav {
             current.set_path(&path);
             let response = self
                 .http
-                .request(Method::from_bytes(b"MKCOL").expect("valid method"), current.as_str())
+                .request(
+                    Method::from_bytes(b"MKCOL").expect("valid method"),
+                    current.as_str(),
+                )
                 .basic_auth(&self.user, Some(&self.password))
                 .send()
                 .await
@@ -148,7 +169,10 @@ impl WebDav {
 
     async fn mkcol(&self, path: &str) -> AppResult<()> {
         let response = self
-            .request(Method::from_bytes(b"MKCOL").expect("valid method"), &ensure_trailing_slash(path))
+            .request(
+                Method::from_bytes(b"MKCOL").expect("valid method"),
+                &ensure_trailing_slash(path),
+            )
             .send()
             .await
             .map_err(network_error)?;
@@ -185,7 +209,11 @@ impl WebDav {
     /// 删一个文件或整个文件夹（WebDAV 删文件夹是连里面一起删）。本来就没有也算成功：
     /// 两台设备同时清理同一样东西时，后到的那个不该报错。
     pub async fn delete(&self, path: &str) -> AppResult<()> {
-        let response = self.request(Method::DELETE, path).send().await.map_err(network_error)?;
+        let response = self
+            .request(Method::DELETE, path)
+            .send()
+            .await
+            .map_err(network_error)?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(());
         }
@@ -194,12 +222,18 @@ impl WebDav {
 
     /// 文件在不在（GET 不下载内容太重时用；这里只给小文件用 GET 判断）。
     pub async fn get_optional(&self, path: &str) -> AppResult<Option<Vec<u8>>> {
-        let response = self.request(Method::GET, path).send().await.map_err(network_error)?;
+        let response = self
+            .request(Method::GET, path)
+            .send()
+            .await
+            .map_err(network_error)?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
         check(response.status(), "下载")?;
-        Ok(Some(response.bytes().await.map_err(network_error)?.to_vec()))
+        Ok(Some(
+            response.bytes().await.map_err(network_error)?.to_vec(),
+        ))
     }
 
     /// 大块上传（视频分块）：慢网络上一块要传好几分钟，单独放宽超时。
@@ -217,13 +251,22 @@ impl WebDav {
 
     /// 大块下载（视频分块）。
     pub async fn get_large(&self, path: &str) -> AppResult<Vec<u8>> {
-        let response = self.request(Method::GET, path).timeout(LARGE_TIMEOUT).send().await.map_err(network_error)?;
+        let response = self
+            .request(Method::GET, path)
+            .timeout(LARGE_TIMEOUT)
+            .send()
+            .await
+            .map_err(network_error)?;
         check(response.status(), "下载视频")?;
         Ok(response.bytes().await.map_err(network_error)?.to_vec())
     }
 
     pub async fn get(&self, path: &str) -> AppResult<Vec<u8>> {
-        let response = self.request(Method::GET, path).send().await.map_err(network_error)?;
+        let response = self
+            .request(Method::GET, path)
+            .send()
+            .await
+            .map_err(network_error)?;
         check(response.status(), "下载")?;
         Ok(response.bytes().await.map_err(network_error)?.to_vec())
     }
@@ -244,10 +287,16 @@ impl WebDav {
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
             check(status, "连接")?;
         }
-        let Some(date) = response.headers().get("date").and_then(|value| value.to_str().ok()) else {
+        let Some(date) = response
+            .headers()
+            .get("date")
+            .and_then(|value| value.to_str().ok())
+        else {
             return Ok(None);
         };
-        let Ok(server) = chrono::DateTime::parse_from_rfc2822(date) else { return Ok(None) };
+        let Ok(server) = chrono::DateTime::parse_from_rfc2822(date) else {
+            return Ok(None);
+        };
         Ok(Some(server.timestamp_millis() - (before + after) / 2))
     }
 }
@@ -264,7 +313,11 @@ fn ensure_trailing_slash(path: &str) -> String {
 /// 把「a/b 课/c.mp4」这样的路径按段编码成可以放进网址的样子。
 pub fn encode_path(path: &str) -> String {
     let trailing = path.ends_with('/');
-    let mut out: Vec<String> = path.split('/').filter(|part| !part.is_empty()).map(encode_segment).collect();
+    let mut out: Vec<String> = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .map(encode_segment)
+        .collect();
     if trailing && !out.is_empty() {
         out.push(String::new());
     }
@@ -303,7 +356,9 @@ fn encode_segment(segment: &str) -> String {
     let mut out = String::new();
     for byte in segment.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -319,10 +374,14 @@ fn check(status: StatusCode, action: &str) -> AppResult<()> {
         return Ok(());
     }
     let reason = match status {
-        StatusCode::UNAUTHORIZED => "账号或密码不对（坚果云要用「第三方应用密码」，不是登录密码）".to_string(),
+        StatusCode::UNAUTHORIZED => {
+            "账号或密码不对（坚果云要用「第三方应用密码」，不是登录密码）".to_string()
+        }
         StatusCode::FORBIDDEN => "服务器拒绝了（没有这个文件夹的权限）".to_string(),
         StatusCode::NOT_FOUND => "地址不对（找不到这个 WebDAV 路径）".to_string(),
-        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => "服务器限流了，稍后会自动重试".to_string(),
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => {
+            "服务器限流了，稍后会自动重试".to_string()
+        }
         StatusCode::INSUFFICIENT_STORAGE => "网盘空间不够了".to_string(),
         other => format!("HTTP {other}"),
     };
@@ -335,7 +394,9 @@ fn check(status: StatusCode, action: &str) -> AppResult<()> {
 pub(crate) fn parse_propfind(xml: &str, own_path: &str) -> Vec<Entry> {
     let mut entries = Vec::new();
     for response in split_elements(xml, "response") {
-        let Some(href) = first_text(response, "href") else { continue };
+        let Some(href) = first_text(response, "href") else {
+            continue;
+        };
         let href = href.trim();
         // href 可能是完整网址，也可能只是路径。
         let path = reqwest::Url::parse(href)
@@ -345,11 +406,17 @@ pub(crate) fn parse_propfind(xml: &str, own_path: &str) -> Vec<Entry> {
             continue;
         }
         let is_dir = path.ends_with('/') || contains_element(response, "collection");
-        let Some(name) = path.trim_end_matches('/').rsplit('/').next().filter(|name| !name.is_empty()) else {
+        let Some(name) = path
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+        else {
             continue;
         };
         let name = percent_decode(name);
-        let size = first_text(response, "getcontentlength").and_then(|value| value.trim().parse().ok());
+        let size =
+            first_text(response, "getcontentlength").and_then(|value| value.trim().parse().ok());
         entries.push(Entry { name, is_dir, size });
     }
     entries
@@ -360,7 +427,9 @@ fn split_elements<'a>(xml: &'a str, local: &str) -> Vec<&'a str> {
     let mut out = Vec::new();
     let mut rest = xml;
     while let Some((_, body_start)) = find_open_tag(rest, local) {
-        let Some(close) = find_close_tag(&rest[body_start..], local) else { break };
+        let Some(close) = find_close_tag(&rest[body_start..], local) else {
+            break;
+        };
         out.push(&rest[body_start..body_start + close.0]);
         rest = &rest[body_start + close.1..];
     }
@@ -387,7 +456,9 @@ fn find_open_tag(xml: &str, local: &str) -> Option<(usize, usize)> {
             index = start + 1;
             continue;
         }
-        let name_end = after.find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '/').unwrap_or(after.len());
+        let name_end = after
+            .find(|ch: char| ch.is_whitespace() || ch == '>' || ch == '/')
+            .unwrap_or(after.len());
         let name = &after[..name_end];
         let local_name = name.rsplit(':').next().unwrap_or(name);
         let tag_end = after.find('>')?;
@@ -422,7 +493,10 @@ mod tests {
 
     #[test]
     fn user_folder_names_round_trip_through_percent_encoding() {
-        assert_eq!(encode_path("网课/申论 2027/01 概括.mp4"), "%E7%BD%91%E8%AF%BE/%E7%94%B3%E8%AE%BA%202027/01%20%E6%A6%82%E6%8B%AC.mp4");
+        assert_eq!(
+            encode_path("网课/申论 2027/01 概括.mp4"),
+            "%E7%BD%91%E8%AF%BE/%E7%94%B3%E8%AE%BA%202027/01%20%E6%A6%82%E6%8B%AC.mp4"
+        );
         assert_eq!(encode_path("a/b/"), "a/b/");
         assert_eq!(percent_decode("01%20%E6%A6%82%E6%8B%AC.mp4"), "01 概括.mp4");
         assert_eq!(percent_decode("100%"), "100%");
@@ -441,7 +515,18 @@ mod tests {
 </d:multistatus>"#;
         assert_eq!(
             parse_propfind(jianguoyun, "/dav/CoursePilot/sync-v1/devices/"),
-            vec![Entry { name: "dev-a".into(), is_dir: true, size: None }, Entry { name: "dev-b".into(), is_dir: true, size: None }]
+            vec![
+                Entry {
+                    name: "dev-a".into(),
+                    is_dir: true,
+                    size: None
+                },
+                Entry {
+                    name: "dev-b".into(),
+                    is_dir: true,
+                    size: None
+                }
+            ]
         );
         // Nextcloud 风格：D: 前缀；文件没有结尾斜杠，resourcetype 为空。
         let nextcloud = r#"<?xml version="1.0"?>
@@ -449,14 +534,27 @@ mod tests {
 <D:response><D:href>https://cloud.example/remote.php/dav/files/u/CP/b/000000000001.json</D:href><D:propstat><D:prop><D:resourcetype/><D:getcontentlength>2048</D:getcontentlength></D:prop></D:propstat></D:response></D:multistatus>"#;
         assert_eq!(
             parse_propfind(nextcloud, "/remote.php/dav/files/u/CP/b/"),
-            vec![Entry { name: "000000000001.json".into(), is_dir: false, size: Some(2048) }]
+            vec![Entry {
+                name: "000000000001.json".into(),
+                is_dir: false,
+                size: Some(2048)
+            }]
         );
     }
 
     #[test]
     fn folder_names_are_percent_encoded_into_the_root() {
-        let dav = WebDav::new("https://dav.example/dav/", "学习 资料/CoursePilot", "u", "p").unwrap();
-        assert_eq!(dav.url("x.json"), "https://dav.example/dav/%E5%AD%A6%E4%B9%A0%20%E8%B5%84%E6%96%99/CoursePilot/x.json");
+        let dav = WebDav::new(
+            "https://dav.example/dav/",
+            "学习 资料/CoursePilot",
+            "u",
+            "p",
+        )
+        .unwrap();
+        assert_eq!(
+            dav.url("x.json"),
+            "https://dav.example/dav/%E5%AD%A6%E4%B9%A0%20%E8%B5%84%E6%96%99/CoursePilot/x.json"
+        );
         assert!(WebDav::new("ftp://x", "a", "u", "p").is_err());
     }
 }

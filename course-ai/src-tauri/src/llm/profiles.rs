@@ -81,7 +81,10 @@ impl LlmProfile {
 
     /// 列模型时要用的路径覆盖。
     pub fn models_path(&self) -> Option<&str> {
-        self.models_path.as_deref().map(str::trim).filter(|p| !p.is_empty())
+        self.models_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
     }
 }
 
