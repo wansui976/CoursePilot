@@ -2359,7 +2359,7 @@ button.ca-time:hover {
 
 /* ===================== 笔记索引标签 ===================== */
 
-/* 贴在页面右边缘的一排彩色纸签：随滚动停在可视区顶上（sticky，自身不占高度）。 */
+/* 贴在页面右边缘、让开一条滚动条宽的一排彩色纸签：随滚动停在可视区顶上（sticky，自身不占高度）。 */
 .ca-note-tabs {
   position: sticky;
   top: 14px;
@@ -2370,7 +2370,7 @@ button.ca-time:hover {
 .ca-note-tabs-rail {
   position: absolute;
   top: 0;
-  right: 0;
+  right: 10px;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2380,7 +2380,7 @@ button.ca-time:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 22px;
   height: var(--tab-h, 44px);
   padding: 4px 0;
   overflow: hidden;
@@ -2420,19 +2420,19 @@ button.ca-time:hover {
 }
 
 .ca-note-tab[aria-current] {
-  width: 22px;
+  width: 26px;
   font-weight: 600;
 }
 
-/* 有标签时给正文右边让出一条。 */
+/* 有标签时给正文右边让出一条；有批注时批注也跟着往里挪，别被标签压住。 */
 .ca-note-tabs + .ca-paper-sheet .tiptap-notes {
-  padding-right: 30px;
+  padding-right: 38px;
 }
 
 .ca-note-tabs + .ca-paper-sheet[data-annotated] .tiptap-notes {
-  padding-right: calc(min(168px, 36%) + 14px);
+  padding-right: calc(min(168px, 36%) + 22px);
 }
 
 .ca-note-tabs + .ca-paper-sheet .ca-pencil-margin {
-  right: 26px;
+  right: 38px;
 }

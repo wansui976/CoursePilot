@@ -9,7 +9,7 @@ const MIN_SECTIONS = 3;
 type Section = { text: string; el: HTMLElement };
 
 /**
- * 长笔记的侧边索引标签：每个二级标题一张彩色小纸签，竖着贴在页面右边缘，
+ * 长笔记的侧边索引标签：每个二级标题一张彩色小纸签，竖着贴在页面右边缘（让开滚动条），
  * 当前读到的那一节的标签多探出来一点；点一下跳到那一节。
  */
 export function NoteTabs({
