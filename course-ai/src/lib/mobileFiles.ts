@@ -74,6 +74,36 @@ export interface PersistedFilePickOptions {
   prompt?: string;
 }
 
+/** 数据线拷进 App「文稿」的文件（只 iOS 有）。 */
+export interface CableFile {
+  name: string;
+  path: string;
+  size: number;
+}
+
+export interface CableScan {
+  files: CableFile[];
+  /** 文稿里一共看到的文件数：用来区分「没拷进来」和「格式不对」。 */
+  scanned: number;
+}
+
+export async function listCableFiles(): Promise<CableScan> {
+  if (!isIOS()) return { files: [], scanned: 0 };
+  return invoke<CableScan>("plugin:mobile-files|list_cable_files");
+}
+
+/** 把「文稿」里的文件移进 App 资料库，返回移动后的路径和时长。 */
+export async function takeCableFile(
+  sourcePath: string,
+  category: string,
+): Promise<PickPersistedFileResult | null> {
+  if (!isIOS()) return null;
+  return invoke<PickPersistedFileResult | null>("plugin:mobile-files|take_cable_file", {
+    sourcePath,
+    category,
+  });
+}
+
 export async function pickPersistedFile({
   category,
   fallbackName,

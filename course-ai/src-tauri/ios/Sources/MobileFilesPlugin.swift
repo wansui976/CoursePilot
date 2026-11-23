@@ -54,6 +54,33 @@ struct PickAndPersistFileResult {
   }
 }
 
+struct TakeCableFileArgs: Decodable {
+  let sourcePath: String
+  let category: String
+}
+
+/// 数据线导入：Finder / Apple 设备把视频放进 App 的 Documents 后，
+/// 这里列出它们（App 自己的沙盒目录，无需安全作用域授权）。
+struct CableFileInfo {
+  let name: String
+  let path: String
+  let size: Int64
+
+  var json: JsonObject {
+    ["name": name, "path": path, "size": NSNumber(value: size)]
+  }
+}
+
+/// 扫描结果带上「一共看到了多少文件」，用来区分「没拷进来」和「格式/目录不对」。
+struct CableScanResult {
+  let files: [CableFileInfo]
+  let scanned: Int
+
+  var json: JsonObject {
+    ["files": files.map(\.json), "scanned": NSNumber(value: scanned)]
+  }
+}
+
 final class MobileFilesPlugin: Plugin {
   private let workQueue = DispatchQueue(label: "dev.courseai.mobile-files")
   private let audioWriterQueue = DispatchQueue(label: "dev.courseai.mobile-files.audio-writer")
@@ -188,6 +215,31 @@ final class MobileFilesPlugin: Plugin {
     }
   }
 
+  /// 列出数据线拷进 App「文稿」（Documents）的视频 / 音频。
+  @objc public func listCableFiles(_ invoke: Invoke) throws {
+    workQueue.async {
+      do {
+        let result = try self.listCableFiles()
+        invoke.resolve(result.json)
+      } catch {
+        invoke.reject(Self.describe(error))
+      }
+    }
+  }
+
+  /// 把「文稿」里的一个文件移进 App 的资料库（同卷移动，不拷贝第二份），并读取时长。
+  @objc public func takeCableFile(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(TakeCableFileArgs.self)
+    workQueue.async {
+      do {
+        let result = try self.takeCableFile(args)
+        invoke.resolve(result.json)
+      } catch {
+        invoke.reject(Self.describe(error))
+      }
+    }
+  }
+
   private func exportLumaFrames(_ args: ExportLumaFramesArgs) throws -> (
     intervalMs: Int64, frames: [String]
   ) {
@@ -259,6 +311,97 @@ final class MobileFilesPlugin: Plugin {
     }
     try FileManager.default.copyItem(at: source, to: destination)
     return try finishPersisting(destination, category: args.category)
+  }
+
+  private static let cableExtensions: Set<String> = [
+    "mp4", "mkv", "mov", "webm", "m4v",
+    "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
+  ]
+
+  private func documentsDirectory() throws -> URL {
+    let url = try FileManager.default.url(
+      for: .documentDirectory,
+      in: .userDomainMask,
+      appropriateFor: nil,
+      create: true)
+    return url.resolvingSymlinksInPath()
+  }
+
+  private func listCableFiles() throws -> CableScanResult {
+    let directory = try documentsDirectory()
+    var files: [CableFileInfo] = []
+    var scanned = 0
+
+    // Finder 里拖进来的可能是一整个文件夹，递归几层再判断。
+    func walk(_ url: URL, depth: Int) {
+      guard
+        let entries = try? FileManager.default.contentsOfDirectory(
+          at: url,
+          includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey],
+          options: [.skipsHiddenFiles])
+      else { return }
+      for entry in entries {
+        let values = try? entry.resourceValues(
+          forKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey])
+        if values?.isDirectory == true {
+          if depth < 5 {
+            walk(entry, depth: depth + 1)
+          }
+          continue
+        }
+        guard values?.isRegularFile == true else { continue }
+        scanned += 1
+        guard Self.cableExtensions.contains(entry.pathExtension.lowercased()) else { continue }
+        let relativeName = entry.path.replacingOccurrences(
+          of: directory.path + "/", with: "")
+        files.append(
+          CableFileInfo(
+            name: relativeName,
+            path: entry.path,
+            size: Int64(values?.fileSize ?? 0)))
+      }
+    }
+
+    walk(directory, depth: 0)
+    files.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    return CableScanResult(files: files, scanned: scanned)
+  }
+
+  private func takeCableFile(_ args: TakeCableFileArgs) throws -> PickAndPersistFileResult {
+    let source = URL(fileURLWithPath: args.sourcePath).resolvingSymlinksInPath()
+    let directory = try documentsDirectory()
+    let prefix = directory.path.hasSuffix("/") ? directory.path : directory.path + "/"
+    guard source.path.hasPrefix(prefix) else {
+      throw MobileFilesError.notInCableFolder
+    }
+    guard FileManager.default.fileExists(atPath: source.path) else {
+      throw MobileFilesError.cableFileMissing
+    }
+
+    let destinationDir = try pickedDirectory(category: args.category)
+    let sourceName = sanitizedFileName(source.lastPathComponent, fallback: "video")
+    let destination = uniqueDestination(in: destinationDir, preferredName: sourceName)
+
+    // 先确认能读，再移动：格式不支持时把文件留在「文稿」里，别把用户唯一的那份删掉。
+    var durationMs: Int64?
+    if args.category == "videos" {
+      do {
+        durationMs = try loadedDurationMs(of: AVURLAsset(url: source))
+      } catch {
+        throw MobileFilesError.unsupportedMedia(source.pathExtension.lowercased())
+      }
+    }
+
+    // 同一卷，move 是原子改名：几个 G 的课不用再拷一遍，也不会在「文稿」里留副本。
+    try FileManager.default.moveItem(at: source, to: destination)
+    return PickAndPersistFileResult(path: destination.path, durationMs: durationMs)
+  }
+
+  private static func describe(_ error: Error) -> String {
+    if let nsError = error as NSError? {
+      return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
+    }
+    return error.localizedDescription
   }
 
   private func pickAndPersistFile(_ args: PickAndPersistFileArgs, invoke: Invoke) throws {
@@ -757,6 +900,8 @@ enum MobileFilesError: LocalizedError {
   case cannotWriteImage
   case cannotReadVideo
   case unsupportedMedia(String)
+  case notInCableFolder
+  case cableFileMissing
 
   var errorDescription: String? {
     switch self {
@@ -775,6 +920,10 @@ enum MobileFilesError: LocalizedError {
     case .unsupportedMedia(let ext):
       // 前端按 unsupported_media_format 认出来，换成「请先转成 MP4」的提示。
       return "unsupported_media_format: \(ext)"
+    case .notInCableFolder:
+      return "File is not in the app's cable import folder"
+    case .cableFileMissing:
+      return "File was moved or deleted before it could be imported"
     }
   }
 }
