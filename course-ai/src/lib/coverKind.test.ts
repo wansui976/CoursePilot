@@ -22,3 +22,20 @@ describe("guessCoverKind", () => {
     expect(guessCoverKind("我的收藏", "随便看看")).toBe("generic");
   });
 });
+
+describe("more subjects and stable picks", () => {
+  it("recognises sciences, programming and history", () => {
+    expect(guessCoverKind("大学物理（上）")).toBe("physics");
+    expect(guessCoverKind("有机化学")).toBe("chemistry");
+    expect(guessCoverKind("食品营养与生食安全")).toBe("biology");
+    expect(guessCoverKind("Python 编程入门")).toBe("programming");
+    expect(guessCoverKind("中国近代史纲要")).toBe("history");
+  });
+
+  it("picks the same index for the same name", async () => {
+    const { stableIndex } = await import("./coverKind");
+    expect(stableIndex("新课程 2", 4)).toBe(stableIndex("新课程 2", 4));
+    const picks = new Set(["新课程 1", "新课程 2", "新课程 3", "新课程 4", "新课程 5", "新课程 6"].map((n) => stableIndex(n, 4)));
+    expect(picks.size).toBeGreaterThan(1);
+  });
+});

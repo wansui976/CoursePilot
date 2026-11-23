@@ -1077,18 +1077,21 @@ button.ca-time:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* 当前播放的那句：荧光笔划过，时间变成墨黄。 */
+/* 当前播放的那句：主题色的淡底逐行划过，时间换成主题色。
+   底色画在行内的 .ca-tr-ink 上（不是块级的 .ca-tr-body），多行时每一行各画一条。 */
 .ca-tr-row[data-active] .ca-transcript-text {
   color: var(--text-strong);
 }
 
 .ca-tr-row[data-active] .ca-tr-time {
-  color: var(--marker-ink);
+  color: var(--accent-text);
   font-weight: 500;
 }
 
-.ca-tr-row[data-active] .ca-tr-body {
-  background: linear-gradient(transparent 38%, var(--marker) 38%, var(--marker) 92%, transparent 92%);
+.ca-tr-row[data-active] .ca-tr-ink {
+  padding: 1px 0;
+  border-radius: 3px;
+  background: var(--accent-weak);
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }

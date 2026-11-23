@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import type { CoverKind } from "@/lib/coverKind";
-import type { CourseColor } from "@/lib/types";
+import { stableIndex, type CoverKind } from "@/lib/coverKind";
+import { COURSE_COLORS, type CourseColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -10,23 +10,7 @@ import { cn } from "@/lib/utils";
  */
 
 /** 每种学科的粉笔图。viewBox 300×169，主要画在右侧 60%，左下留给数字。 */
-const ART: Record<CoverKind, ReactNode> = {
-  // 猜不出学科：画一块写过的黑板——几行粉笔字迹、一个圈出来的重点、一个箭头和一行要点。
-  generic: (
-    <g className="stroke" transform="translate(0 14)">
-      <path d="M156 40c6-5 10 4 16-1s9 3 15-1 10 3 16-1 9 4 15 0 11 3 17-1 9 2 14 0" />
-      <path d="M156 62c6-4 11 3 17-1s9 4 15 0 10-3 16 1 8 2 14-1" />
-      <path d="M156 64c22 3 44 2 66 0" opacity="0.55" />
-      <ellipse cx="246" cy="98" rx="30" ry="15" />
-      <path d="M234 98c5-4 9 3 13 0s8 2 12-1" />
-      <path d="M160 98c18 0 34 0 52 0M204 92l9 6-9 6" />
-      <circle cx="162" cy="130" r="2.2" />
-      <path d="M172 130c6-4 10 3 16-1s10 3 16-1 9 3 15 0" />
-      <circle cx="162" cy="150" r="2.2" />
-      <path d="M172 150c6-3 10 3 15 0s9 2 14-1" />
-      <path d="M262 136l7 8 14-18" />
-    </g>
-  ),
+const ART: Record<Exclude<CoverKind, "generic">, ReactNode> = {
   linear: (
     <>
       <text x="150" y="62" fontSize="24">A = SΛS⁻¹</text>
@@ -122,13 +106,103 @@ const ART: Record<CoverKind, ReactNode> = {
       <text x="160" y="112" fontSize="17">γνῶθι σεαυτόν</text>
     </>
   ),
+  physics: (
+    <>
+      <text x="160" y="56" fontSize="24">F = ma</text>
+      <path className="stroke" d="M152 112c12-28 24-28 36 0s24 28 36 0 24-28 36 0 18 20 26 10" />
+      <path className="stroke" d="M160 150h60M212 144l8 6-8 6" />
+      <text x="232" y="154" fontSize="13">v</text>
+    </>
+  ),
+  chemistry: (
+    <>
+      <path className="stroke" d="M226 40l26 15v30l-26 15-26-15V55z" />
+      <path className="stroke" d="M226 50l17 10v20l-17 10" opacity="0.6" />
+      <path className="stroke" d="M252 55l22-12M200 55l-22-12M226 100v22" />
+      <text x="160" y="150" fontSize="16">H₂O · NaCl</text>
+    </>
+  ),
+  biology: (
+    <>
+      <path className="stroke" d="M186 30c40 16 40 34 0 50s-40 34 0 50M226 30c-40 16-40 34 0 50s40 34 0 50" />
+      <path className="stroke" d="M194 38h24M190 55h32M194 72h24M194 88h24M190 105h32M194 122h24" opacity="0.6" />
+      <circle className="stroke" cx="268" cy="70" r="20" />
+      <circle className="stroke" cx="272" cy="66" r="6" />
+    </>
+  ),
+  programming: (
+    <>
+      <text x="154" y="70" fontSize="44" className="upright mono">{"{ }"}</text>
+      <text x="158" y="104" fontSize="12" className="mono">for x in xs:</text>
+      <text x="174" y="122" fontSize="12" className="mono">yield f(x)</text>
+      <text x="158" y="146" fontSize="12" className="mono">return 0;</text>
+    </>
+  ),
+  history: (
+    <>
+      <path className="stroke" d="M152 96h138M168 88v16M206 88v16M244 88v16M280 88v16" />
+      <text x="156" y="76" fontSize="12" className="mono">1840</text>
+      <text x="196" y="124" fontSize="12" className="mono">1911</text>
+      <text x="234" y="76" fontSize="12" className="mono">1949</text>
+      <text x="160" y="152" fontSize="14">史料 · 年表</text>
+    </>
+  ),
 };
+
+/**
+ * 猜不出学科时的几块「写过的黑板」，按课程名稳定地挑一块，同一屏的课不会长得一模一样。
+ * 都画在课程名那条线以下（y > 50）。
+ */
+const GENERIC_ART: ReactNode[] = [
+  // 几行笔记、一个圈出的重点、一个箭头和两行要点。
+  <g key="notes" className="stroke" transform="translate(0 14)">
+    <path d="M156 40c6-5 10 4 16-1s9 3 15-1 10 3 16-1 9 4 15 0 11 3 17-1 9 2 14 0" />
+    <path d="M156 62c6-4 11 3 17-1s9 4 15 0 10-3 16 1 8 2 14-1" />
+    <ellipse cx="246" cy="98" rx="30" ry="15" />
+    <path d="M234 98c5-4 9 3 13 0s8 2 12-1" />
+    <path d="M160 98c18 0 34 0 52 0M204 92l9 6-9 6" />
+    <circle cx="162" cy="130" r="2.2" />
+    <path d="M172 130c6-4 10 3 16-1s10 3 16-1 9 3 15 0" />
+    <path d="M262 136l7 8 14-18" />
+  </g>,
+  // 思维导图：中间一个词，四条分支。
+  <g key="map" className="stroke">
+    <ellipse cx="222" cy="106" rx="26" ry="14" />
+    <path d="M210 106c4-3 8 2 12 0s8 2 12-1" />
+    <path d="M198 98l-30-26M246 98l28-26M198 114l-30 22M246 114l28 22" />
+    <path d="M150 68c5-3 9 2 14 0M272 68c5-3 9 2 14 0M150 142c5-3 9 2 14 0M272 142c5-3 9 2 14 0" />
+  </g>,
+  // 流程：三个框两个箭头，最后打个勾。
+  <g key="flow" className="stroke">
+    <rect x="154" y="66" width="38" height="24" rx="3" />
+    <rect x="206" y="66" width="38" height="24" rx="3" />
+    <rect x="258" y="66" width="38" height="24" rx="3" />
+    <path d="M192 78h12M200 74l4 4-4 4M244 78h12M252 74l4 4-4 4" />
+    <path d="M160 118c6-4 11 3 17-1s9 4 15 0 10-3 16 1 8 2 14-1 10 3 16-1" />
+    <path d="M160 140c6-4 10 3 16-1s10 3 16-1" />
+    <path d="M262 136l7 8 14-18" />
+  </g>,
+  // 编号要点：1. 2. 3.，第二条画了下划线。
+  <g key="list">
+    <text x="156" y="76" fontSize="15" className="mono">1.</text>
+    <text x="156" y="108" fontSize="15" className="mono">2.</text>
+    <text x="156" y="140" fontSize="15" className="mono">3.</text>
+    <g className="stroke">
+      <path d="M180 71c6-4 10 3 16-1s9 3 15-1 10 3 16-1 9 4 15 0" />
+      <path d="M180 103c6-4 11 3 17-1s9 4 15 0 10-3 16 1 8 2 14-1 10 3 16-1" />
+      <path d="M180 114c30 2 60 1 92-1" />
+      <path d="M180 135c6-4 10 3 16-1s10 3 16-1" />
+      <path d="M274 52l4 9 10 1-7 7 2 10-9-5-9 5 2-10-7-7 10-1z" />
+    </g>
+  </g>,
+];
 
 export function BoardCover({
   kind,
   number,
   unit,
   caption,
+  seed,
   color,
   className,
   children,
@@ -140,17 +214,22 @@ export function BoardCover({
   unit?: string;
   /** 左上的课程名。小尺寸时自动隐藏。 */
   caption?: string;
+  /** 挑通用黑板和默认颜色用的种子（课程名）；不传就用 caption。 */
+  seed?: string;
   color?: CourseColor | null;
   className?: string;
   /** 叠在封面上的东西（时长、进度条、播放按钮）。 */
   children?: ReactNode;
 }) {
-  const numberColor = color ? `var(--course-${color}-on-dark)` : "var(--chalk)";
+  const key = seed ?? caption ?? "";
+  // 没选颜色的课按名字稳定地分一个颜色，不然一排课全是白字。
+  const tone = color ?? COURSE_COLORS[stableIndex(key, COURSE_COLORS.length)];
+  const numberColor = `var(--course-${tone}-on-dark)`;
   const glyph = number == null ? (caption?.trim().charAt(0) ?? "") : null;
   return (
     <span className={cn("ca-board-cover", className)} data-kind={kind}>
       <svg className="art" viewBox="0 0 300 169" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
-        {ART[kind]}
+        {kind === "generic" ? GENERIC_ART[stableIndex(key, GENERIC_ART.length)] : ART[kind]}
       </svg>
       {caption && (
         <span className="cap" aria-hidden="true">

@@ -48,6 +48,7 @@ export function LectureCover({
       kind={guessCoverKind(course?.name, title)}
       number={number}
       caption={showCaption ? (course?.name ?? title) : undefined}
+      seed={course?.name ?? title}
       color={course?.color ?? null}
       className={className}
     >
