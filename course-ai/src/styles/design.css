@@ -1788,6 +1788,27 @@ button.ca-time:hover {
   gap: 12px;
 }
 
+/* 手机上 176 的最小宽只排得下一张，一张卡横跨整屏、又高又空。固定两张一排，边距收窄。 */
+@media (max-width: 480px) {
+  .ca-book {
+    padding: 16px 16px 32px;
+  }
+
+  .ca-book-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .ca-kcard {
+    min-height: 96px;
+  }
+
+  /* 两张一排时卡窄了，「该复习了」小签会压到知识点名上：名字给它让出位置，换行。 */
+  .ca-kcard:has(.tab) .k {
+    padding-right: 58px;
+  }
+}
+
 /* 一个知识点是一张小黑板卡。粉笔字的亮度跟着记忆走（--r 0..1）。 */
 .ca-kcard {
   --r: 1;
@@ -2469,4 +2490,45 @@ button.ca-time:hover {
   line-height: 22px;
   font-weight: 500;
   color: var(--text-strong);
+}
+
+/* ===================== 手机上的助手浮球：往下读时收起 ===================== */
+/* 浮球固定在右下角，正文、按钮滚过去总有一截被它压着。往下滚时沉到底栏后面，
+   往回滚或滚到顶再浮上来（useTuckOnScroll）。只动 transform / opacity。 */
+button[data-tour="assistant"] {
+  transition:
+    transform 0.22s var(--ease-out),
+    opacity 0.18s var(--ease-out),
+    border-color var(--dur-fast);
+}
+
+button[data-tour="assistant"][data-tucked] {
+  transform: translateY(calc(100% + 40px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button[data-tour="assistant"] {
+    transition: opacity 0.12s;
+  }
+
+  button[data-tour="assistant"][data-tucked] {
+    transform: none;
+  }
+}
+
+/* 横屏手机：底栏的 Tab 收在中间，浮球落进底栏右端（--fab-bottom，见 bottom-tab.css）。
+   叠在底栏之上、和底栏一样高，不要浮起的投影；不压内容，也就不用随滚动收起。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  button[data-tour="assistant"] {
+    z-index: calc(var(--z-bottom-tab) + 1);
+    box-shadow: none;
+  }
+
+  button[data-tour="assistant"][data-tucked] {
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
 }

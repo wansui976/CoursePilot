@@ -305,7 +305,7 @@ export function BoardCover({
         {glyph == null && unit ? <small>{unit}</small> : null}
       </span>
       {/* 黑板下沿放粉笔的木槽：一截粉笔、一块板擦。小尺寸时不画。 */}
-      <span className="ledge" aria-hidden="true">
+      <span className="ledge" aria-hidden="true" data-allow-gradient="">
         <i />
         <b />
       </span>

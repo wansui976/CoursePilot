@@ -239,6 +239,8 @@
     "emptyDescription": "Comments are only available for Bilibili videos and are fetched automatically."
   },
   "courseList": {
+    "videoCount_one": "{{count}} video",
+    "videoCount_other": "{{count}} videos",
     "newCourse": "New Course",
     "newCourseN": "New Course {{index}}",
     "renameCourse": "Rename course",

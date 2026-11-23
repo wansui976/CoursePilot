@@ -2,6 +2,14 @@
 
 /* ===================== 窄屏底部 Tab + 整屏课程列表(P1) ===================== */
 
+/* 底栏高度：竖屏 56；横屏手机（矮于 500）屏幕本来就矮，图标和字并排成一行、只要 44，
+   内容区、助手入口、后台任务胶囊都按这个变量让开。 */
+:root {
+  --tab-h: 56px;
+  /* 助手浮球离底：竖屏浮在底栏上方。 */
+  --fab-bottom: calc(var(--tab-h) + var(--safe-bottom) + 16px);
+}
+
 /* 底部主导航 */
 .ca-bottom-tab {
   position: fixed;
@@ -22,7 +30,7 @@
 .ca-bottom-tab-btn {
   flex: 1 1 0;
   min-width: 0;
-  min-height: 56px;
+  min-height: var(--tab-h);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -64,7 +72,7 @@
 
 /* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
 .ca-app[data-shell="stacked"][data-view="library"] .ca-main {
-  padding-bottom: calc(56px + var(--safe-bottom));
+  padding-bottom: calc(var(--tab-h) + var(--safe-bottom));
 }
 
 /* 整屏课程列表(CourseSidebar variant="screen") */
@@ -189,4 +197,122 @@
 
 .ca-course-screen .course-meta {
   font-size: var(--fs-xs);
+}
+
+/* 行首的小黑板封面（和课桌上的课程牌同一块板），名字下一行小字写视频数。 */
+.ca-course-screen .ca-nav-thumb {
+  flex: none;
+  width: 64px;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+}
+
+/* 缩略图上只写课程名的首字，粉笔字放大一点，像黑板上写的一个大字。 */
+.ca-course-screen .ca-nav-thumb > .no {
+  left: 9px;
+  bottom: 4px;
+  font-size: 22px;
+}
+
+.ca-course-screen .ca-nav-two {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ca-course-screen .ca-nav-two .nm {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  line-height: 21px;
+  color: var(--text-strong);
+}
+
+.ca-course-screen .ca-nav-two .sub {
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  color: var(--text-muted);
+}
+
+.ca-course-screen .ca-nav-item:has(.ca-nav-thumb),
+.ca-course-screen .ca-nav-item:has(.ca-nav-thumb) .ca-nav-button {
+  min-height: 64px;
+}
+
+.ca-course-screen .ca-nav-item:has(.ca-nav-thumb) + .ca-nav-item::before {
+  left: 88px;
+}
+
+/* 矮屏（横屏手机）：「继续学习」加课程列表放不下，整屏一起滚，不是只有列表在一小条里滚。 */
+@media (max-height: 560px) {
+  .ca-course-screen {
+    overflow-y: auto;
+  }
+
+  .ca-course-screen .ca-nav {
+    flex: none;
+    overflow: visible;
+  }
+}
+
+/* 横屏手机的矮底栏（写在基础规则之后才能覆盖）。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  :root {
+    --tab-h: 44px;
+    /* 横屏底栏的 Tab 收在中间、两边空着：浮球落进底栏右端，不再压在内容上。 */
+    --fab-bottom: var(--safe-bottom);
+  }
+
+  /* 四个 Tab 不再平铺 800 多宽的整行，在中间收拢，像竖屏时一样手指够得着。 */
+  .ca-bottom-tab {
+    justify-content: center;
+  }
+
+  .ca-bottom-tab-btn {
+    flex: 0 1 132px;
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .ca-bottom-tab-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .ca-bottom-tab-label {
+    font-size: 12px;
+  }
+
+  /* 图标和字并排时，角标会盖住字：有角标的那个 Tab 字往右让一点。 */
+  .ca-bottom-tab-btn:has(.ca-bottom-tab-badge) .ca-bottom-tab-label {
+    margin-left: 8px;
+  }
+}
+
+/* 手机上的「继续学习」：一张卡占一行；右边那颗「继续播放」胶囊挤掉了视频名，
+   封面上本来就有播放钮，窄屏只留封面 + 文字。 */
+.ca-course-screen .ca-resume-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 520px) {
+  .ca-course-screen .ca-resume-row .ca-resume-card {
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .ca-course-screen .ca-resume-row .ca-resume-card .ca-resume-go {
+    display: none;
+  }
+
+  .ca-course-screen .ca-resume-row .ca-resume-card .ca-resume-cover {
+    width: 112px;
+  }
+}
+
+/* 深色主题下黑板缩略图和卡片底色太近，描一圈发丝线把板边勾出来。 */
+.ca-course-screen .ca-nav-thumb {
+  outline: 1px solid var(--border-subtle);
+  outline-offset: -1px;
 }

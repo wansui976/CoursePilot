@@ -22,6 +22,7 @@ import { Button } from "@/ui/button";
 import { Menu, MenuItem } from "@/ui/menu";
 import { MAX_PANEL_WIDTH, MIN_PANEL_WIDTH } from "@/stores/assistant";
 import { toggleShortcutLabel } from "./assistantPanelModel";
+import { useTuckOnScroll } from "@/lib/useTuckOnScroll";
 
 /**
  * 助手面板的外壳部件：收起时的浮球、宽度抓手、标题栏。
@@ -54,11 +55,15 @@ export function AssistantLauncher({
   onPointerDown?: (event: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const { t } = useTranslation();
+  // 手机上往下读时收起，不挡正文；正在回答（busy）或有未读时一直露着。
+  const tucked = useTuckOnScroll(mobile) && !busy && !hasUnread;
   return (
     <button
       ref={launcherRef}
       type="button"
       data-tour="assistant"
+      data-tucked={tucked || undefined}
+      tabIndex={tucked ? -1 : undefined}
       aria-label={t("assistant.openAssistant")}
       aria-busy={busy || undefined}
       title={t("assistant.openWithShortcut", { shortcut: toggleShortcutLabel() })}

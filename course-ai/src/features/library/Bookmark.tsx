@@ -17,6 +17,7 @@ export function Bookmark({ bookmark, course }: { bookmark: CourseBookmark; cours
       {bookmark.dusty && <span className="ca-dust" aria-hidden="true" />}
       <span
         className="ca-bookmark"
+        data-allow-gradient=""
         data-dusty={bookmark.dusty ? "" : undefined}
         style={{ "--ribbon": `var(--tag-${courseTone(course.color, course.name)})` } as React.CSSProperties}
         role="img"

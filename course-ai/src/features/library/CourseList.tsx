@@ -13,6 +13,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { FolderOpen, Image, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
+import { CourseBoardCover } from "./CourseBoardCover";
 import { SubscriptionsDialog } from "./SubscriptionsDialog";
 import { CoverPickerDialog } from "./CoverPickerDialog";
 import { nextOrder } from "./SortableVideos";
@@ -118,6 +119,7 @@ export function CourseList({
   queueOpen = false,
   selectedCourseExtra,
   onTransientCloseChange,
+  boardThumbs = false,
 }: {
   selectedCourseId: string | null;
   /** 选中课程里当前打开的文件夹；null = 课程根目录。 */
@@ -132,6 +134,8 @@ export function CourseList({
   selectedCourseExtra?: ReactNode;
   /** 窄屏根页把临时菜单纳入系统返回层级；打开时注册关闭函数，收起时注销。 */
   onTransientCloseChange?: (close: (() => void) | null) => void;
+  /** 手机 / 平板整屏课程列表：行首画一块小黑板封面、名字下写视频数，而不是一个文件夹图标。 */
+  boardThumbs?: boolean;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -548,12 +552,24 @@ export function CourseList({
                     aria-current={rowActive ? "page" : undefined}
                     className="ca-nav-button"
                   >
-                    <FolderOpen
-                      className="ic h-4 w-4"
-                      data-color={course.color ?? undefined}
-                      style={colorStyle(course.color)}
-                    />
-                    <span className="nm">{course.name}</span>
+                    {boardThumbs ? (
+                      <>
+                        <CourseBoardCover course={course} caption={course.name} className="ca-nav-thumb" />
+                        <span className="ca-nav-two">
+                          <span className="nm">{course.name}</span>
+                          <span className="sub">{t("courseList.videoCount", { count: course.video_count })}</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <FolderOpen
+                          className="ic h-4 w-4"
+                          data-color={course.color ?? undefined}
+                          style={colorStyle(course.color)}
+                        />
+                        <span className="nm">{course.name}</span>
+                      </>
+                    )}
                     {renderCourseMeta(course)}
                   </button>
                   <button

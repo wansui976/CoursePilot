@@ -429,7 +429,7 @@
 .ca-tasks-floating {
   position: fixed;
   left: calc(1rem + var(--safe-left));
-  bottom: calc(56px + var(--safe-bottom) + 24px);
+  bottom: calc(var(--tab-h) + var(--safe-bottom) + 24px);
   z-index: 40;
 }
 

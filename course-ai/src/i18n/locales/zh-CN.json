@@ -239,6 +239,7 @@
     "emptyDescription": "评论区只有 B 站视频才有，打开视频后会自动抓取。"
   },
   "courseList": {
+    "videoCount": "{{count}} 个视频",
     "newCourse": "新课程",
     "newCourseN": "新课程 {{index}}",
     "renameCourse": "重命名课程",

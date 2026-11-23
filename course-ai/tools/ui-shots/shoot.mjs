@@ -52,6 +52,11 @@ const SAFE_AREAS = {
   iphone: { top: 47, right: 0, bottom: 34, left: 0 },
   "iphone-landscape": { top: 0, right: 47, bottom: 21, left: 47 },
   ipad: { top: 24, right: 0, bottom: 20, left: 0 },
+  "phone-se": { top: 20, right: 0, bottom: 0, left: 0 },
+  "phone-se-landscape": { top: 0, right: 0, bottom: 0, left: 0 },
+  "phone-narrow": { top: 32, right: 0, bottom: 24, left: 0 },
+  "phone-max": { top: 59, right: 0, bottom: 34, left: 0 },
+  "fold-open": { top: 28, right: 0, bottom: 24, left: 0 },
   "ipad-landscape": { top: 24, right: 0, bottom: 20, left: 0 },
   android: { top: 51, right: 0, bottom: 24, left: 0 },
   "android-landscape": { top: 28, right: 0, bottom: 24, left: 52 },
@@ -76,10 +81,17 @@ const DEVICES = {
   "android-landscape": { kind: "phone", viewport: { width: 915, height: 412 }, deviceScaleFactor: 2.625, userAgent: ANDROID_UA, ...touch },
   "android-tablet": { kind: "tablet", viewport: { width: 800, height: 1280 }, deviceScaleFactor: 2, userAgent: ANDROID_TABLET_UA, ...touch },
   windows: { kind: "desktop", viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1.25, userAgent: WINDOWS_UA },
+  // —— 不同屏幕比例：小而矮（SE）、极窄（折叠屏外屏）、大屏（Pro Max）、折叠屏展开（近方形）——
+  "phone-se": { kind: "phone", viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, userAgent: IOS_UA, ...touch },
+  "phone-narrow": { kind: "phone", viewport: { width: 344, height: 882 }, deviceScaleFactor: 3, userAgent: ANDROID_UA, ...touch },
+  "phone-max": { kind: "phone", viewport: { width: 430, height: 932 }, deviceScaleFactor: 3, userAgent: IOS_UA, ...touch },
+  "fold-open": { kind: "tablet", viewport: { width: 673, height: 841 }, deviceScaleFactor: 2.625, userAgent: ANDROID_TABLET_UA, ...touch },
+  "phone-se-landscape": { kind: "phone", viewport: { width: 667, height: 375 }, deviceScaleFactor: 2, userAgent: IOS_UA, ...touch },
 };
 
 const DEVICE_GROUPS = {
   all: ["desktop", "phone", "tablet"],
+  ratios: ["phone-se", "phone-se-landscape", "phone-narrow", "phone-max", "fold-open", "iphone-landscape", "ipad-landscape"],
   platforms: ["iphone", "iphone-landscape", "ipad", "ipad-landscape", "android", "android-landscape", "android-tablet", "windows"],
 };
 
@@ -215,6 +227,39 @@ function auditLayout() {
     const actual = outerless(getComputedStyle(el).display);
     if (actual !== expected) {
       issues.push(`${describe(el)} 写了 ${wanted[0]}，实际 display:${actual}`);
+    }
+  }
+  // 第零类：横向溢出——整页能左右拖动，或元素伸出屏幕右边（不在横向滚动容器里）。
+  // 窄屏、横屏、折叠屏最常见，截图里伸出去的那截看不见，只能靠量。
+  const vw = document.documentElement.clientWidth;
+  if (document.documentElement.scrollWidth > vw + 1) {
+    issues.push(`整页横向溢出（内容宽 ${document.documentElement.scrollWidth}px，屏宽 ${vw}px）`);
+  }
+  const scrollsX = (node) => {
+    for (let p = node.parentElement; p; p = p.parentElement) {
+      const o = getComputedStyle(p).overflowX;
+      if (o === "auto" || o === "scroll" || o === "hidden" || o === "clip") return true;
+    }
+    return false;
+  };
+  for (const el of document.querySelectorAll("body *")) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1 || rect.right <= vw + 2) continue;
+    const style = getComputedStyle(el);
+    if (style.position === "fixed" || style.visibility === "hidden") continue;
+    if (scrollsX(el)) continue;
+    issues.push(`${describe(el)} 伸出屏幕右边 ${Math.round(rect.right - vw)}px`);
+  }
+  // 第零类之二：触屏上的点按目标太小（< 28px 见方），手指点不准。
+  if (matchMedia("(pointer: coarse)").matches) {
+    for (const el of document.querySelectorAll("button, a[href], [role='button'], [role='tab'], input[type='checkbox']")) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) continue;
+      if (el.closest("[hidden], [inert], [aria-hidden='true']")) continue;
+      if (getComputedStyle(el).visibility === "hidden") continue;
+      if (rect.width < 28 && rect.height < 28) {
+        issues.push(`${describe(el)} 点按目标太小（${Math.round(rect.width)}×${Math.round(rect.height)}）`);
+      }
     }
   }
   // 第三类：文字被裁掉却没有省略号（overflow 隐藏、不换行、内容超宽、没设 ellipsis），

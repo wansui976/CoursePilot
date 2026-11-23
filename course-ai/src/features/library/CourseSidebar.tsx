@@ -24,8 +24,8 @@ export function CourseSidebar({
   onOpenRecycleBin?: () => void;
   onTransientCloseChange?: (close: (() => void) | null) => void;
   /**
-   * 给了就在课程列表上面加「继续学习」（平板竖屏）。平板上这一屏是 800 多宽的首页，
-   * 只有一列课程名、下面大半屏空着；手机上这一屏就是课程列表本身，不给。
+   * 给了就在课程列表上面加「继续学习」。这一屏就是手机 / 平板竖屏的首页，
+   * 打开应用最常做的就是接着上次看，放在最上面一点就回去。
    */
   onResume?: (courseId: string, videoId: string, positionSec: number) => void;
   className?: string;
@@ -75,6 +75,7 @@ export function CourseSidebar({
           onSelect={onSelect}
           onClearSelection={onClearSelection}
           onTransientCloseChange={onTransientCloseChange}
+          boardThumbs
         />
       </div>
     </aside>

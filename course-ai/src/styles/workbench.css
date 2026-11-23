@@ -778,3 +778,11 @@ li[data-active] > .ca-chapter .ca-chapter-time {
 .ca-transcript-filler .ca-transcript-text {
   opacity: 0.55;
 }
+
+/* 摘要区高度有帽（45%），矮屏（横屏手机、小屏）上正文常常在一行中间被切断，
+   像是排版出错。底部 18px 淡出，看得出「下面还有、可以滚」；滚到底时最后一行
+   正好落在 .ca-panel-scroll-end 的底部留白上方，不被淡掉。 */
+.ca-summary-panel .ca-panel-scroll-end {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+}
