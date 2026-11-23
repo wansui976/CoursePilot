@@ -651,6 +651,22 @@ export const scenes = [
     },
   },
   {
+    // 复习卡「回看出处」跳到视频，再从视频返回：应回到学习面板、接着复习。
+    name: "review-source",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await nav(page, "学习面板", "学习");
+      await page.getByRole("button", { name: "开始复习" }).first().click();
+      await page.getByRole("button", { name: /显示答案/ }).first().click();
+      await page.getByRole("button", { name: "回看出处" }).click();
+      await page.locator(".wb-title").waitFor();
+      await shot("video");
+      await page.getByRole("button", { name: /返回/ }).first().click();
+      await page.locator(".ca-review-card").waitFor();
+      await shot("back");
+    },
+  },
+  {
     name: "subscriptions",
     devices: ALL,
     run: async ({ page, shot }) => {

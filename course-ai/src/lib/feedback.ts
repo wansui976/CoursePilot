@@ -3,12 +3,12 @@ import { create } from "zustand";
 /**
  * 界面声音与触感：只在几个时刻出声、只在状态变化时震动（设计系统 SoundDesign / Haptics）。
  *
- * 声音：粉笔书写、翻卡、擦黑板、点亮四种，现场用 Web Audio 合成（不带音频文件），
+ * 声音：粉笔书写、翻卡、点亮三种，现场用 Web Audio 合成（不带音频文件），
  * 默认「很轻」，可在设置 → 外观里关掉；启动后头两秒不出声。
  * 触感：手机上用 navigator.vibrate（Android WebView 支持；iOS WebView 没有这个接口，调用无效果）。
  */
 export type SoundLevel = "off" | "quiet" | "normal";
-export type SoundKind = "chalk" | "flip" | "erase" | "stamp";
+export type SoundKind = "chalk" | "flip" | "stamp";
 export type HapticKind = "tick" | "soft" | "stamp" | "warning" | "success";
 
 const SOUND_KEY = "course-ai-ui-sound";
@@ -114,18 +114,6 @@ function synth(c: AudioContext, kind: SoundKind, scale: number): AudioScheduledS
     f.frequency.exponentialRampToValueAtTime(5000, t + 0.22);
     s.connect(f).connect(g).connect(c.destination);
     envelope(g, t, [[0.03, 0.16], [0.12, 0.06], [0.25, 0]], scale);
-    s.start(t);
-    out.push(s);
-  } else if (kind === "erase") {
-    const s = noise(c, 0.8);
-    const f = c.createBiquadFilter();
-    const g = c.createGain();
-    f.type = "lowpass";
-    f.frequency.setValueAtTime(500, t);
-    f.frequency.linearRampToValueAtTime(1400, t + 0.35);
-    f.frequency.linearRampToValueAtTime(600, t + 0.7);
-    s.connect(f).connect(g).connect(c.destination);
-    envelope(g, t, [[0.18, 0.12], [0.5, 0.1], [0.75, 0]], scale);
     s.start(t);
     out.push(s);
   } else {

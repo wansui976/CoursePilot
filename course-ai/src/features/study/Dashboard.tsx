@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useReviewReturn } from "@/stores/reviewReturn";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { useTranslation } from "react-i18next";
@@ -240,6 +241,15 @@ export function Dashboard({
     queryKey: qk.weakConcepts(),
     queryFn: () => ipc.srs.weakConcepts(),
   });
+
+  // 从「回看出处」的视频返回：接着刚才那种复习。
+  useEffect(() => {
+    const session = useReviewReturn.getState().take();
+    if (!session) return;
+    if (session.kind === "due") setReviewing(true);
+    else if (session.kind === "mistakes") setReviewingMistakes(true);
+    else setWeakReview({ courseId: session.courseId, conceptId: session.conceptId, name: session.name });
+  }, []);
 
   // 概念复习结束：刷新薄弱榜与待复习计数。
   function closeWeakReview() {
@@ -921,6 +931,7 @@ export function Dashboard({
         <ReviewSession
           onClose={() => setReviewing(false)}
           onJump={(card) => {
+            if (card.video_id) useReviewReturn.getState().remember({ kind: "due" }, card.video_id);
             setReviewing(false);
             onJump(card);
           }}
@@ -932,6 +943,7 @@ export function Dashboard({
           mistakes={{ courseId: null }}
           onClose={() => setReviewingMistakes(false)}
           onJump={(card) => {
+            if (card.video_id) useReviewReturn.getState().remember({ kind: "mistakes" }, card.video_id);
             setReviewingMistakes(false);
             onJump(card);
           }}
@@ -943,6 +955,9 @@ export function Dashboard({
           concept={weakReview}
           onClose={closeWeakReview}
           onJump={(card) => {
+            if (card.video_id) {
+              useReviewReturn.getState().remember({ kind: "concept", ...weakReview }, card.video_id);
+            }
             closeWeakReview();
             onJump(card);
           }}

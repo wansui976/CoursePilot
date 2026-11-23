@@ -887,7 +887,7 @@
       "homeLayoutDashboard": "仪表盘",
       "homeLayoutDesk": "课桌",
       "uiSound": "界面声音",
-      "uiSoundHint": "只在翻卡、擦黑板、写板书、复习完这几个时刻出声。",
+      "uiSoundHint": "只在翻卡、写板书、复习完这几个时刻出声。",
       "uiSoundOff": "关",
       "uiSoundQuiet": "很轻",
       "uiSoundNormal": "正常",
@@ -2519,15 +2519,6 @@
     "reviewNone": "今天都复习完了",
     "deckCaption": "我的课程 · {{count}} 门",
     "nothingOpen": "挑一门课开始吧"
-  },
-  "lectureMap": {
-    "title": "课程地图",
-    "chapters": "章节",
-    "highlights": "重点",
-    "notes": "笔记",
-    "mistakes": "错题",
-    "filler": "闲聊",
-    "jump": "跳到 {{time}}"
   },
   "memoryCurve": {
     "toggle": "记忆曲线",

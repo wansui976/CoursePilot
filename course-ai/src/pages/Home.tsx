@@ -6,6 +6,7 @@ import { AppSidebar } from "@/features/shell/AppSidebar";
 import { AppRail } from "@/features/shell/AppRail";
 import type { ShellNav } from "@/features/shell/shellNav";
 import type { ConceptNavigationState } from "@/features/knowledge/ConceptsPanel";
+import { useReviewReturn } from "@/stores/reviewReturn";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
 import { useDownloadsSync } from "@/features/library/useDownloads";
 import { useRecorrection } from "@/features/library/useRecorrection";
@@ -308,17 +309,25 @@ export function Home() {
 
   const returnFromVideo = useCallback(() => {
     runAfterWorkspaceTransient(() => {
-      if (knowledgeReturn) {
+      const review = useReviewReturn.getState();
+      if (review.pending && review.pending.videoId === selectedVideoId) {
+        // 复习卡「回看出处」进来的：回到学习面板接着复习。
+        review.markResume();
+        usePlayer.getState().clearPendingSeek();
+        go({ view: "dashboard", videoId: null });
+      } else if (knowledgeReturn) {
         performReturnToKnowledge();
       } else {
         returnToLibrary();
       }
     });
   }, [
+    go,
     knowledgeReturn,
     performReturnToKnowledge,
     returnToLibrary,
     runAfterWorkspaceTransient,
+    selectedVideoId,
   ]);
 
   const selectedVideo =
