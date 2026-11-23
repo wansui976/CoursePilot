@@ -9,9 +9,11 @@ import { ipc, type DueCard, type MistakeCard } from "@/lib/ipc";
 import { formatStudyInterval } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { prefersReducedMotion } from "@/lib/viewTransition";
+import { haptic, playSound } from "@/lib/feedback";
 import { MathText } from "@/ui/MathText";
 import { renderInlineMarkdown } from "@/lib/renderMarkdown";
 import { MemoryCurve } from "./MemoryCurve";
+import { useSwipeCard } from "./useSwipeCard";
 
 /** 评完分甩出去的时长（与 design.css 的 ca-toss 一致）。 */
 const TOSS_MS = 320;
@@ -120,6 +122,11 @@ export function ReviewSession({
   /** 评完分的这张正被甩向右边（做完的那摞），动画结束才换下一张。 */
   const [tossing, setTossing] = useState(false);
   const [showCurve, setShowCurve] = useState(false);
+  // 手机上：翻面后左滑「重来」、右滑「良好」（困难 / 容易仍用按钮）。
+  const swipe = useSwipeCard({
+    enabled: revealed && !tossing,
+    onSwipe: (direction) => void grade(direction === "left" ? 1 : 3),
+  });
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const exitButtonRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -155,7 +162,9 @@ export function ReviewSession({
         queryClient.invalidateQueries({ queryKey: ["srs-mistakes"] }),
       ]);
       // 不论评几分都往右甩：放到「做完的那摞」上。等级只看按钮，不看方向。
+      haptic(rating === 1 ? "warning" : "tick");
       if (!prefersReducedMotion()) {
+        playSound("flip");
         setTossing(true);
         await new Promise((resolve) => window.setTimeout(resolve, TOSS_MS));
       }
@@ -186,6 +195,8 @@ export function ReviewSession({
 
   function revealAnswer() {
     if (choiceData && selectedOptionsRef.current.length === 0) return;
+    playSound("flip");
+    haptic("soft");
     setRevealed(true);
   }
 
@@ -199,6 +210,12 @@ export function ReviewSession({
   // 会话结束刷新待复习计数（仪表盘据此更新）。
   useEffect(() => {
     if (done) queryClient.invalidateQueries({ queryKey: qk.srs.countDue() });
+    // 一副牌复习完：轻轻盖个章。
+    if (done && cards.length > 0) {
+      playSound("stamp");
+      haptic("success");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [done, queryClient]);
 
   // 键盘：有选项时 A–Z 选答案，空格/回车翻面；翻面后 1–4 打分。
@@ -350,7 +367,24 @@ export function ReviewSession({
               className="ca-review-card ca-card-enter"
               data-revealed={revealed ? "" : undefined}
               data-tossing={tossing ? "" : undefined}
+              data-dragging={swipe.dx !== 0 ? "" : undefined}
+              style={
+                swipe.dx !== 0
+                  ? { transform: `translateX(${swipe.dx}px) rotate(${swipe.dx / 18}deg)` }
+                  : undefined
+              }
+              {...swipe.handlers}
             >
+              {revealed && (
+                <>
+                  <span className="ca-stamp left" style={{ opacity: swipe.leftStamp }} aria-hidden="true">
+                    {t("review.again")}
+                  </span>
+                  <span className="ca-stamp right" style={{ opacity: swipe.rightStamp }} aria-hidden="true">
+                    {t("review.good")}
+                  </span>
+                </>
+              )}
               <div className="ca-reading whitespace-pre-wrap text-center text-[length:calc(1.6rem*var(--reading-scale,1))] font-semibold leading-snug text-[var(--text-strong)]">
                 {renderInlineMarkdown(card.front)}
               </div>

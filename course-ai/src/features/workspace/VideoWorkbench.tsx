@@ -14,6 +14,7 @@ import { RemoteMediaStage } from "./RemoteMediaStage";
 import { DriveDownloadBar } from "./DriveDownloadBar";
 import { LanDownloadBar } from "./LanDownloadBar";
 import { WorkspaceLayout } from "./WorkspaceLayout";
+import { EraseTransition } from "./EraseTransition";
 import { allowsNotesSplit } from "./workbenchLayout";
 
 /** 单个视频的学习工作台：标题条 + 播放舞台 + 右侧（窄屏下方）学习面板。 */
@@ -149,6 +150,7 @@ export function VideoWorkbench({
           {!hasLocalFile && remoteStream.data?.kind === "drive" && <DriveDownloadBar video={video} />}
           {!hasLocalFile && remoteStream.data?.kind === "lan" && <LanDownloadBar video={video} />}
           <div className="ca-stage-wrap">
+            <EraseTransition video={video} course={course} courseVideos={courseVideos} />
             {isPhoneDevice && (
               <button
                 type="button"

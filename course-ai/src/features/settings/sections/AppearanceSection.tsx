@@ -11,6 +11,8 @@ import {
 } from "@/stores/readingFont";
 import { DENSITIES, useDensity } from "@/stores/density";
 import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
+import { useFeedbackPrefs, type SoundLevel } from "@/lib/feedback";
+import { Switch } from "@/ui/switch";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
 import { isIOS } from "@/lib/platform";
 
@@ -110,6 +112,10 @@ export function AppearanceSection() {
   const setDensity = useDensity((s) => s.setDensity);
   const homeLayout = useHomeLayout((s) => s.layout);
   const setHomeLayout = useHomeLayout((s) => s.setLayout);
+  const sound = useFeedbackPrefs((s) => s.sound);
+  const setSound = useFeedbackPrefs((s) => s.setSound);
+  const haptics = useFeedbackPrefs((s) => s.haptics);
+  const setHaptics = useFeedbackPrefs((s) => s.setHaptics);
   // 量一次即可：本机字体在应用运行期间不会变。
   const [fontAvailable] = useState(() =>
     Object.fromEntries(READING_FONTS.map((option) => [option.key, isReadingFontAvailable(option.key)])),
@@ -296,6 +302,25 @@ export function AppearanceSection() {
             ]}
             value={homeLayout}
             onChange={setHomeLayout}
+          />
+        </Row>
+        <Row label={t("settings.appearance.uiSound")} hint={t("settings.appearance.uiSoundHint")} layout="inline">
+          <Segmented
+            label={t("settings.appearance.uiSound")}
+            options={[
+              { key: "off" as SoundLevel, label: t("settings.appearance.uiSoundOff") },
+              { key: "quiet" as SoundLevel, label: t("settings.appearance.uiSoundQuiet") },
+              { key: "normal" as SoundLevel, label: t("settings.appearance.uiSoundNormal") },
+            ]}
+            value={sound}
+            onChange={setSound}
+          />
+        </Row>
+        <Row label={t("settings.appearance.haptics")} hint={t("settings.appearance.hapticsHint")} layout="inline">
+          <Switch
+            checked={haptics}
+            onCheckedChange={setHaptics}
+            aria-label={t("settings.appearance.haptics")}
           />
         </Row>
         <Row label={t("settings.appearance.density")} hint={t("settings.appearance.densityFootnote")} layout="inline">

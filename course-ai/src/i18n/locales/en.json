@@ -886,7 +886,14 @@
       "homeLayout": "Home layout",
       "homeLayoutHint": "Both show the same things, laid out differently.",
       "homeLayoutDashboard": "Dashboard",
-      "homeLayoutDesk": "Desk"
+      "homeLayoutDesk": "Desk",
+      "uiSound": "Interface sounds",
+      "uiSoundHint": "Only when a card turns, the board is wiped, AI writes on the board, or a review ends.",
+      "uiSoundOff": "Off",
+      "uiSoundQuiet": "Quiet",
+      "uiSoundNormal": "Normal",
+      "haptics": "Haptics",
+      "hapticsHint": "A light tap on phones when you swipe a card, miss one, or finish a review."
     },
     "studyReminder": {
       "title": "Study Reminder",
@@ -2571,5 +2578,12 @@
       "pending": "has cards not yet reviewed",
       "locked": "no cards yet"
     }
+  },
+  "onboarding": {
+    "title": "Put your first course on the desk",
+    "hint": "Pick a folder of lecture videos. Bilibili links, playlists and cloud drives are imported inside a course.",
+    "step1": "Add a course",
+    "step2": "Watch a lecture",
+    "step3": "Come back tomorrow to review"
   }
 }

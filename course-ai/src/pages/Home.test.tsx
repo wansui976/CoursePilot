@@ -303,9 +303,10 @@ describe("Home", () => {
     expect(screen.getByText("选择课程后导入或管理视频")).toBeInTheDocument();
     // 侧栏的拖动排序也挂着一个 status 播报区：按空态自己的标题找它。
     const emptyState = screen
-      .getByRole("heading", { name: "还没有课程" })
+      .getByRole("heading", { name: "把第一门课放上来" })
       .closest<HTMLElement>('[role="status"]')!;
-    expect(emptyState).toHaveClass("ca-empty-state");
+    // 第一次打开：一块黑板写着要做的那一步。
+    expect(emptyState).toHaveClass("ca-chalk-empty");
     expect(
       within(emptyState).getByRole("button", { name: "添加课程文件夹" }),
     ).toBeInTheDocument();
@@ -326,7 +327,7 @@ describe("Home", () => {
     expect(screen.queryByText("00:00")).not.toBeInTheDocument();
   });
 
-  it("uses the shared empty-state language when a selected course has no videos", async () => {
+  it("shows the chalkboard empty state with an import action when a selected course has no videos", async () => {
     mockIpc.videos.list.mockImplementation(async (courseId: string) =>
       courseId === "course-1" ? [] : [],
     );
@@ -339,7 +340,7 @@ describe("Home", () => {
     const emptyState = (await screen.findByRole("heading", { name: "还没有视频" })).closest<HTMLElement>(
       '[role="status"]',
     )!;
-    expect(emptyState).toHaveClass("ca-empty-state");
+    expect(emptyState).toHaveClass("ca-chalk-empty");
     // 空态就地给「导入」入口，新用户不用去找右上角的按钮。
     expect(within(emptyState).getByRole("button", { name: "导入" })).toBeInTheDocument();
   });

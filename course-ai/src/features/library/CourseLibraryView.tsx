@@ -36,6 +36,7 @@ import { SortableVideoItem } from "@/features/library/SortableVideos";
 import { LectureCover } from "@/features/library/LectureCover";
 import { Badge, type BadgeTone } from "@/ui/badge";
 import { EmptyState } from "@/ui/empty-state";
+import { ChalkboardEmpty } from "@/ui/ChalkboardEmpty";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { IconButton } from "@/ui/icon-button";
 import { Button } from "@/ui/button";
@@ -1634,12 +1635,13 @@ export function CourseLibraryView({
             </div>
           ) : !selectedCourseId || courseEmpty ? (
             <div className="flex h-full min-h-[320px] items-center justify-center">
-              <EmptyState
-                title={selectedCourseId ? t("home.noVideos") : t("home.noCourses")}
-                description={
+              <ChalkboardEmpty
+                title={selectedCourseId ? t("home.noVideos") : t("onboarding.title")}
+                hint={selectedCourseId ? t("home.noVideosHint") : t("onboarding.hint")}
+                steps={
                   selectedCourseId
-                    ? t("home.noVideosHint")
-                    : undefined
+                    ? undefined
+                    : [t("onboarding.step1"), t("onboarding.step2"), t("onboarding.step3")]
                 }
                 action={
                   selectedCourseId ? (

@@ -19,16 +19,27 @@ const CONTENT = WIDTH - PAD * 2;
 /** 长图最高（逻辑像素），再长就截断并提示去 App 里看完整版。 */
 const MAX_NOTES_HEIGHT = 5200;
 
-const FONT_STACK = '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
+const FONT_STACK =
+  '"Instrument Sans Variable", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif';
+/** 标题用衬线（和应用里一样）；字体已随应用打包，中文落到系统宋体。 */
+const SERIF_STACK =
+  '"Newsreader Variable", "Songti SC", "STSong", "Noto Serif SC", "Noto Serif CJK SC", Georgia, serif';
 const font = (size: number, weight = 400) => `${weight} ${size}px ${FONT_STACK}`;
+const serif = (size: number, weight = 500) => `${weight} ${size}px ${SERIF_STACK}`;
 
-const INK = "#1d1d1f";
-const MUTED = "#6e6e73";
-const LINE = "#e5e5ea";
-const ACCENT = "#7c4dff";
-const ACCENT_SOFT = "#f3efff";
-/** 脑图各一级分支的颜色。 */
-const BRANCH_COLORS = ["#7c4dff", "#0a84ff", "#30b158", "#ff9f0a", "#ff375f", "#5ac8fa", "#bf5af2", "#a2845e"];
+// 分享图固定用「纸」配色（不跟应用主题走），与设计系统的令牌同值。
+const PAPER = "#fbfbfa";
+const INK = "#1b1f1d";
+const MUTED = "#5f6762";
+const LINE = "#e4e6e2";
+const BOARD = "#17211c";
+const ACCENT = "#1d6b52";
+const MARKER = "#ffd60a";
+const MARKER_WEAK = "#fff6cc";
+const MARKER_INK = "#5c4a00";
+const ACCENT_SOFT = MARKER_WEAK;
+/** 脑图各一级分支的颜色：标签色板的实色。 */
+const BRANCH_COLORS = ["#2f9e67", "#3b7ddd", "#d06a22", "#8a5cd6", "#d6508f", "#1f9a94", "#b08400", "#d9493f"];
 
 export interface ShareCardLabels {
   /** 页脚标语。 */
@@ -76,26 +87,24 @@ interface HeaderLayout {
 }
 
 function layoutHeader(header: CardHeader, measure: Measure, width = CONTENT): HeaderLayout {
-  const titleLines = wrapLines(header.title, width, font(22, 700), measure).slice(0, 3);
+  const titleLines = wrapLines(header.title, width, serif(22), measure).slice(0, 3);
   const courseLine = header.course.trim() ? header.course.trim() : null;
   const height = 6 + 28 + (courseLine ? 22 : 0) + titleLines.length * 31 + 26 + 18;
   return { height, courseLine, titleLines, kind: header.kind };
 }
 
 function drawHeader(ctx: CanvasRenderingContext2D, layout: HeaderLayout, x: number, width: number) {
-  const band = ctx.createLinearGradient(0, 0, width + x * 2, 0);
-  band.addColorStop(0, ACCENT);
-  band.addColorStop(1, "#a78bfa");
-  ctx.fillStyle = band;
+  // 顶部一条黑板：分享图也是「板书与荧光笔」。
+  ctx.fillStyle = BOARD;
   ctx.fillRect(0, 0, width + x * 2, 6);
   let y = 6 + 28;
   if (layout.courseLine) {
-    ctx.font = font(13, 600);
+    ctx.font = serif(13, 500);
     ctx.fillStyle = ACCENT;
     ctx.fillText(layout.courseLine, x, y);
     y += 22;
   }
-  ctx.font = font(22, 700);
+  ctx.font = serif(22);
   ctx.fillStyle = INK;
   for (const line of layout.titleLines) {
     y += 24;
@@ -106,10 +115,10 @@ function drawHeader(ctx: CanvasRenderingContext2D, layout: HeaderLayout, x: numb
   ctx.font = font(12, 600);
   const tagWidth = ctx.measureText(layout.kind).width + 16;
   y += 8;
-  roundRect(ctx, x, y, tagWidth, 20, 10);
+  roundRect(ctx, x, y, tagWidth, 20, 4);
   ctx.fillStyle = ACCENT_SOFT;
   ctx.fill();
-  ctx.fillStyle = ACCENT;
+  ctx.fillStyle = MARKER_INK;
   ctx.fillText(layout.kind, x + 8, y + 14);
 }
 
@@ -122,19 +131,19 @@ function drawFooter(ctx: CanvasRenderingContext2D, top: number, x: number, width
   ctx.moveTo(x, top + 0.5);
   ctx.lineTo(x + width, top + 0.5);
   ctx.stroke();
-  // 简化版应用图标：圆角方块 + 播放三角。
+  // 简化版标识：一小块黑板 + 荧光黄的播放三角。
   const iconY = top + 22;
-  roundRect(ctx, x, iconY, 36, 36, 9);
-  ctx.fillStyle = "#2f6bff";
+  roundRect(ctx, x, iconY, 36, 36, 8);
+  ctx.fillStyle = BOARD;
   ctx.fill();
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = MARKER;
   ctx.beginPath();
   ctx.moveTo(x + 14, iconY + 11);
   ctx.lineTo(x + 25, iconY + 18);
   ctx.lineTo(x + 14, iconY + 25);
   ctx.closePath();
   ctx.fill();
-  ctx.font = font(15, 700);
+  ctx.font = serif(16, 500);
   ctx.fillStyle = INK;
   ctx.fillText("CoursePilot", x + 48, iconY + 15);
   ctx.font = font(12);
@@ -156,7 +165,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 function fillBackground(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, width, height);
 }
 
@@ -265,7 +274,7 @@ function placeBlock(block: NoteBlock, measure: Measure): PlacedBlock {
           ctx.save();
           ctx.clip();
           rows.forEach((cells, r) => {
-            ctx.fillStyle = r === 0 ? ACCENT_SOFT : r % 2 === 0 ? "#fafafc" : "#ffffff";
+            ctx.fillStyle = r === 0 ? ACCENT_SOFT : r % 2 === 0 ? "#f6f7f5" : PAPER;
             ctx.fillRect(PAD, y, CONTENT, heights[r]);
             ctx.font = r === 0 ? headerFont : cellFont;
             ctx.fillStyle = r === 0 ? ACCENT : INK;
@@ -452,14 +461,15 @@ export function renderWeeklyCard(report: WeeklyReport, labels: WeeklyLabels): HT
   stats.forEach(([label, value], i) => {
     const x = PAD + (i % 2) * (cellW + 12);
     const y = statsTop + Math.floor(i / 2) * (statH + 12);
-    roundRect(ctx, x, y, cellW, statH, 12);
-    ctx.fillStyle = i === 0 ? ACCENT_SOFT : "#f5f5f7";
+    roundRect(ctx, x, y, cellW, statH, 8);
+    ctx.fillStyle = i === 0 ? ACCENT_SOFT : "#f1f2ef";
     ctx.fill();
     ctx.font = font(12);
     ctx.fillStyle = MUTED;
     ctx.fillText(label, x + 16, y + 26);
-    ctx.font = font(26, 700);
-    ctx.fillStyle = i === 0 ? ACCENT : INK;
+    // 统计大数字用衬线，和应用里的统计行一致。
+    ctx.font = serif(28, 500);
+    ctx.fillStyle = i === 0 ? MARKER_INK : INK;
     ctx.fillText(value, x + 16, y + 62);
   });
 

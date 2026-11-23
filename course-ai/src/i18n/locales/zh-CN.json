@@ -885,7 +885,14 @@
       "homeLayout": "主页样式",
       "homeLayoutHint": "两种主页显示同样的内容，只是摆法不同。",
       "homeLayoutDashboard": "仪表盘",
-      "homeLayoutDesk": "课桌"
+      "homeLayoutDesk": "课桌",
+      "uiSound": "界面声音",
+      "uiSoundHint": "只在翻卡、擦黑板、写板书、复习完这几个时刻出声。",
+      "uiSoundOff": "关",
+      "uiSoundQuiet": "很轻",
+      "uiSoundNormal": "正常",
+      "haptics": "触感",
+      "hapticsHint": "手机上滑动复习卡、答错、复习完时轻轻震一下。"
     },
     "studyReminder": {
       "title": "学习提醒",
@@ -2557,5 +2564,12 @@
       "pending": "有卡还没复习",
       "locked": "还没出过题"
     }
+  },
+  "onboarding": {
+    "title": "把第一门课放上来",
+    "hint": "选一个装着课程视频的文件夹；B 站链接、合集和网盘在课程里导入。",
+    "step1": "放一门课上来",
+    "step2": "看完一讲",
+    "step3": "明天回来复习"
   }
 }

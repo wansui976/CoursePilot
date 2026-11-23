@@ -64,7 +64,7 @@ export const scenes = [
   {
     // 课程多于 4 门：主页课程叠成牌堆；再翻一张看「甩回牌底」后的样子。
     name: "home-deck",
-    devices: ALL,
+    devices: ["desktop", "tablet"],
     run: async ({ page, shot }) => {
       await page.evaluate(() => localStorage.setItem("__shot-many-courses", "1"));
       await page.reload({ waitUntil: "networkidle" });
@@ -78,7 +78,7 @@ export const scenes = [
   {
     // 主页样式选「课桌」。
     name: "home-desk",
-    devices: ALL,
+    devices: ["desktop", "tablet"],
     run: async ({ page, shot }) => {
       await page.evaluate(() => {
         localStorage.setItem("__shot-many-courses", "1");

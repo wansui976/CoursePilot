@@ -7,6 +7,7 @@ import { displayTitle } from "@/lib/videoTitle";
 import { BoardCover } from "@/ui/BoardCover";
 import { Button } from "@/ui/button";
 import { Mark, Tag } from "@/ui/marks";
+import { useSwipeCard } from "@/features/study/useSwipeCard";
 
 export type DeckCourse = {
   course: Course;
@@ -40,6 +41,11 @@ export function CourseDeck({
   const { t } = useTranslation();
   const [leaving, setLeaving] = useState<string | null>(null);
   const n = items.length;
+  // 手机上左右滑翻牌（往左滑看下一门，往右滑回上一门）。
+  const swipe = useSwipeCard({
+    enabled: n > 1,
+    onSwipe: (direction) => go(direction === "left" ? front + 1 : front - 1),
+  });
   if (n === 0) return null;
   const current = items[Math.min(front, n - 1)];
 
@@ -74,6 +80,7 @@ export function CourseDeck({
         aria-label={t("library.deckLabel")}
         aria-activedescendant={`deck-card-${current.course.id}`}
         onKeyDown={onKeyDown}
+        {...swipe.handlers}
       >
         {items.map((item, k) => {
           const depth = (k - front + n) % n;

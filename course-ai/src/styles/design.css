@@ -1715,3 +1715,242 @@ button.ca-time:hover {
 .ca-book-mistakes {
   margin-top: 8px;
 }
+
+/* ===================== 黑板空状态（第一次打开） ===================== */
+
+.ca-chalk-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  width: min(560px, 100%);
+  padding: 24px 16px;
+}
+
+.ca-chalk-board {
+  position: relative;
+  width: 100%;
+  padding: 40px 40px 52px;
+  border-radius: var(--r-lg);
+  background: var(--board);
+  background-image: var(--grain-bg);
+  color: var(--chalk);
+  text-align: center;
+  box-shadow:
+    inset 0 0 0 10px #2a1f16,
+    inset 0 0 0 11px rgb(0 0 0 / 0.3),
+    0 24px 48px -24px rgb(16 24 20 / 0.55);
+}
+
+.ca-chalk-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 30px;
+  line-height: 40px;
+  font-weight: 500;
+}
+
+.ca-chalk-steps {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 17px;
+  color: rgb(238 242 236 / 0.78);
+}
+
+.ca-chalk-steps li + li::before {
+  content: "→";
+  margin-right: 10px;
+  color: var(--marker-strong);
+  font-style: normal;
+}
+
+.ca-chalk-hint {
+  margin: 14px auto 0;
+  max-width: 34em;
+  font-size: 13px;
+  line-height: 20px;
+  color: rgb(238 242 236 / 0.55);
+}
+
+/* 黑板底边的粉笔槽：一截粉笔、一块板擦。 */
+.ca-chalk-ledge {
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  bottom: 11px;
+  height: 12px;
+  background: linear-gradient(#3a2b1f, #2a1f16);
+}
+
+.ca-chalk-ledge i {
+  position: absolute;
+  left: 18%;
+  top: 2px;
+  width: 34px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--chalk);
+  opacity: 0.85;
+}
+
+.ca-chalk-ledge b {
+  position: absolute;
+  left: calc(18% + 48px);
+  top: 1px;
+  width: 50px;
+  height: 9px;
+  border-radius: 2px;
+  background: #5a4a3a;
+}
+
+/* ===================== 擦黑板（切到下一讲） ===================== */
+
+.ca-erase {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+  background: var(--board);
+  pointer-events: none;
+  animation: ca-erase-out 0.4s var(--ease-in) 1.3s forwards;
+}
+
+.ca-erase .layer {
+  position: absolute;
+  inset: 0;
+}
+
+.ca-erase .layer > .cover {
+  position: absolute;
+  inset: 0;
+}
+
+.ca-erase .new {
+  opacity: 0;
+}
+
+.ca-erase .smudge {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(100deg, transparent 0, rgb(238 242 236 / 0.05) 30%, rgb(238 242 236 / 0.08) 55%, transparent 85%);
+}
+
+.ca-erase .eraser {
+  position: absolute;
+  top: -10%;
+  bottom: -10%;
+  left: -120px;
+  width: 100px;
+  filter: blur(6px);
+  background: linear-gradient(90deg, transparent, rgb(238 242 236 / 0.14) 40%, rgb(238 242 236 / 0.2) 60%, transparent);
+}
+
+.ca-erase.run .old {
+  animation: ca-wipe 0.7s var(--ease-in) forwards;
+}
+
+.ca-erase.run .eraser {
+  animation: ca-eraser 0.7s var(--ease-in) forwards;
+}
+
+.ca-erase.run .smudge {
+  animation: ca-smudge 1.6s var(--ease) forwards;
+}
+
+.ca-erase.run .new {
+  animation: ca-chalk-in 0.6s var(--ease-out) 0.75s forwards;
+}
+
+@keyframes ca-wipe {
+  from {
+    clip-path: inset(0 0 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 100%);
+  }
+}
+
+@keyframes ca-eraser {
+  to {
+    transform: translateX(calc(100cqw + 240px));
+  }
+}
+
+@keyframes ca-smudge {
+  30% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.55;
+  }
+}
+
+@keyframes ca-chalk-in {
+  from {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ca-erase-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.ca-stage-wrap {
+  container-type: inline-size;
+}
+
+/* 手机上滑卡：卡片跟手、印章随拖动距离显现，像盖了一个橡皮章。 */
+.ca-review-card {
+  touch-action: pan-y;
+}
+
+.ca-review-card[data-dragging] {
+  transition: none;
+  animation: none;
+}
+
+.ca-stamp {
+  position: absolute;
+  top: 18px;
+  z-index: 2;
+  padding: 3px 12px;
+  border: 2px solid currentColor;
+  border-radius: var(--r-sm);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ca-stamp.left {
+  right: 20px;
+  color: var(--status-err);
+  transform: rotate(8deg);
+}
+
+.ca-stamp.right {
+  left: 20px;
+  color: var(--status-ok);
+  transform: rotate(-8deg);
+}
+
+.ca-deck-stack {
+  touch-action: pan-y;
+}
