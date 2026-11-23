@@ -709,8 +709,6 @@
       "lost": "笔记改过了，找不到这条批注对应的原文",
       "erase": "擦掉这条批注"
     },
-    "pageMark": "第 {{page}} 页",
-    "pageCount": "打印成讲义约 {{count}} 页（A4）",
     "tabs": "笔记分节索引"
   },
   "quiz": {
@@ -932,7 +930,11 @@
       "weatherHere": "当前位置",
       "weatherLocateFailed": "拿不到当前位置（系统没给权限，或这台设备不支持）。可以直接搜城市名。",
       "weatherNoResult": "没找到这个地方，换个写法试试。",
-      "weatherResults": "搜索结果"
+      "weatherResults": "搜索结果",
+      "noteTabs": "笔记索引标签",
+      "noteTabsHint": "长笔记右边缘按小节贴的标签。单色：只有当前小节那张有颜色；彩色：每张一个颜色。",
+      "noteTabsPlain": "单色",
+      "noteTabsColor": "彩色"
     },
     "studyReminder": {
       "title": "学习提醒",

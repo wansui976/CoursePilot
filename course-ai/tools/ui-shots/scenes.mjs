@@ -559,7 +559,7 @@ export const scenes = [
     },
   },
   {
-    // 长笔记：顶上看侧边索引标签和夹着回形针的截图，再滚到第 2 页开始处。
+    // 长笔记：顶上看侧边索引标签和夹着回形针的截图，再点一张标签跳到那一节。
     name: "notes-pages",
     devices: ["desktop"],
     run: async ({ page, shot }) => {
@@ -573,11 +573,18 @@ export const scenes = [
       await page.locator(".ca-note-tab").first().waitFor();
       await page.waitForTimeout(500);
       await shot("top");
-      const mark = page.locator(".ca-page-break").first();
-      await mark.waitFor({ state: "attached" });
-      await mark.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(400);
+      // 点第四张标签，跳到那一节。
+      await page.locator(".ca-note-tab").nth(3).click();
+      await page.waitForTimeout(700);
       await shot();
+      // 设置里换成彩色标签。
+      await page.evaluate(() => localStorage.setItem("course-ai-note-tabs", "color"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("tab", { name: /笔记/ }).click();
+      await page.locator(".ca-note-tab").first().waitFor();
+      await page.waitForTimeout(500);
+      await shot("color");
     },
   },
   {

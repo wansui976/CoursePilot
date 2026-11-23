@@ -2287,77 +2287,6 @@ button.ca-time:hover {
   text-underline-offset: 4px;
 }
 
-/* ===================== 笔记分页记号 ===================== */
-
-/* 打印成讲义时，下一页从这里开始：一道很淡的虚线，右边一个页码。 */
-/* 只在页面右边缘画一小段虚线 + 页码：估算的分页常落在一行字中间，整条线会划过文字。 */
-.ca-page-break {
-  position: absolute;
-  right: 16px;
-  width: 96px;
-  height: 0;
-  border-top: 1px dashed var(--border-subtle);
-  pointer-events: none;
-}
-
-.ca-page-break > span {
-  position: absolute;
-  right: 0;
-  top: -9px;
-  padding: 0 0 0 6px;
-  background: var(--surface-panel);
-  font-family: var(--font-app);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--text-faint);
-}
-
-.ca-page-count {
-  margin: 0;
-  padding: 4px 16px 20px;
-  text-align: right;
-  font-family: var(--font-app);
-  font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-
-/* 擦掉一条铅笔批注后留下的橡皮屑：几粒小卷，往下掉一点、慢慢淡掉。 */
-.ca-eraser-crumbs {
-  position: absolute;
-  left: 4px;
-  width: 100px;
-  height: 20px;
-  pointer-events: none;
-}
-
-.ca-eraser-crumbs i {
-  position: absolute;
-  left: var(--x);
-  top: var(--y);
-  width: 5px;
-  height: 2.5px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--eraser) 55%, var(--pencil));
-  transform: rotate(var(--r));
-  animation: ca-crumb-fall 1.6s var(--ease-out) forwards;
-}
-
-@keyframes ca-crumb-fall {
-  0% {
-    opacity: 0.9;
-    transform: translateY(-4px) rotate(var(--r));
-  }
-  60% {
-    opacity: 0.7;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(8px) rotate(calc(var(--r) + 40deg));
-  }
-}
-
 /* ===================== 笔记索引标签 ===================== */
 
 /* 贴在页面右边缘、让开一条滚动条宽的一排纸签：随滚动停在可视区顶上（sticky，自身不占高度）。 */
@@ -2431,6 +2360,14 @@ button.ca-time:hover {
   color: var(--accent-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
   font-weight: 600;
+}
+
+/* 彩色样式：每张纸签一个标签色（淡底 + 同色字），当前那张不换色，只探出来、加粗。 */
+.ca-note-tabs-rail[data-style="color"] .ca-note-tab,
+.ca-note-tabs-rail[data-style="color"] .ca-note-tab[aria-current] {
+  background: var(--tab-bg);
+  color: var(--tab-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tab-ink) 18%, transparent);
 }
 
 /* 有标签时给正文右边让出一条；有批注时批注也跟着往里挪，别被标签压住。 */

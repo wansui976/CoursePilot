@@ -710,9 +710,6 @@
       "lost": "The notes changed; the text this refers to is gone",
       "erase": "Erase this note"
     },
-    "pageMark": "Page {{page}}",
-    "pageCount_one": "About {{count}} page as a printed handout (A4)",
-    "pageCount_other": "About {{count}} pages as a printed handout (A4)",
     "tabs": "Section tabs"
   },
   "quiz": {
@@ -934,7 +931,11 @@
       "weatherHere": "Current location",
       "weatherLocateFailed": "Couldn't get your location (no permission, or not supported on this device). Search for a city instead.",
       "weatherNoResult": "No place found. Try another spelling.",
-      "weatherResults": "Results"
+      "weatherResults": "Results",
+      "noteTabs": "Note section tabs",
+      "noteTabsHint": "Tabs along the edge of long notes. Plain: only the current section's tab is coloured. Colourful: each tab has its own colour.",
+      "noteTabsPlain": "Plain",
+      "noteTabsColor": "Colourful"
     },
     "studyReminder": {
       "title": "Study Reminder",

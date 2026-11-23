@@ -11,7 +11,7 @@ import {
 } from "@/stores/readingFont";
 import { DENSITIES, useDensity } from "@/stores/density";
 import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
-import { NOTE_PAPERS, useNotePaper } from "@/stores/notePaper";
+import { NOTE_PAPERS, useNotePaper, type NoteTabStyle } from "@/stores/notePaper";
 import { WeatherPlaceRow } from "./WeatherPlaceRow";
 import { PaperSwatch } from "./PaperSwatch";
 import { useFeedbackPrefs, type SoundLevel } from "@/lib/feedback";
@@ -118,6 +118,8 @@ export function AppearanceSection() {
   const deskWindow = useHomeLayout((s) => s.deskWindow);
   const notePaper = useNotePaper((s) => s.paper);
   const setNotePaper = useNotePaper((s) => s.setPaper);
+  const noteTabStyle = useNotePaper((s) => s.tabStyle);
+  const setNoteTabStyle = useNotePaper((s) => s.setTabStyle);
   const setDeskWindow = useHomeLayout((s) => s.setDeskWindow);
   const sound = useFeedbackPrefs((s) => s.sound);
   const setSound = useFeedbackPrefs((s) => s.setSound);
@@ -294,6 +296,17 @@ export function AppearanceSection() {
             options={READING_SIZES.map((option) => ({ key: option.key, label: t(option.i18nKey) }))}
             value={readingSize}
             onChange={setReadingSize}
+          />
+        </Row>
+        <Row label={t("settings.appearance.noteTabs")} hint={t("settings.appearance.noteTabsHint")} layout="inline">
+          <Segmented
+            label={t("settings.appearance.noteTabs")}
+            options={[
+              { key: "plain" as NoteTabStyle, label: t("settings.appearance.noteTabsPlain") },
+              { key: "color" as NoteTabStyle, label: t("settings.appearance.noteTabsColor") },
+            ]}
+            value={noteTabStyle}
+            onChange={setNoteTabStyle}
           />
         </Row>
         <StackRow label={t("settings.appearance.notePaper")} hint={t("settings.appearance.notePaperHint")}>

@@ -8,7 +8,6 @@ import { type Editor, EditorContent, useEditor } from "@tiptap/react";
 import { type ExportItem } from "./ExportMenu";
 import { ArchiveRestore, Loader2, NotebookPen, PencilLine, X } from "lucide-react";
 import { PencilMargin } from "./notes/PencilMargin";
-import { PageMarks } from "./notes/PageMarks";
 import { NoteTabs } from "./notes/NoteTabs";
 import { isMobile } from "@/lib/mobileFiles";
 import type { NoteAnnotation } from "@/lib/ipc/media";
@@ -18,7 +17,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { useNoteCapture } from "@/stores/noteCapture";
 import { keyLabel, useShortcuts } from "@/stores/shortcuts";
 import { usePlayer } from "@/stores/player";
-import { PanelActions, panelActionButtonClass } from "./PanelActions";
+import { PanelActions, inlineActionButtonClass } from "./PanelActions";
 import { NoteHistoryDialog } from "./notes/NoteHistoryDialog";
 import { noteContentToDoc } from "./notes/noteVersionContent";
 import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCard";
@@ -488,6 +487,51 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             >
               {t(SAVE_STATUS_I18N[writeState.status])}
             </span>
+            {/* 记一笔、历史、铅笔批注、时间戳、导出、重新生成：放在格式条最右边，
+                不再悬浮在右下角压住正文和侧边索引标签。 */}
+            <span aria-hidden="true" className="h-4 w-px flex-none bg-[var(--border-subtle)]" />
+            <PanelActions
+              inline
+              leading={
+                <>
+                  <button
+                    type="button"
+                    aria-label={t("notes.takeNote")}
+                    title={t("notes.takeNoteTitle", { key: keyLabel(takeNoteKey, t) })}
+                    onClick={() => useNoteCapture.getState().capture(videoId, usePlayer.getState().currentMs)}
+                    className={inlineActionButtonClass}
+                  >
+                    <NotebookPen className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("notes.history")}
+                    title={t("notes.history")}
+                    onClick={() => setHistoryOpen(true)}
+                    className={inlineActionButtonClass}
+                  >
+                    <ArchiveRestore className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={annotationCount > 0 ? t("notes.pencil.again") : t("notes.pencil.ask")}
+                    title={annotationCount > 0 ? t("notes.pencil.again") : t("notes.pencil.ask")}
+                    disabled={annotate.isPending || !editor}
+                    onClick={() => annotate.mutate()}
+                    className={inlineActionButtonClass}
+                  >
+                    {annotate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
+                  </button>
+                  <TimestampToggle />
+                </>
+              }
+              onRegenerate={() => void requestGenerate()}
+              regenerating={generate.isPending}
+              hasContent={Boolean(localDraft ?? notesContent) || hasLocalEdits}
+              exportItems={
+                (notesQuery.isPending || notesQuery.isError) && !localDraft ? [] : exportItems
+              }
+            />
           </div>
         </>
       )}
@@ -596,52 +640,10 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             >
               <EditorContent editor={editor} />
               <PencilMargin videoId={videoId} editor={editor} sheetRef={sheetRef} />
-              <PageMarks editor={editor} sheetRef={sheetRef} />
             </div>
           </>
         )}
       </div>
-      <PanelActions
-        leading={
-          <>
-            <button
-              type="button"
-              aria-label={t("notes.takeNote")}
-              title={t("notes.takeNoteTitle", { key: keyLabel(takeNoteKey, t) })}
-              onClick={() => useNoteCapture.getState().capture(videoId, usePlayer.getState().currentMs)}
-              className={panelActionButtonClass}
-            >
-              <NotebookPen className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={t("notes.history")}
-              title={t("notes.history")}
-              onClick={() => setHistoryOpen(true)}
-              className={panelActionButtonClass}
-            >
-              <ArchiveRestore className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={annotationCount > 0 ? t("notes.pencil.again") : t("notes.pencil.ask")}
-              title={annotationCount > 0 ? t("notes.pencil.again") : t("notes.pencil.ask")}
-              disabled={annotate.isPending || !editor}
-              onClick={() => annotate.mutate()}
-              className={panelActionButtonClass}
-            >
-              {annotate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
-            </button>
-            <TimestampToggle />
-          </>
-        }
-        onRegenerate={() => void requestGenerate()}
-        regenerating={generate.isPending}
-        hasContent={Boolean(localDraft ?? notesContent) || hasLocalEdits}
-        exportItems={
-          (notesQuery.isPending || notesQuery.isError) && !localDraft ? [] : exportItems
-        }
-      />
       <NoteHistoryDialog
         videoId={videoId}
         open={historyOpen}

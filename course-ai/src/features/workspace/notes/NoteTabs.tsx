@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { tabLabel } from "@/lib/noteTabs";
+import { COURSE_COLORS } from "@/lib/types";
+import { useNotePaper } from "@/stores/notePaper";
 import type { Editor } from "@tiptap/react";
 
 /** 至少这么多个二级标题、而且笔记比一屏长出一半，才贴标签。 */
@@ -12,7 +14,8 @@ type Section = { text: string; el: HTMLElement };
 
 /**
  * 长笔记的侧边索引标签：每个二级标题一张小纸签，竖着贴在页面右边缘（让开滚动条）。
- * 纸签都是同一种纸色，只有当前读到的那一节用主题色、多探出来一点——一页上只有一处强调色。
+ * 默认单色：都是同一种纸色，只有当前读到的那一节用主题色、多探出来一点——一页上只有一处强调色。
+ * 设置里可以换成彩色：每张一个标签色，当前那张探出来、加粗。
  * 点一下跳到那一节。
  */
 export function NoteTabs({
@@ -23,6 +26,7 @@ export function NoteTabs({
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const { t } = useTranslation();
+  const tabStyle = useNotePaper((state) => state.tabStyle);
   const [sections, setSections] = useState<Section[]>([]);
   const [active, setActive] = useState(0);
 
@@ -86,7 +90,7 @@ export function NoteTabs({
   const chars = Math.max(1, Math.min(4, Math.floor((tabHeight - 10) / 11.5)));
   return (
     <nav className="ca-note-tabs" aria-label={t("notes.tabs")}>
-      <div className="ca-note-tabs-rail" style={{ "--tab-h": `${tabHeight}px` } as React.CSSProperties}>
+      <div className="ca-note-tabs-rail" data-style={tabStyle} style={{ "--tab-h": `${tabHeight}px` } as React.CSSProperties}>
         {sections.map((section, i) => {
           return (
             <button
@@ -95,6 +99,13 @@ export function NoteTabs({
               className="ca-note-tab"
               aria-current={i === active ? "location" : undefined}
               title={section.text}
+              // 彩色样式用：每张一个标签色，按顺序循环。单色样式里这两个变量不用。
+              style={
+                {
+                  "--tab-bg": `var(--tag-${COURSE_COLORS[i % COURSE_COLORS.length]}-bg)`,
+                  "--tab-ink": `var(--tag-${COURSE_COLORS[i % COURSE_COLORS.length]}-text)`,
+                } as React.CSSProperties
+              }
               onClick={() => section.el.scrollIntoView({ behavior: "smooth", block: "start" })}
             >
               {/[\u3400-\u9fff]/.test(section.text) ? (

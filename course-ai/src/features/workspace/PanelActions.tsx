@@ -12,7 +12,7 @@ export const panelActionButtonClass =
   "ca-touch-44 ca-workbench-touch grid h-8 w-8 place-items-center rounded-md text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 
 /** 标题条里的同款按钮：不带浮起的边框与阴影，只是一个安静的图标。 */
-const inlineActionButtonClass =
+export const inlineActionButtonClass =
   "ca-touch-44 grid h-7 w-7 place-items-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 
 export function PanelActions({
