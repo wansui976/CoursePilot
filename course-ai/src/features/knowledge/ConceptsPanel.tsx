@@ -21,14 +21,11 @@ import {
   Check,
   ChevronDown,
   FileText,
-  Layers,
-  Lightbulb,
   MessageCircle,
   Mic,
   Play,
   RefreshCw,
   Search,
-  Video,
   Wand2,
   X,
 } from "lucide-react";
@@ -796,7 +793,7 @@ export function ConceptsPanel({
           ref={mainScrollRef}
           className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7 sm:py-6"
         >
-        <main className="mx-auto max-w-3xl space-y-6">
+        <main className="mx-auto w-full max-w-[860px] space-y-6">
           <p className="sr-only" aria-live="polite">
             {announcement || recoveredAnnouncement}
           </p>
@@ -888,14 +885,14 @@ export function ConceptsPanel({
             <>
               <section
                 aria-labelledby="course-knowledge-overview"
-                className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
+                className="ca-kn-overview overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]"
               >
                 <div className="p-4 sm:p-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2
                         id="course-knowledge-overview"
-                        className="text-base font-semibold text-[var(--text-strong)]"
+                        className="ca-kn-heading"
                       >
                         {t("concepts.courseOverview")}
                       </h2>
@@ -954,27 +951,24 @@ export function ConceptsPanel({
                   </div>
                 </div>
 
-                <dl className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] border-t border-[var(--border-subtle)] bg-[var(--surface-panel)]">
+                <dl className="ca-kn-stats grid grid-cols-3 divide-x divide-[var(--border-subtle)] border-t border-[var(--border-subtle)]">
                   <div className="min-w-0 px-4 py-3.5">
-                    <dt className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                      <Layers aria-hidden="true" className="h-3.5 w-3.5 text-[var(--text-faint)]" />
+                    <dt>
                       {t("concepts.topicsLabel")}
                     </dt>
-                    <dd className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">{topicCount}</dd>
+                    <dd>{topicCount}</dd>
                   </div>
                   <div className="min-w-0 px-4 py-3.5">
-                    <dt className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                      <Lightbulb aria-hidden="true" className="h-3.5 w-3.5 text-[var(--text-faint)]" />
+                    <dt>
                       {t("concepts.conceptsLabel")}
                     </dt>
-                    <dd className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-strong)]">{allConcepts.length}</dd>
+                    <dd>{allConcepts.length}</dd>
                   </div>
                   <div className="min-w-0 px-4 py-3.5">
-                    <dt className="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-                      <Video aria-hidden="true" className="h-3.5 w-3.5 text-[var(--text-faint)]" />
+                    <dt>
                       {t("concepts.coveredVideos")}
                     </dt>
-                    <dd className="mt-1 truncate text-lg font-semibold tabular-nums text-[var(--text-strong)]">
+                    <dd className="truncate">
                       {/* 知识点真正出自几个视频。不用 covered_videos（那是「有字幕的视频数」）：
                           否则这里写 7/8，下面又说 5 个视频还没出现在知识点里，自相矛盾。 */}
                       {analyzedVideos}/{knowledge?.total_videos ?? 0}
@@ -984,14 +978,8 @@ export function ConceptsPanel({
               </section>
 
               {/* 「下一步」行动条：全页唯一的主动作。只靠行尾的主按钮突出，不再整块铺强调底色。 */}
-              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
-                <span className="flex h-9 w-9 flex-none items-center justify-center rounded-md bg-[var(--surface-card-hover)] text-[var(--text-muted)]">
-                  {nextReview ? (
-                    <Brain aria-hidden="true" className="h-4 w-4" />
-                  ) : (
-                    <Play aria-hidden="true" className="h-4 w-4" />
-                  )}
-                </span>
+              <div className="ca-kn-next flex flex-wrap items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-4 py-3">
+
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-[var(--text-muted)]">{t("concepts.nextStep")}</p>
                   {dueCountsPending ? (
@@ -1085,18 +1073,13 @@ export function ConceptsPanel({
                   aria-label={t("concepts.topicNav")}
                   className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
-                  {groups.map(({ group, colorIndex }, index) => (
+                  {groups.map(({ group }, index) => (
                     <button
                       key={`${index}-${group.title}`}
                       type="button"
                       onClick={() => scrollToTopic(index)}
-                      className="inline-flex flex-none items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-normal)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-strong)]"
+                      className="inline-flex flex-none items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-normal)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-strong)]"
                     >
-                      <span
-                        aria-hidden="true"
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ background: `var(--topic-${colorIndex % TOPIC_COLOR_COUNT})` }}
-                      />
                       <span className="max-w-36 truncate">{group.title}</span>
                       <span className="tabular-nums text-[var(--text-faint)]">{group.concepts.length}</span>
                     </button>
@@ -1121,16 +1104,15 @@ export function ConceptsPanel({
                       style={{ "--topic-color": `var(--topic-${colorIndex % TOPIC_COLOR_COUNT})` } as CSSProperties}
                     >
                       <div className="mb-2 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <h2
                             id={`knowledge-topic-${index}`}
-                            className="flex items-center gap-2 text-sm font-semibold text-[var(--text-strong)]"
+                            className="ca-kn-topic"
                           >
-                            <span aria-hidden="true" className="h-2 w-2 flex-none rounded-full bg-[var(--topic-color)]" />
                             {highlightQuery(group.title, query)}
                           </h2>
                           {group.summary && (
-                            <p className="mt-1 pl-4 text-xs leading-5 text-[var(--text-muted)]">
+                            <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                               {highlightQuery(group.summary, query)}
                             </p>
                           )}
@@ -1146,10 +1128,7 @@ export function ConceptsPanel({
                           const due = dueCountByConcept.get(concept.id) ?? 0;
                           const detailId = `concept-detail-${concept.id}`;
                           return (
-                            <li
-                              key={concept.id}
-                              className="shadow-[inset_3px_0_0_0_var(--topic-color)]"
-                            >
+                            <li key={concept.id}>
                               <div className="flex min-w-0 items-stretch gap-1 pr-2">
                                 <button
                                   type="button"
@@ -1157,11 +1136,11 @@ export function ConceptsPanel({
                                   aria-expanded={isExpanded}
                                   aria-controls={detailId}
                                   className={`flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left transition hover:bg-[var(--surface-card-hover)] ${
-                                    isExpanded ? "bg-[var(--accent-weak)]" : ""
+                                    isExpanded ? "bg-[var(--surface-card-active)]" : ""
                                   }`}
                                 >
                                   <span className="min-w-0 flex-1">
-                                    <span className="flex flex-wrap items-center gap-x-1.5 break-words text-sm font-medium text-[var(--text-strong)]">
+                                    <span className="ca-kn-concept flex flex-wrap items-center gap-x-1.5 break-words">
                                       {highlightQuery(concept.name, query)}
                                       {mastered.has(`concept:${concept.id}`) && (
                                         <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--status-ok-bg)] px-1.5 ca-t-2xs font-medium text-[var(--status-ok)]">

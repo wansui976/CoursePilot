@@ -1774,7 +1774,7 @@ button.ca-time:hover {
 
 .ca-book {
   width: 100%;
-  max-width: 1040px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 20px 28px 40px;
   display: flex;
@@ -1848,7 +1848,8 @@ button.ca-time:hover {
   display: block;
   height: 100%;
   width: calc(var(--r) * 100%);
-  background: var(--marker-strong);
+  /* 记得多少：粉笔白（黄色只给用户自己的高亮和播放头）。 */
+  background: var(--chalk);
 }
 
 /* 褪色：去饱和，贴一张「该复习了」小标签。 */
@@ -1862,8 +1863,9 @@ button.ca-time:hover {
   top: 8px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: var(--marker-strong);
-  color: #1b1f1d;
+  /* 一小条粉笔白的纸签（不用荧光黄：黄色只给用户自己的高亮和播放头）。 */
+  background: var(--chalk);
+  color: var(--board);
   font-size: 10.5px;
   font-weight: 600;
 }
@@ -2391,4 +2393,80 @@ button.ca-time:hover {
 
 .ca-note-tabs + .ca-paper-sheet .ca-pencil-margin {
   right: 38px;
+}
+
+/* ===================== 课程知识 · 知识点 ===================== */
+
+/* 总览：衬线标题，摘要用阅读字体。 */
+.ca-kn-heading {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.ca-kn-overview .ca-reading {
+  font-family: var(--font-reading);
+  font-size: 15.5px;
+  line-height: 1.8;
+  color: var(--text-normal);
+}
+
+/* 统计：和主页统计行同一种写法——小字标签在下，衬线大数字在上，发丝线分隔，不配图标。 */
+.ca-kn-stats > div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  padding: 14px 20px 16px;
+}
+
+.ca-kn-stats dt {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ca-kn-stats dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 500;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--text-strong);
+}
+
+/* 下一步：一条安静的纸条，只靠行尾的主按钮突出。 */
+.ca-kn-next {
+  background: transparent;
+}
+
+/* 主题：衬线小节标题，后面一道发丝线拉到边（和收集册的小节同一个样子）。 */
+.ca-kn-topic {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+
+.ca-kn-topic::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* 知识点名字用衬线。 */
+.ca-kn-concept {
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  line-height: 22px;
+  font-weight: 500;
+  color: var(--text-strong);
 }
