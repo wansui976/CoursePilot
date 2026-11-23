@@ -2314,13 +2314,23 @@ button.ca-time:hover {
   height: var(--tab-h, 44px);
   padding: 4px 0;
   overflow: hidden;
-  border-radius: var(--r-xs) 0 0 var(--r-xs);
-  background: var(--surface-card);
+  /* 一张硬卡纸：露在外面的一边圆角，贴在页边的一边直；纸纹 + 右边一道塞进纸页下面的阴影；
+     每张歪的角度不一样（--tilt，按序号给），像手贴上去的。 */
+  --slip: var(--surface-sidebar);
+  border-radius: 5px 1px 1px 5px;
+  background-color: var(--slip);
+  background-image:
+    linear-gradient(to left, rgb(16 24 20 / 0.12), transparent 6px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.06), transparent 40%),
+    var(--grain-bg);
   color: var(--text-muted);
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  box-shadow:
+    inset 0 0 0 1px var(--border-subtle),
+    -1px 1px 2px rgb(16 24 20 / 0.16);
   font-family: var(--font-app);
   font-size: 10.5px;
-  transform: translateX(4px);
+  transform: translateX(4px) rotate(var(--tilt, 0deg));
+  transform-origin: right center;
   transition: transform 0.15s var(--ease-out);
 }
 
@@ -2346,7 +2356,7 @@ button.ca-time:hover {
 
 .ca-note-tab:hover,
 .ca-note-tab[aria-current] {
-  transform: translateX(0);
+  transform: translateX(0) rotate(var(--tilt, 0deg));
 }
 
 .ca-note-tab:hover {
@@ -2356,7 +2366,7 @@ button.ca-time:hover {
 /* 当前小节：主题色淡底、主题色字，探出来、宽一点。整页只有这一张有颜色。 */
 .ca-note-tab[aria-current] {
   width: 26px;
-  background: var(--accent-weak);
+  --slip: var(--accent-weak);
   color: var(--accent-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
   font-weight: 600;
@@ -2365,7 +2375,7 @@ button.ca-time:hover {
 /* 彩色样式：每张纸签一个标签色（淡底 + 同色字），当前那张不换色，只探出来、加粗。 */
 .ca-note-tabs-rail[data-style="color"] .ca-note-tab,
 .ca-note-tabs-rail[data-style="color"] .ca-note-tab[aria-current] {
-  background: var(--tab-bg);
+  --slip: var(--tab-bg);
   color: var(--tab-ink);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tab-ink) 18%, transparent);
 }

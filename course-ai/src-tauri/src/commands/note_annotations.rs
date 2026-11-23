@@ -1,5 +1,5 @@
-//! 铅笔批注：AI 读一遍笔记，在页边用铅笔写几句——哪里漏了、哪里不对、可以再追问什么、
-//! 和前面哪一讲有关。每条批注锚在笔记里一小段原文上（quote），前端把它画在那一行的页边。
+//! 铅笔批注：AI 读一遍笔记，在页边用铅笔写几句补充和小结——这里漏了什么、这一段的要点是什么、
+//! 和前面哪一讲有关。只用陈述句，不提问（问句会被丢掉）。每条批注锚在笔记里一小段原文上（quote），前端把它画在那一行的页边。
 //! 批注不改笔记原文；擦掉就是删这一条。
 
 use crate::commands::courses::AppState;
@@ -50,6 +50,9 @@ pub fn parse_annotations(content: &str, markdown: &str) -> AppResult<Vec<(String
             || note.is_empty()
             || note.chars().count() > MAX_NOTE_CHARS
             || note.chars().any(char::is_control)
+            // 批注是补充和小结，不是提问：带问号的一律不要。
+            || note.contains('？')
+            || note.contains('?')
             || !haystack.contains(&quote_plain)
             || out.iter().any(|(q, _)| plain(q) == quote_plain)
         {
@@ -67,11 +70,12 @@ fn annotate_request(model: &str, title: &str, markdown: &str) -> ChatRequest {
     let notes: String = markdown.chars().take(MAX_INPUT_CHARS).collect();
     let user = format!(
         "这一讲：{title}\n\n学生的笔记：\n{notes}\n\n\
-         你是认真的助教，用铅笔在这份笔记的页边写批注。只输出 JSON 数组，不要代码围栏：\n\
+         你是认真的助教，用铅笔在这份笔记的页边写批注，给这份笔记做补充和小结。只输出 JSON 数组，不要代码围栏：\n\
          [{{\"quote\": 笔记里一字不差的一小段原文（2 到 20 个字，用来定位写在哪一行旁边）, \
          \"note\": 批注（不超过 30 个字）}}]\n\
-         1. 写 2 到 6 条，只写真正有用的：漏了的关键条件、说错或说得不准的地方、值得追问的「为什么」、和别的概念的联系。\n\
-         2. 语气像老师在页边随手写的：短、具体，可以用问句。不要夸奖，不要复述笔记。\n\
+         1. 写 2 到 6 条，只写两种：补充（这里漏掉的关键条件、前提、易错点、和别的概念的联系，直接把要补的内容写出来）\
+            和小结（用一句话把这一段的要点归纳出来）。\n\
+         2. 一律用陈述句，直接给出内容。不要提问、不要反问、不要「想一想……」「为什么……」，不要夸奖，不要照抄笔记原句。\n\
          3. quote 必须照抄笔记原文，不要改字、不要加省略号。\n\
          4. 笔记已经很好就少写，可以输出 []。"
     );
@@ -203,7 +207,8 @@ mod tests {
     fn keeps_only_anchored_short_annotations() {
         let markdown = "## 学习率\n- **太大**：在谷底两侧来回震荡\n- 太小：收敛很慢";
         let content = r#"[
-          {"quote":"在谷底两侧来回震荡","note":"为什么会震荡？画一下等高线。"},
+          {"quote":"在谷底两侧来回震荡","note":"步长越过谷底，在两侧来回跳。"},
+          {"quote":"太小：收敛很慢","note":"为什么会慢？"},
           {"quote":"太大：在谷底","note":"跨过加粗记号也能锚上"},
           {"quote":"笔记里没有这句话","note":"锚不上，丢掉"},
           {"quote":"太小：收敛很慢","note":"这一条批注写得实在太长了，远远超过了页边能写下的四十个字的限制，所以应该被丢掉才对"},
@@ -212,6 +217,8 @@ mod tests {
         let items = parse_annotations(content, markdown).unwrap();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].0, "在谷底两侧来回震荡");
+        // 问句（「为什么会慢？」）不算批注。
+        assert!(items.iter().all(|(_, note)| !note.contains('？')));
     }
 
     #[tokio::test]

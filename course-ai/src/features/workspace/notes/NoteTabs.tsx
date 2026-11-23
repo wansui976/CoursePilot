@@ -104,6 +104,8 @@ export function NoteTabs({
                 {
                   "--tab-bg": `var(--tag-${COURSE_COLORS[i % COURSE_COLORS.length]}-bg)`,
                   "--tab-ink": `var(--tag-${COURSE_COLORS[i % COURSE_COLORS.length]}-text)`,
+                  // 每张纸签歪得不一样，像手贴的：-0.8° 到 0.8° 之间，按序号固定。
+                  "--tilt": `${(((i * 37) % 9) - 4) * 0.2}deg`,
                 } as React.CSSProperties
               }
               onClick={() => section.el.scrollIntoView({ behavior: "smooth", block: "start" })}

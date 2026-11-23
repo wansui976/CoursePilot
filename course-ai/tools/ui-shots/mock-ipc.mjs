@@ -87,8 +87,8 @@ export function installMockIpc({ theme, safeArea }) {
   }
 
   const pencilNotes = [
-    { id: "p1", quote: "负梯度", note: "为什么是负梯度？梯度指向增长最快的方向。", created_at: now },
-    { id: "p2", quote: "在谷底两侧来回震荡", note: "画一张等高线图，看步子怎么跨过谷底。", created_at: now },
+    { id: "p1", quote: "负梯度", note: "梯度指向增长最快的方向，所以取负号往下走。", created_at: now },
+    { id: "p2", quote: "在谷底两侧来回震荡", note: "步长越过谷底，在两侧来回跳；小结：步长要和坡度匹配。", created_at: now },
     { id: "p3", quote: "学习率衰减", note: "常见几种：step、cosine、warmup——第 5 讲会讲。", created_at: now },
   ];
 
