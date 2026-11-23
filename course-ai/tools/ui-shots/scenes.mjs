@@ -124,6 +124,30 @@ export const scenes = [
     },
   },
   {
+    // 窄一点的窗口（侧栏展开）：课桌两栏、牌堆上下排，笔记本封面在上。
+    name: "home-desk-narrow",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-many-courses", "1");
+        localStorage.setItem("course-ai-home-layout", "desk");
+        localStorage.setItem("course-ai-weather-place", JSON.stringify({ name: "武汉", region: "中国", latitude: 30.59, longitude: 114.31 }));
+        localStorage.setItem("__shot-weather", "cloudy");
+      });
+      for (const width of [1000, 1240]) {
+        await page.setViewportSize({ width, height: 760 });
+        await page.clock.setFixedTime(new Date(2026, 10, 23, 21, 0));
+        await page.reload({ waitUntil: "networkidle" });
+        await page.locator(".ca-desk-surface").first().waitFor();
+        await page.waitForTimeout(400);
+        await shot(String(width));
+        await page.locator(".ca-desk-deck").scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+        await shot(`${width}-deck`);
+      }
+    },
+  },
+  {
     // 窗外的四季和月相：春、夏、秋、冬的白天，和几个夜晚的月亮（新月后、上弦、满月、下弦）。
     name: "home-desk-seasons",
     devices: ["desktop"],

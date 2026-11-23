@@ -77,6 +77,8 @@ export function CourseDeck({
   const ratio = total > 0 ? done / total : 0;
 
   return (
+    // 外面这层是容器查询的参照：牌堆按自己拿到的宽度决定左右排还是上下排。
+    <div className="ca-deck-wrap">
     <div className="ca-deck">
       <div
         className="ca-deck-stack"
@@ -172,6 +174,7 @@ export function CourseDeck({
           </Button>
         </div>
       </div>
+    </div>
     </div>
   );
 }

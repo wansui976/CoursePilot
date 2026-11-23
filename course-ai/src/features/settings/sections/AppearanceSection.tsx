@@ -13,6 +13,7 @@ import { DENSITIES, useDensity } from "@/stores/density";
 import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
 import { NOTE_PAPERS, useNotePaper } from "@/stores/notePaper";
 import { WeatherPlaceRow } from "./WeatherPlaceRow";
+import { PaperSwatch } from "./PaperSwatch";
 import { useFeedbackPrefs, type SoundLevel } from "@/lib/feedback";
 import { Switch } from "@/ui/switch";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
@@ -309,7 +310,7 @@ export function AppearanceSection() {
                     : "border-[var(--border-subtle)] text-[var(--text-muted)] hover:border-[var(--border-strong)]"
                 }`}
               >
-                <span className="ca-paper-swatch" data-paper={option} aria-hidden="true" />
+                <PaperSwatch paper={option} />
                 <span className="px-1">{t(`settings.appearance.notePapers.${option}`)}</span>
               </button>
             ))}

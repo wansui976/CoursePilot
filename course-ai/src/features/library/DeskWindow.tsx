@@ -67,7 +67,8 @@ export function DeskWindow({
           {/* 阴天一层灰：天色还在，只是蒙上了。 */}
           {grey && <rect x="0" y="0" width="200" height="140" fill="var(--overcast)" opacity={night ? 0.35 : 0.55} />}
           {(condition === "cloudy" || (part === "day" && condition === "clear")) && (
-            <g fill="var(--cloud)" opacity="0.9" data-clouds="">
+            // 夜里的云是暗的：白云贴在夜空上很突兀。
+            <g fill={night ? "var(--cloud-dark)" : "var(--cloud)"} opacity={night ? 0.45 : 0.9} data-clouds="">
               <ellipse cx="128" cy="40" rx="20" ry="7" />
               <ellipse cx="142" cy="35" rx="12" ry="7" />
               {condition === "cloudy" && (
