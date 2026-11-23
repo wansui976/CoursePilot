@@ -233,7 +233,7 @@ export function ProgressBar({
             aria-label={t("videoPlayer.danmakuPeak", { time: formatMs(peak.ms) })}
             title={`${formatMs(peak.ms)} · ${t("videoPlayer.danmakuCount", { count: peak.count })}`}
             onClick={() => onSeek(peak.ms)}
-            className="absolute z-[1] h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 ring-1 ring-black/30 transition-transform hover:scale-150"
+            className="ca-hit-expand absolute z-[1] h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/90 ring-1 ring-black/30 transition-transform hover:scale-150"
             // 曲线占轨道上方 12px（顶边在命中区 -3px 处），圆点落在该处曲线高度上。
             style={{ left: `${pct(peak.ms)}%`, top: `${-3 + (1 - peak.level) * 12}px` }}
           />

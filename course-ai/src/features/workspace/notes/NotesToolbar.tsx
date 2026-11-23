@@ -219,7 +219,7 @@ export function NotesToolbar({
 
   return (
     <>
-      <div role="toolbar" aria-label={t("notesToolbar.label")} className="flex min-w-0 flex-1 items-center">
+      <div role="toolbar" aria-label={t("notesToolbar.label")} className="ca-notes-format flex min-w-0 flex-1 items-center">
       {/* 放不下时（手机竖屏）横向滑动；「更多」菜单在滑动区外面，弹出时不会被裁掉。 */}
       <div className="ca-notes-toolbar flex min-w-0 items-center gap-0.5 overflow-x-auto">
         <GhostSelect

@@ -5,9 +5,9 @@
 /* 底栏高度：竖屏 56；横屏手机（矮于 500）屏幕本来就矮，图标和字并排成一行、只要 44，
    内容区、助手入口、后台任务胶囊都按这个变量让开。 */
 :root {
-  --tab-h: 56px;
+  --bottom-tab-h: 56px;
   /* 助手浮球离底：竖屏浮在底栏上方。 */
-  --fab-bottom: calc(var(--tab-h) + var(--safe-bottom) + 16px);
+  --fab-bottom: calc(var(--bottom-tab-h) + var(--safe-bottom) + 16px);
 }
 
 /* 底部主导航 */
@@ -30,7 +30,7 @@
 .ca-bottom-tab-btn {
   flex: 1 1 0;
   min-width: 0;
-  min-height: var(--tab-h);
+  min-height: var(--bottom-tab-h);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -72,7 +72,7 @@
 
 /* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
 .ca-app[data-shell="stacked"][data-view="library"] .ca-main {
-  padding-bottom: calc(var(--tab-h) + var(--safe-bottom));
+  padding-bottom: calc(var(--bottom-tab-h) + var(--safe-bottom));
 }
 
 /* 整屏课程列表(CourseSidebar variant="screen") */
@@ -259,7 +259,7 @@
 /* 横屏手机的矮底栏（写在基础规则之后才能覆盖）。 */
 @media (orientation: landscape) and (max-height: 500px) {
   :root {
-    --tab-h: 44px;
+    --bottom-tab-h: 44px;
     /* 横屏底栏的 Tab 收在中间、两边空着：浮球落进底栏右端，不再压在内容上。 */
     --fab-bottom: var(--safe-bottom);
   }

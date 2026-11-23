@@ -256,8 +256,20 @@ function auditLayout() {
       const rect = el.getBoundingClientRect();
       if (rect.width <= 1 || rect.height <= 1) continue;
       if (el.closest("[hidden], [inert], [aria-hidden='true']")) continue;
-      if (getComputedStyle(el).visibility === "hidden") continue;
-      if (rect.width < 28 && rect.height < 28) {
+      const style = getComputedStyle(el);
+      if (style.visibility === "hidden" || style.opacity === "0") continue;
+      // 用伪元素向外扩了点按区域的（.ca-hit-expand 等）按扩过的大小算。
+      const after = getComputedStyle(el, "::after");
+      const grow = after.content !== "none" && after.position === "absolute" ? -2 * parseFloat(after.top) || 0 : 0;
+      // 勾选框包在 label 里时，label（连同它向外扩的伪元素）才是点按区。
+      const label = el.closest("label");
+      if (label) {
+        const box = label.getBoundingClientRect();
+        const la = getComputedStyle(label, "::after");
+        const lg = la.content !== "none" && la.position === "absolute" ? -2 * parseFloat(la.top) || 0 : 0;
+        if (box.width + lg >= 28 || box.height + lg >= 28) continue;
+      }
+      if (rect.width + grow < 28 && rect.height + grow < 28) {
         issues.push(`${describe(el)} 点按目标太小（${Math.round(rect.width)}×${Math.round(rect.height)}）`);
       }
     }
@@ -612,7 +624,7 @@ try {
           await page.goto(BASE, { waitUntil: "networkidle" });
           await scene.run({ page, shot, device, kind: DEVICES[device].kind, theme, out: opts.out });
         } catch (error) {
-          failures.push(`${device}/${theme}/${scene.name}: ${String(error).split("\n").slice(0, 4).join(" | ")}`);
+          failures.push(`${device}/${theme}/${scene.name}: ${String(error).split("\n").slice(0, 14).join(" | ")}`);
         }
         for (const cmd of (await page.evaluate(() => window.__unknownCmds ?? []).catch(() => []))) unknownCmds.add(cmd);
         await context.close();

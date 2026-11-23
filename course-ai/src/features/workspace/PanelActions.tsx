@@ -43,7 +43,7 @@ export function PanelActions({
     >
       {leading}
       {exportItems.length > 0 && (
-        <ExportMenu items={exportItems} icon placement="up" />
+        <ExportMenu items={exportItems} icon placement={inline ? "down" : "up"} />
       )}
       {onRegenerate && (
         <button

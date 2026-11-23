@@ -97,6 +97,8 @@ export function NoteTabs({
               key={`${i}-${section.text}`}
               type="button"
               className="ca-note-tab"
+              // 硬卡纸的纸纹是渐变画的，属于固定几处实物质感之一。
+              data-allow-gradient=""
               aria-current={i === active ? "location" : undefined}
               title={section.text}
               // 彩色样式用：每张一个标签色，按顺序循环。单色样式里这两个变量不用。

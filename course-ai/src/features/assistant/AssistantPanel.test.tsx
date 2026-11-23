@@ -2532,7 +2532,7 @@ describe("AssistantPanel", () => {
     const panel = screen.getByRole("dialog", { name: "AI 助手" });
     expect(screen.queryByRole("button", { name: "拖动 AI 助手面板" })).not.toBeInTheDocument();
     expect(panel).toHaveClass("inset-x-0", "h-[70dvh]");
-    expect(panel.getAttribute("style")).toContain("bottom: calc(var(--tab-h)");
+    expect(panel.getAttribute("style")).toContain("bottom: calc(var(--bottom-tab-h)");
   });
 
   it("工作台收起助手时避开面板右下角操作轨道", () => {

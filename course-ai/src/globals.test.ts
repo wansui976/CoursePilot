@@ -186,7 +186,7 @@ describe("窄屏 shell 的响应式约束", () => {
 
     expect(shell).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)/);
     expect(main).toMatch(/var\(--safe-top\)/);
-    expect(bottomInset).toMatch(/var\(--tab-h\)\s*\+\s*var\(--safe-bottom\)/);
+    expect(bottomInset).toMatch(/var\(--bottom-tab-h\)\s*\+\s*var\(--safe-bottom\)/);
     expect(stackedWorkbench).toMatch(/display:\s*flex/);
     expect(stackedWorkbench).toMatch(/flex-direction:\s*column/);
     expect(css).toMatch(

@@ -261,3 +261,30 @@
 .tiptap-notes ul[data-type="taskList"] li > div > p {
   margin: 0;
 }
+
+/* 笔记面板窄（手机竖屏、桌面上被拉窄的学习面板）时，格式条和右边那排操作挤不进一行：
+   操作有六七个，格式条被压成 0 宽，按钮叠在一起点不到，导出菜单也被裁掉。
+   窄时拆成两行：上行是格式条（放不下照旧横滑），下行左边保存状态、右边操作。 */
+.ca-notes-root {
+  container: notes / inline-size;
+}
+
+@container notes (max-width: 520px) {
+  .ca-notes-bar {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .ca-notes-bar > .ca-notes-format {
+    flex: 1 0 100%;
+  }
+
+  .ca-notes-bar > .ca-notes-status {
+    margin-right: auto;
+    padding-left: 6px;
+  }
+
+  .ca-notes-bar > .ca-notes-bar-rule {
+    display: none;
+  }
+}

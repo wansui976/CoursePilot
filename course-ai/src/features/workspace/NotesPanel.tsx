@@ -451,7 +451,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
       ref={rootRef}
       data-notes-root=""
       {...(showTimestamps ? {} : { "data-hide-timestamps": "" })}
-      className="relative flex h-full flex-col"
+      className="ca-notes-root relative flex h-full flex-col"
     >
       {(writeState.status === "error" ||
         (!notesQuery.isPending && !notesQuery.isError)) && (
@@ -479,7 +479,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
               role="status"
               aria-live="polite"
               aria-atomic="true"
-              className={`flex-none text-xs ${
+              className={`ca-notes-status flex-none text-xs ${
                 writeState.status === "error"
                   ? "text-[var(--status-err)]"
                   : "text-[var(--text-faint)]"
@@ -489,7 +489,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
             </span>
             {/* 记一笔、历史、铅笔批注、时间戳、导出、重新生成：放在格式条最右边，
                 不再悬浮在右下角压住正文和侧边索引标签。 */}
-            <span aria-hidden="true" className="h-4 w-px flex-none bg-[var(--border-subtle)]" />
+            <span aria-hidden="true" className="ca-notes-bar-rule h-4 w-px flex-none bg-[var(--border-subtle)]" />
             <PanelActions
               inline
               leading={

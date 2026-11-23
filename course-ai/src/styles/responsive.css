@@ -327,6 +327,39 @@
     inset: -8px;
   }
 
+  /* 设置里的「ⓘ」、引导气泡的关闭、进度条上的弹幕高峰点：看上去还是小的，
+     点按区域用伪元素向外扩，手指点得准（四周都有留白，扩出去不碰邻键）。 */
+  /* .ca-hit-expand 用在本身已绝对定位的元素上，不能在这里改成 relative。 */
+  .ca-hint-button,
+  .ca-tour-close {
+    position: relative;
+  }
+
+  .ca-hint-button::after,
+  .ca-tour-close::after,
+  .ca-hit-expand::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
+  }
+
+  /* 笔记里的待办勾选框：浏览器默认 13～15px，手指很难点中。放大到 18px，外面的 label
+     再往外扩一圈当点按区。 */
+  .tiptap-notes ul[data-type="taskList"] li > label {
+    position: relative;
+  }
+
+  .tiptap-notes ul[data-type="taskList"] li > label::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+
+  .tiptap-notes ul[data-type="taskList"] input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+
   /* 学习工作台里的小图标按钮：触屏下再放大一档，避免只点到图标边缘。 */
   .ca-workbench-touch {
     min-width: 48px;
