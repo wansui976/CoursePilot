@@ -2065,8 +2065,9 @@ button.ca-time:hover {
    用在笔记编辑器外面那层，也用在设置里的小样上。 */
 .ca-paper-sheet,
 .ca-paper-swatch {
-  --rule: var(--border-faint);
-  --rule-strong: var(--border-subtle);
+  /* 格线要看得见：最淡的 --border-faint 在纸色上几乎是白的，正常屏幕上等于没画。 */
+  --rule: var(--border-subtle);
+  --rule-strong: var(--border-strong);
   --pitch: calc(0.9rem * var(--reading-scale, 1) * 1.7);
   min-height: 100%;
 }
@@ -2103,23 +2104,26 @@ button.ca-time:hover {
   background-position: 16px calc(16px - 1px);
 }
 
-/* 米字格：两行一格，外框实线，中间十字和两条对角虚一点（用更淡的线代替虚线）。 */
+/* 米字格：两行一格，外框实线，中间十字和两条对角淡一档（代替虚线）。 */
 .ca-paper-sheet[data-paper="mi"],
 .ca-paper-swatch[data-paper="mi"] {
   --cell: calc(var(--pitch) * 2);
-  --rule: color-mix(in srgb, var(--border-faint) 55%, transparent);
+  --rule-soft: color-mix(in srgb, var(--rule) 60%, transparent);
   background-image:
     linear-gradient(transparent calc(var(--cell) - 1px), var(--rule-strong) calc(var(--cell) - 1px)),
     linear-gradient(90deg, transparent calc(var(--cell) - 1px), var(--rule-strong) calc(var(--cell) - 1px)),
-    linear-gradient(transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
-    linear-gradient(90deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
-    linear-gradient(45deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
-    linear-gradient(-45deg, transparent calc(50% - 0.5px), var(--rule) calc(50% - 0.5px), var(--rule) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+    linear-gradient(transparent calc(50% - 0.5px), var(--rule-soft) calc(50% - 0.5px), var(--rule-soft) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(90deg, transparent calc(50% - 0.5px), var(--rule-soft) calc(50% - 0.5px), var(--rule-soft) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(45deg, transparent calc(50% - 0.5px), var(--rule-soft) calc(50% - 0.5px), var(--rule-soft) calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+    linear-gradient(-45deg, transparent calc(50% - 0.5px), var(--rule-soft) calc(50% - 0.5px), var(--rule-soft) calc(50% + 0.5px), transparent calc(50% + 0.5px));
   background-size: var(--cell) var(--cell);
   background-position: 16px 16px;
 }
 
 .ca-paper-swatch {
+  /* 小样只有 44px 高，格线再深一档才认得出是哪种纸。 */
+  --rule: var(--border-strong);
+  --rule-strong: color-mix(in srgb, var(--text-faint) 70%, transparent);
   display: block;
   height: 44px;
   min-height: 0;
