@@ -2580,11 +2580,10 @@
   "cover": {
     "menu": "Cover…",
     "title": "Cover for “{{course}}”",
-    "sourceAi": "AI chose “{{kind}}”. Pick a board to change it; the AI won't override your choice.",
-    "sourceUser": "You chose “{{kind}}”.",
+    "sourceAi": "AI picked “{{kind}}” automatically. Pick a board to change it; your choice syncs to your other devices.",
+    "sourceUser": "Set to “{{kind}}”. This syncs to your other devices and the AI won't change it.",
     "sourceGuess": "Not judged by AI yet; guessed from keywords in the course name.",
     "optionsLabel": "Cover styles",
-    "reset": "Back to automatic",
     "rejudge": "Ask AI again",
     "judging": "Judging…",
     "kinds": {

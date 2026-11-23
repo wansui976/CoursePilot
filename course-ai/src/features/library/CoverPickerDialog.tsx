@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Sparkles, Undo2 } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { DRAWN_KINDS, type CourseCover, type CoverKind } from "@/lib/coverKind";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
@@ -12,8 +12,8 @@ import { Modal } from "@/ui/dialog";
 import { ErrorNote } from "@/ui/ErrorNote";
 
 /**
- * 选一门课的黑板封面：现成的学科图、AI 画的图（有的话）、通用黑板，
- * 或者让 AI 重新判断、恢复自动。手动选过的 AI 不会再改。
+ * 选一门课的黑板封面：现成的学科图、AI 画的图（有的话）、通用黑板，或者让 AI 重新判断。
+ * 在这里做的选择会同步到其它设备；AI 自动判断的结果不会盖掉它。
  */
 export function CoverPickerDialog({ course, onClose }: { course: Course; onClose: () => void }) {
   const { t } = useTranslation();
@@ -21,15 +21,15 @@ export function CoverPickerDialog({ course, onClose }: { course: Course; onClose
   const { data: covers } = useCourseCovers();
   const saved = covers?.get(course.id);
 
-  function store(cover: CourseCover | null) {
+  function store(cover: CourseCover) {
     queryClient.setQueryData<CourseCover[]>(qk.courseCovers(), (list = []) => [
       ...list.filter((item) => item.course_id !== course.id),
-      ...(cover ? [cover] : []),
+      cover,
     ]);
   }
 
   const choose = useMutation({
-    mutationFn: (kind: CoverKind | null) => ipc.courses.setCoverKind(course.id, kind),
+    mutationFn: (kind: CoverKind) => ipc.courses.setCoverKind(course.id, kind),
     onSuccess: (cover) => {
       store(cover);
       onClose();
@@ -86,12 +86,6 @@ export function CoverPickerDialog({ course, onClose }: { course: Course; onClose
         ))}
       </ul>
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-        {saved && (
-          <Button variant="ghost" size="sm" disabled={choose.isPending} onClick={() => choose.mutate(null)}>
-            <Undo2 />
-            {t("cover.reset")}
-          </Button>
-        )}
         <Button variant="default" size="sm" disabled={rejudge.isPending} onClick={() => rejudge.mutate()}>
           <Sparkles />
           {rejudge.isPending ? t("cover.judging") : t("cover.rejudge")}

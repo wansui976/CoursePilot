@@ -546,8 +546,7 @@ export function installMockIpc({ theme, safeArea }) {
       const kinds = { c1: "ml", c2: "linear", c3: "systems", c4: "economics", c5: "language", c6: "datastruct" };
       return { ...base, kind: kinds[courseId] ?? "generic" };
     },
-    cmd_set_course_cover_kind: ({ courseId, kind }) =>
-      kind ? { course_id: courseId, kind, terms: [], art: null, source: "user", updated_at: now } : null,
+    cmd_set_course_cover_kind: ({ courseId, kind }) => ({ course_id: courseId, kind, terms: [], art: null, source: "user", updated_at: now }),
     cmd_media_url: ({ videoId }) => mediaUrl(videoId),
     // —— 多设备同步 / 局域网直连播放 / 从网盘导入 ——
     cmd_remote_sync_status: () => ({

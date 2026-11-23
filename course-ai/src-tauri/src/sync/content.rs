@@ -34,8 +34,17 @@ const COVER_MAX_BYTES: u64 = 1024 * 1024;
 
 pub const COURSE_KNOWLEDGE: &str = "CourseKnowledge";
 
+/// 课程的黑板封面（AI 判断的学科、关键术语、AI 画的图，或手动选的学科）。
+/// 整条后写胜；AI 自动判断的结果戳是 1（弱），手动选择和「重新判断」用真实时间。
+pub const COURSE_COVER: &str = "CourseCover";
+
+/// 自动判断结果的戳：比任何真实写入都旧，只用来填空白。
+pub const WEAK_STAMP: i64 = 1;
+
 pub fn is_content(record_type: &str) -> bool {
-    record_type == COURSE_KNOWLEDGE || VIDEO_TYPES.iter().any(|(name, _)| *name == record_type)
+    record_type == COURSE_KNOWLEDGE
+        || record_type == COURSE_COVER
+        || VIDEO_TYPES.iter().any(|(name, _)| *name == record_type)
 }
 
 /// 首次开启同步时要排进出件箱的内容记录：（记录类型, 表, 键列）。
@@ -84,6 +93,30 @@ pub async fn enqueue_snapshot(db: &crate::db::Db) -> AppResult<()> {
         .execute(&mut *tx)
         .await?;
     }
+    // 封面：手动选的用它自己的时间，AI 自动判断的用弱戳——开同步那一刻不能把自动结果变「新」，
+    // 否则会盖掉别的设备上更早手动选好的封面。
+    sqlx::query(
+        "INSERT INTO sync_outbox(record_type,record_id,operation,changed_at)
+         SELECT ?, course_id, 'save', CASE source WHEN 'user' THEN updated_at ELSE ? END FROM course_covers
+         WHERE true
+         ON CONFLICT(record_type,record_id) DO UPDATE SET changed_at=excluded.changed_at,
+           leased_at=NULL, version_counter=NULL, version_device=NULL",
+    )
+    .bind(COURSE_COVER)
+    .bind(WEAK_STAMP)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO sync_content_stamps(record_type,record_id,updated_at,device)
+         SELECT ?, course_id, CASE source WHEN 'user' THEN updated_at ELSE ? END, ? FROM course_covers
+         WHERE true
+         ON CONFLICT(record_type,record_id) DO UPDATE SET updated_at=excluded.updated_at, device=excluded.device",
+    )
+    .bind(COURSE_COVER)
+    .bind(WEAK_STAMP)
+    .bind(&device)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -260,6 +293,18 @@ pub async fn payload(
             };
             json!({"videoID": id, "content": content, "generatedAt": generated_at, "source": source})
         }
+        COURSE_COVER => {
+            let row: Option<(String, String, Option<String>, String)> = sqlx::query_as(
+                "SELECT kind, terms_json, art_json, source FROM course_covers WHERE course_id=?",
+            )
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            let Some((kind, terms, art, source)) = row else {
+                return Ok(None);
+            };
+            json!({"courseID": id, "kind": kind, "termsJson": terms, "artJson": art, "source": source})
+        }
         COURSE_KNOWLEDGE => {
             let concepts: Vec<(String, String, i64, Option<String>, Option<String>)> = sqlx::query_as(
                 "SELECT id,name,created_at,explanation,explanation_source FROM concepts WHERE course_id=? ORDER BY id",
@@ -404,11 +449,12 @@ pub async fn save(
 ) -> AppResult<ContentOutcome> {
     let id = envelope.record_id.as_str();
     let payload = &envelope.payload;
-    let owner_ready = if envelope.record_type == COURSE_KNOWLEDGE {
-        exists(tx, "courses", id).await?
-    } else {
-        exists(tx, "videos", id).await?
-    };
+    let owner_ready =
+        if envelope.record_type == COURSE_KNOWLEDGE || envelope.record_type == COURSE_COVER {
+            exists(tx, "courses", id).await?
+        } else {
+            exists(tx, "videos", id).await?
+        };
     if !owner_ready {
         return Ok(ContentOutcome::Parked);
     }
@@ -511,6 +557,25 @@ pub async fn save(
             .execute(&mut **tx)
             .await?;
             write_source(tx, id, &envelope.record_type, payload.get("source")).await?;
+        }
+        COURSE_COVER => {
+            // 内容在写进来之前再校验一遍：别的设备（或旧版本）送来的东西同样不可信。
+            let Some(cover) = crate::commands::course_covers::validate_synced(payload) else {
+                return Ok(ContentOutcome::Skipped);
+            };
+            sqlx::query(
+                "INSERT INTO course_covers(course_id,kind,terms_json,art_json,source,updated_at) VALUES (?,?,?,?,?,?)
+                 ON CONFLICT(course_id) DO UPDATE SET kind=excluded.kind, terms_json=excluded.terms_json,
+                   art_json=excluded.art_json, source=excluded.source, updated_at=excluded.updated_at",
+            )
+            .bind(id)
+            .bind(&cover.kind)
+            .bind(serde_json::to_string(&cover.terms)?)
+            .bind(cover.art.as_ref().map(serde_json::to_string).transpose()?)
+            .bind(&cover.source)
+            .bind(envelope.updated_at)
+            .execute(&mut **tx)
+            .await?;
         }
         COURSE_KNOWLEDGE => {
             // 知识点 id 跨设备保持不变：费曼复述的记录按「concept:<id>」引用它们。
@@ -617,6 +682,12 @@ pub async fn delete(
                 .execute(&mut **tx)
                 .await?;
             write_source(tx, id, &envelope.record_type, None).await?;
+        }
+        COURSE_COVER => {
+            sqlx::query("DELETE FROM course_covers WHERE course_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
         }
         COURSE_KNOWLEDGE => {
             sqlx::query("DELETE FROM concepts WHERE course_id=?")

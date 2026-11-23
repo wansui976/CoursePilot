@@ -2566,11 +2566,10 @@
   "cover": {
     "menu": "封面…",
     "title": "「{{course}}」的封面",
-    "sourceAi": "AI 判断为「{{kind}}」。点一块黑板改成它，手动选的 AI 不会再改。",
-    "sourceUser": "你选的是「{{kind}}」。",
+    "sourceAi": "AI 自动判断为「{{kind}}」。点一块黑板改成它，你的选择会同步到其它设备。",
+    "sourceUser": "已定为「{{kind}}」，会同步到其它设备，AI 不会再自动改。",
     "sourceGuess": "还没让 AI 判断，现在按课程名里的关键词猜。",
     "optionsLabel": "封面样式",
-    "reset": "恢复自动",
     "rejudge": "让 AI 重新判断",
     "judging": "判断中…",
     "kinds": {

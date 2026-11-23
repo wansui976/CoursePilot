@@ -53,11 +53,11 @@ export const courses = {
     invoke("cmd_set_course_color", { id, color }),
   /** 存下来的黑板封面（AI 判断的或手动选的）。 */
   covers: (): Promise<CourseCover[]> => invoke("cmd_course_covers"),
-  /** 让 AI 看课程名和视频标题判断封面；已有结果时直接返回，force 时重新判断。 */
+  /** 让 AI 看课程名和视频标题判断封面；已有结果时直接返回。force = 用户要求重新判断，结果算作用户的选择。 */
   classifyCover: (courseId: string, force = false): Promise<CourseCover> =>
     invoke("cmd_classify_course_cover", { courseId, force }),
-  /** 手动选封面学科；null = 清掉，回到自动判断。 */
-  setCoverKind: (courseId: string, kind: CoverKind | null): Promise<CourseCover | null> =>
+  /** 手动选封面学科（会同步到其它设备）。 */
+  setCoverKind: (courseId: string, kind: CoverKind): Promise<CourseCover> =>
     invoke("cmd_set_course_cover_kind", { courseId, kind }),
 };
 

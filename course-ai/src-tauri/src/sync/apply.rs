@@ -1620,6 +1620,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_chosen_cover_beats_an_automatic_one_on_every_device() {
+        use crate::commands::course_covers::{list_covers, set_kind, write_cover};
+        let (db_b, dir_b, incoming_b) = device().await;
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let (course, _video) = seed_video(&db_b, dir_b.path()).await;
+        ship(&db_b, &db_a, &incoming_a).await;
+
+        // A 上手动选了「历史」；B 还不知道，后台 AI 自动判断成「物理」（墙钟更晚也一样）。
+        set_kind(&db_a, &course, "history").await.unwrap();
+        write_cover(&db_b, &course, "physics", &["力".into()], None, true).await.unwrap();
+
+        ship(&db_b, &db_a, &incoming_a).await;
+        ship(&db_a, &db_b, &incoming_b).await;
+
+        for db in [&db_a, &db_b] {
+            let covers = list_covers(db).await.unwrap();
+            assert_eq!(covers.len(), 1);
+            assert_eq!((covers[0].kind.as_str(), covers[0].source.as_str()), ("history", "user"));
+        }
+        assert_eq!(outbox_count(&db_b).await, 0, "收进来的封面不得回声外发");
+    }
+
+    #[tokio::test]
+    async fn an_automatic_cover_fills_a_device_that_has_none() {
+        use crate::commands::course_covers::{list_covers, write_cover};
+        let (db_b, dir_b, _incoming_b) = device().await;
+        let (db_a, _dir_a, incoming_a) = device().await;
+        let (course, _video) = seed_video(&db_b, dir_b.path()).await;
+        write_cover(&db_b, &course, "physics", &[], None, true).await.unwrap();
+        ship(&db_b, &db_a, &incoming_a).await;
+        let covers = list_covers(&db_a).await.unwrap();
+        assert_eq!((covers[0].kind.as_str(), covers[0].source.as_str()), ("physics", "ai"));
+    }
+
+    #[tokio::test]
     async fn rename_is_lww_in_both_directions() {
         let (db_b, dir_b, _) = device().await;
         let (db_a, _dir_a, incoming_a) = device().await;

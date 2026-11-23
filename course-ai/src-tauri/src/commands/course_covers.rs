@@ -5,7 +5,9 @@
 //!   前端用 React 元素逐个画出来，不把模型输出当 HTML/SVG 插进页面。
 //! - 另外给 2～3 个这门课的关键术语，通用黑板上写的就是它们。
 //!
-//! 结果存在本机的 course_covers 表；用户手动选过（source = 'user'）就不再被 AI 覆盖。
+//! 结果存在 course_covers 表，并作为 CourseCover 记录同步到其它设备（整条后写胜）：
+//! - source = 'ai'：AI 自动判断，弱结果，只填空白；
+//! - source = 'user'：手动选的，或用户点了「让 AI 重新判断」——有意的选择，按真实时间同步。
 
 use crate::commands::courses::AppState;
 use crate::db::Db;
@@ -232,34 +234,67 @@ pub async fn list_covers(db: &Db) -> AppResult<Vec<CourseCover>> {
     Ok(rows.into_iter().map(to_cover).collect())
 }
 
-async fn write_cover(
+/// 写一条封面。
+///
+/// - `weak`（AI 自动判断）：只在这门课还没有封面时写入；同一事务里把同步戳和出件时间降成
+///   `WEAK_STAMP`，这样它只填空白，永远赢不了任何一台设备上有意做出的选择。
+/// - 否则（手动选、点了「让 AI 重新判断」）：照常覆盖，触发器记真实时间，按后写胜同步出去。
+pub(crate) async fn write_cover(
     db: &Db,
     course_id: &str,
     kind: &str,
     terms: &[String],
     art: Option<&Vec<Shape>>,
-    source: &str,
+    weak: bool,
 ) -> AppResult<CourseCover> {
     let now = chrono::Utc::now().timestamp_millis();
-    sqlx::query(
+    let source = if weak { "ai" } else { "user" };
+    let sql = if weak {
+        "INSERT INTO course_covers(course_id,kind,terms_json,art_json,source,updated_at) VALUES (?,?,?,?,?,?)
+         ON CONFLICT(course_id) DO NOTHING"
+    } else {
         "INSERT INTO course_covers(course_id,kind,terms_json,art_json,source,updated_at) VALUES (?,?,?,?,?,?)
          ON CONFLICT(course_id) DO UPDATE SET kind=excluded.kind, terms_json=excluded.terms_json,
-           art_json=excluded.art_json, source=excluded.source, updated_at=excluded.updated_at",
-    )
-    .bind(course_id)
-    .bind(kind)
-    .bind(serde_json::to_string(terms)?)
-    .bind(art.map(serde_json::to_string).transpose()?)
-    .bind(source)
-    .bind(now)
-    .execute(&db.pool)
-    .await?;
+           art_json=excluded.art_json, source=excluded.source, updated_at=excluded.updated_at"
+    };
+    let mut tx = db.begin_write().await?;
+    let written = sqlx::query(sql)
+        .bind(course_id)
+        .bind(kind)
+        .bind(serde_json::to_string(terms)?)
+        .bind(art.map(serde_json::to_string).transpose()?)
+        .bind(source)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if weak && written > 0 {
+        let stamp = crate::sync::content::WEAK_STAMP;
+        let record = crate::sync::content::COURSE_COVER;
+        sqlx::query(
+            "UPDATE sync_content_stamps SET updated_at=? WHERE record_type=? AND record_id=?",
+        )
+        .bind(stamp)
+        .bind(record)
+        .bind(course_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE sync_outbox SET changed_at=? WHERE record_type=? AND record_id=?")
+            .bind(stamp)
+            .bind(record)
+            .bind(course_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
     read_cover(db, course_id)
         .await?
         .ok_or_else(|| AppError::Other("封面没有存上".into()))
 }
 
-/// 用 AI 判断一门课的封面。已经有结果时直接返回；force 时重新判断（会覆盖手动选择）。
+/// 用 AI 判断一门课的封面。
+/// 不 force：已有封面直接返回；没有时判断出来作为弱结果写入。
+/// force（用户点了「让 AI 重新判断」）：结果算作用户的选择，覆盖并同步到其它设备。
 pub async fn classify(
     db: &Db,
     provider: &Provider,
@@ -288,25 +323,13 @@ pub async fn classify(
     let req = cover_request(model, &name, &titles);
     let content = provider.complete(&req).await?.content;
     let (kind, terms, art) = parse_cover(&content)?;
-    write_cover(db, course_id, &kind, &terms, art.as_ref(), "ai").await
+    write_cover(db, course_id, &kind, &terms, art.as_ref(), !force).await
 }
 
-/// 手动选学科。None = 清掉，回到自动判断。
-pub async fn set_kind(
-    db: &Db,
-    course_id: &str,
-    kind: Option<String>,
-) -> AppResult<Option<CourseCover>> {
-    let Some(kind) = kind else {
-        sqlx::query("DELETE FROM course_covers WHERE course_id=?")
-            .bind(course_id)
-            .execute(&db.pool)
-            .await?;
-        return Ok(None);
-    };
+/// 手动选学科。选 custom 只能回到 AI 已经画过的那幅。
+pub async fn set_kind(db: &Db, course_id: &str, kind: &str) -> AppResult<CourseCover> {
     let existing = read_cover(db, course_id).await?;
     if kind == "custom" {
-        // 只能回到 AI 已经画过的那幅。
         let Some(prev) = existing.filter(|c| c.art.is_some()) else {
             return Err(AppError::Other("这门课还没有 AI 画的图".into()));
         };
@@ -316,18 +339,71 @@ pub async fn set_kind(
             "custom",
             &prev.terms,
             prev.art.as_ref(),
-            "user",
+            false,
         )
-        .await
-        .map(Some);
+        .await;
     }
-    if kind != "generic" && !KNOWN_KINDS.contains(&kind.as_str()) {
+    if kind != "generic" && !KNOWN_KINDS.contains(&kind) {
         return Err(AppError::Other(format!("未知的封面学科：{kind}")));
     }
-    let (terms, art) = existing.map(|c| (c.terms, c.art)).unwrap_or_default();
-    write_cover(db, course_id, &kind, &terms, art.as_ref(), "user")
-        .await
-        .map(Some)
+    let terms = existing.map(|c| c.terms).unwrap_or_default();
+    // 换成别的学科后，AI 画的图就不要了（选回 custom 时也没得回）。
+    write_cover(db, course_id, kind, &terms, None, false).await
+}
+
+/// 别的设备同步来的封面：同样逐项校验后才写库。
+pub struct SyncedCover {
+    pub kind: String,
+    pub terms: Vec<String>,
+    pub art: Option<Vec<Shape>>,
+    pub source: String,
+}
+
+pub fn validate_synced(payload: &serde_json::Value) -> Option<SyncedCover> {
+    let kind = payload.get("kind")?.as_str()?.to_string();
+    let source = match payload.get("source").and_then(|v| v.as_str()) {
+        Some("user") => "user",
+        _ => "ai",
+    }
+    .to_string();
+    let terms: Vec<String> = payload
+        .get("termsJson")
+        .and_then(|v| v.as_str())
+        .and_then(|json| serde_json::from_str(json).ok())
+        .unwrap_or_default();
+    let terms = clean_terms(terms);
+    let art: Option<Vec<Shape>> = payload
+        .get("artJson")
+        .and_then(|v| v.as_str())
+        .and_then(|json| serde_json::from_str::<Vec<serde_json::Value>>(json).ok())
+        .map(|shapes| {
+            shapes
+                .into_iter()
+                .filter_map(sanitize_shape)
+                .take(MAX_SHAPES)
+                .collect::<Vec<_>>()
+        })
+        .filter(|shapes| !shapes.is_empty());
+    let known = kind == "generic" || KNOWN_KINDS.contains(&kind.as_str());
+    match (kind.as_str(), &art) {
+        ("custom", Some(shapes)) if shapes.len() >= 3 => {}
+        ("custom", _) => {
+            return Some(SyncedCover {
+                kind: "generic".into(),
+                terms,
+                art: None,
+                source,
+            })
+        }
+        _ if !known => return None,
+        _ => {}
+    }
+    Some(SyncedCover {
+        kind,
+        terms,
+        art,
+        source,
+    })
 }
 
 #[tauri::command]
@@ -363,9 +439,9 @@ pub async fn cmd_classify_course_cover(
 pub async fn cmd_set_course_cover_kind(
     state: State<'_, AppState>,
     course_id: String,
-    kind: Option<String>,
-) -> AppResult<Option<CourseCover>> {
-    set_kind(&state.db, &course_id, kind).await
+    kind: String,
+) -> AppResult<CourseCover> {
+    set_kind(&state.db, &course_id, &kind).await
 }
 
 #[cfg(test)]
@@ -424,7 +500,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_choice_is_stored_and_clearable() {
+    async fn manual_choice_is_stored_and_validated() {
         let db = fresh_db().await;
         let course = crate::commands::courses::create_course(
             &db,
@@ -433,22 +509,72 @@ mod tests {
         )
         .await
         .unwrap();
-        let cover = set_kind(&db, &course.id, Some("biology".into()))
-            .await
-            .unwrap()
-            .unwrap();
+        let cover = set_kind(&db, &course.id, "biology").await.unwrap();
         assert_eq!(
             (cover.kind.as_str(), cover.source.as_str()),
             ("biology", "user")
         );
         assert_eq!(list_covers(&db).await.unwrap().len(), 1);
-        assert!(set_kind(&db, &course.id, Some("nope".into()))
+        assert!(set_kind(&db, &course.id, "nope").await.is_err());
+        assert!(set_kind(&db, &course.id, "custom").await.is_err());
+    }
+
+    async fn stamp(db: &Db, course_id: &str) -> (i64, i64) {
+        sqlx::query_as(
+            "SELECT s.updated_at, o.changed_at FROM sync_content_stamps s
+             JOIN sync_outbox o ON o.record_type=s.record_type AND o.record_id=s.record_id
+             WHERE s.record_type='CourseCover' AND s.record_id=?",
+        )
+        .bind(course_id)
+        .fetch_one(&db.pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn automatic_results_are_weak_and_never_replace_a_choice() {
+        let db = fresh_db().await;
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            std::env::temp_dir().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        // 自动结果：写进去，但同步戳和出件时间都是弱戳。
+        write_cover(&db, &course.id, "physics", &[], None, true)
             .await
-            .is_err());
-        assert!(set_kind(&db, &course.id, Some("custom".into()))
+            .unwrap();
+        let weak = crate::sync::content::WEAK_STAMP;
+        assert_eq!(stamp(&db, &course.id).await, (weak, weak));
+        // 已经有封面时，自动结果不覆盖。
+        set_kind(&db, &course.id, "history").await.unwrap();
+        let kept = write_cover(&db, &course.id, "physics", &[], None, true)
             .await
-            .is_err());
-        assert!(set_kind(&db, &course.id, None).await.unwrap().is_none());
-        assert!(list_covers(&db).await.unwrap().is_empty());
+            .unwrap();
+        assert_eq!(
+            (kept.kind.as_str(), kept.source.as_str()),
+            ("history", "user")
+        );
+        let (synced, outbox) = stamp(&db, &course.id).await;
+        assert!(synced > weak && outbox > weak);
+    }
+
+    #[test]
+    fn synced_payloads_are_checked_again() {
+        let ok = validate_synced(&serde_json::json!({
+            "kind": "custom", "source": "user", "termsJson": "[\"三文鱼\"]",
+            "artJson": "[{\"t\":\"circle\",\"cx\":200,\"cy\":80,\"r\":10},{\"t\":\"line\",\"x1\":160,\"y1\":150,\"x2\":290,\"y2\":150},{\"t\":\"path\",\"d\":\"M160 100 L 200 60\"},{\"t\":\"path\",\"d\":\"<script>\"}]"
+        }))
+        .unwrap();
+        assert_eq!((ok.kind.as_str(), ok.source.as_str()), ("custom", "user"));
+        assert_eq!(ok.art.unwrap().len(), 3);
+        assert!(validate_synced(&serde_json::json!({"kind": "astrology"})).is_none());
+        assert_eq!(
+            validate_synced(&serde_json::json!({"kind": "custom"}))
+                .unwrap()
+                .kind,
+            "generic"
+        );
     }
 }
