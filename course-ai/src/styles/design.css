@@ -2236,10 +2236,11 @@ button.ca-time:hover {
 /* ===================== 笔记分页记号 ===================== */
 
 /* 打印成讲义时，下一页从这里开始：一道很淡的虚线，右边一个页码。 */
+/* 只在页面右边缘画一小段虚线 + 页码：估算的分页常落在一行字中间，整条线会划过文字。 */
 .ca-page-break {
   position: absolute;
-  left: 16px;
   right: 16px;
+  width: 96px;
   height: 0;
   border-top: 1px dashed var(--border-subtle);
   pointer-events: none;
@@ -2301,4 +2302,84 @@ button.ca-time:hover {
     opacity: 0;
     transform: translateY(8px) rotate(calc(var(--r) + 40deg));
   }
+}
+
+/* ===================== 笔记索引标签 ===================== */
+
+/* 贴在页面右边缘的一排彩色纸签：随滚动停在可视区顶上（sticky，自身不占高度）。 */
+.ca-note-tabs {
+  position: sticky;
+  top: 14px;
+  z-index: 4;
+  height: 0;
+}
+
+.ca-note-tabs-rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ca-note-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: var(--tab-h, 44px);
+  padding: 4px 0;
+  overflow: hidden;
+  border-radius: var(--r-xs) 0 0 var(--r-xs);
+  background: var(--tab-bg);
+  color: var(--tab-ink);
+  box-shadow: inset 1px 0 0 rgb(16 24 20 / 0.06), -1px 1px 2px rgb(16 24 20 / 0.08);
+  font-family: var(--font-app);
+  font-size: 10.5px;
+  transform: translateX(4px);
+  transition: transform 0.15s var(--ease-out);
+}
+
+/* 中文一个字一行直立往下排；西文顺时针躺倒。 */
+.ca-note-tab > .stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.ca-note-tab > .stack > i {
+  display: block;
+  font-style: normal;
+  line-height: 11px;
+}
+
+.ca-note-tab > .turn {
+  writing-mode: vertical-rl;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ca-note-tab:hover,
+.ca-note-tab[aria-current] {
+  transform: translateX(0);
+}
+
+.ca-note-tab[aria-current] {
+  width: 22px;
+  font-weight: 600;
+}
+
+/* 有标签时给正文右边让出一条。 */
+.ca-note-tabs + .ca-paper-sheet .tiptap-notes {
+  padding-right: 30px;
+}
+
+.ca-note-tabs + .ca-paper-sheet[data-annotated] .tiptap-notes {
+  padding-right: calc(min(168px, 36%) + 14px);
+}
+
+.ca-note-tabs + .ca-paper-sheet .ca-pencil-margin {
+  right: 26px;
 }

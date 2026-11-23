@@ -705,7 +705,8 @@
       "erase": "擦掉这条批注"
     },
     "pageMark": "第 {{page}} 页",
-    "pageCount": "打印成讲义约 {{count}} 页（A4）"
+    "pageCount": "打印成讲义约 {{count}} 页（A4）",
+    "tabs": "笔记分节索引"
   },
   "quiz": {
     "correct": "正确",

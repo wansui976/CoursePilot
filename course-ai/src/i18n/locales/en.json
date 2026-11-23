@@ -707,7 +707,8 @@
     },
     "pageMark": "Page {{page}}",
     "pageCount_one": "About {{count}} page as a printed handout (A4)",
-    "pageCount_other": "About {{count}} pages as a printed handout (A4)"
+    "pageCount_other": "About {{count}} pages as a printed handout (A4)",
+    "tabs": "Section tabs"
   },
   "quiz": {
     "correct": "Correct",

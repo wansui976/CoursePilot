@@ -140,6 +140,18 @@ export function installMockIpc({ theme, safeArea }) {
   ];
   const summary = "## 本讲要点\n\n梯度下降把**最小化损失**变成一个反复迭代的过程：每一步沿负梯度方向移动一小段距离。\n\n- **梯度**：函数在当前点增长最快的方向\n- **学习率**：每一步走多远，过大震荡、过小缓慢\n- **小批量**：用部分样本估计梯度，换取速度与泛化\n\n> 直觉：蒙着眼下山，每一步都朝脚下最陡的方向迈一小步。";
   const noteImages = new Map();
+  // 长笔记：八个小节，第一节贴了一张截图（左上角夹回形针），用来看分页记号和侧边索引标签。
+  const longNotes = [
+    "# 梯度下降笔记",
+    ...["核心思想", "学习率", "小批量", "动量", "Adam", "正则化", "早停", "总结"].map(
+      (title, i) =>
+        `## ${title}\n\n` +
+        (i === 0 ? "![课上截图](note-image:frame1)\n\n" : "") +
+        "沿**负梯度**方向迭代更新参数，直到损失不再明显下降。每一步走多远由学习率决定。[00:15]\n\n" +
+        "- 太大：在谷底两侧来回震荡，甚至发散 [00:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [00:45]\n\n" +
+        "> 一句话：蒙着眼下山，每一步朝最陡处迈一小步。",
+    ),
+  ].join("\n\n");
   const notes = "# 梯度下降笔记\n\n## 核心思想\n\n沿**负梯度**方向迭代更新参数，直到损失不再明显下降。[00:15]\n\n## 学习率\n\n- 太大：在谷底两侧来回震荡，甚至发散 [00:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [00:45]\n\n> 一句话：蒙着眼下山，每一步朝最陡处迈一小步。";
 
   // —— 课程知识 ——
@@ -683,7 +695,7 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_get_chapters: () => chapters,
     cmd_get_summary: () => summary,
     // __shot-long-notes：把笔记重复十遍，看分页记号。
-    cmd_get_notes: () => (localStorage.getItem("__shot-long-notes") === "1" ? Array(10).fill(notes).join("\n\n") : notes),
+    cmd_get_notes: () => (localStorage.getItem("__shot-long-notes") === "1" ? longNotes : notes),
     cmd_list_note_versions: () => [
       { id: "h:3", source: "history", edited_at: now - 25 * 60_000, captured_at: now - 20 * 60_000, content: notes.replace("> 一句话", "> 草稿：一句话") },
       { id: "h:2", source: "history", edited_at: now - 3 * 3_600_000, captured_at: now - 2 * 3_600_000, content: "# 梯度下降笔记\n\n## 核心思想\n\n沿负梯度方向迭代更新参数。[00:15]" },
@@ -694,7 +706,8 @@ export function installMockIpc({ theme, safeArea }) {
       noteImages.set(id, Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0)));
       return { id, src: `note-image:${id}` };
     },
-    cmd_read_note_image: ({ id }) => noteImages.get(id) ?? Promise.reject(`not found: note image ${id}`),
+    cmd_read_note_image: ({ id }) =>
+      id === "frame1" ? cover("v3") : (noteImages.get(id) ?? Promise.reject(`not found: note image ${id}`)),
     // 截取画面：拿封面当作那一帧。
     cmd_capture_frame: ({ videoId, atMs }) => ({ id: 1, video_id: videoId, image_path: `/shots/${atMs}.jpg`, at_ms: atMs, created_at: now }),
     cmd_read_slide_image: ({ videoId }) => cover(videoId),

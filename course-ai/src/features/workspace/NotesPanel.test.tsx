@@ -82,6 +82,7 @@ vi.mock("./notes/NotesToolbar", () => ({ NotesToolbar: () => null }));
 // 页边批注要量真编辑器里的文字位置，替身编辑器没有 view；它自己的排版由 lib/pencilLayout.test 测。
 vi.mock("./notes/PencilMargin", () => ({ PencilMargin: () => null }));
 vi.mock("./notes/PageMarks", () => ({ PageMarks: () => null }));
+vi.mock("./notes/NoteTabs", () => ({ NoteTabs: () => null }));
 const { storeNoteImage, insertBlocks } = vi.hoisted(() => ({
   storeNoteImage: vi.fn(),
   insertBlocks: vi.fn(),

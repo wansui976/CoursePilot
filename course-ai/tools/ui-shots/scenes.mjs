@@ -535,7 +535,7 @@ export const scenes = [
     },
   },
   {
-    // 笔记分页记号：长笔记往下滚，看第 2 页从哪儿开始。
+    // 长笔记：顶上看侧边索引标签和夹着回形针的截图，再滚到第 2 页开始处。
     name: "notes-pages",
     devices: ["desktop"],
     run: async ({ page, shot }) => {
@@ -543,10 +543,13 @@ export const scenes = [
       await page.reload({ waitUntil: "networkidle" });
       await openVideo(page);
       await page.getByRole("tab", { name: /笔记/ }).click();
+      await page.locator(".ca-note-tab").first().waitFor();
+      await page.waitForTimeout(500);
+      await shot("top");
       const mark = page.locator(".ca-page-break").first();
       await mark.waitFor({ state: "attached" });
       await mark.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(400);
       await shot();
     },
   },

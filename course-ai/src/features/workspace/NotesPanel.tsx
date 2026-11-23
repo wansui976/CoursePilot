@@ -9,6 +9,7 @@ import { type ExportItem } from "./ExportMenu";
 import { ArchiveRestore, Loader2, NotebookPen, PencilLine, X } from "lucide-react";
 import { PencilMargin } from "./notes/PencilMargin";
 import { PageMarks } from "./notes/PageMarks";
+import { NoteTabs } from "./notes/NoteTabs";
 import { isMobile } from "@/lib/mobileFiles";
 import type { NoteAnnotation } from "@/lib/ipc/media";
 import { Button } from "@/ui/button";
@@ -586,6 +587,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
               </div>
             )}
             {/* 纸张（横线、方格……）画在这层上：它随内容一起变高，格子跟着滚动。 */}
+            <NoteTabs editor={editor} scrollRef={scrollerRef} />
             <div
               ref={sheetRef}
               className="ca-paper-sheet"

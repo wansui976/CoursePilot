@@ -170,6 +170,8 @@
   /* 直接当背景图用的颗粒（透明度已烘进去），用在页面、侧栏这类大面积底色上。 */
   /* 铅笔：页边批注的石墨灰。 */
   --pencil: #6f7471;
+  /* 回形针：笔记里贴图左上角夹的那枚。 */
+  --clip: #8f989d;
   --window-frame: #e8e2d6;
   --window-frame-edge: #cfc6b5;
   --grain-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.09 0 0 0 0 0.08 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -247,6 +249,7 @@
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.93 0 0 0 0 0.95 0 0 0 0 0.93 0 0 0 0.6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --grain-opacity: 0.05;
   --pencil: #a3a9a5;
+  --clip: #b4bcc0;
   --window-frame: #3b423e;
   --window-frame-edge: #2c322f;
   --grain-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.93 0 0 0 0 0.95 0 0 0 0 0.93 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");

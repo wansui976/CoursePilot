@@ -183,8 +183,26 @@
 
 /* 图片：占满行宽为止，不放大小图；细边框让白底截图和页面分得开。 */
 .tiptap-notes .ca-note-image {
-  margin: 0.9em 0;
+  position: relative;
+  margin: 1.2em 0 0.9em;
   line-height: 0;
+}
+/* 贴进笔记的图：左上角夹一枚回形针，一半压在图上，一半露在纸上。
+   形状用遮罩画（只是轮廓），颜色走令牌。 */
+.tiptap-notes .ca-note-image:not([data-state="loading"])::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  left: 18px;
+  top: -14px;
+  width: 12px;
+  height: 34px;
+  background: var(--clip);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 34'%3E%3Cpath d='M4 9v15a2 2 0 0 0 4 0V6a3.5 3.5 0 0 0-7 0v21a5 5 0 0 0 10 0V10' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 34'%3E%3Cpath d='M4 9v15a2 2 0 0 0 4 0V6a3.5 3.5 0 0 0-7 0v21a5 5 0 0 0 10 0V10' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: rotate(-8deg);
+  filter: drop-shadow(0 1px 0.5px rgb(16 24 20 / 0.25));
+  pointer-events: none;
 }
 .tiptap-notes .ca-note-image img {
   display: block;
