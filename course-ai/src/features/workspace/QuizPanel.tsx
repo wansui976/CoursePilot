@@ -435,7 +435,7 @@ function OptionBadge({ letter, state, pop = false }: { letter: string; state: "i
   const look = {
     idle: "border border-[var(--border-strong)] text-[var(--text-muted)]",
     dim: "border border-[var(--border-subtle)] text-[var(--text-faint)]",
-    picked: "bg-[var(--accent)] text-[var(--on-accent)]",
+    picked: "bg-[var(--text-strong)] text-[var(--surface-panel)]",
     right: "bg-[var(--status-ok)] text-[var(--on-status-ok)]",
     wrong: "bg-[var(--status-err)] text-[var(--on-status-err)]",
   }[state];
@@ -506,8 +506,9 @@ function QuestionCard({
           ? "bg-[var(--status-err-bg)] text-[var(--text-strong)]"
           : "text-[var(--text-muted)]"
       : picked
-        ? "bg-[var(--accent-weak)] text-[var(--text-strong)] ring-1 ring-inset ring-[var(--accent)]"
-        : "bg-[var(--surface-card-hover)] text-[var(--text-normal)] hover:bg-[var(--accent-weak)]";
+        ? // 选中是中性的（深一档的底 + 墨色细框），主题色只给「提交」这样的操作。
+          "bg-[var(--surface-card-active)] text-[var(--text-strong)] ring-1 ring-inset ring-[var(--text-strong)]"
+        : "bg-[var(--surface-card-hover)] text-[var(--text-normal)] hover:bg-[var(--surface-card-active)]";
   const badgeState = (picked: boolean, right: boolean) =>
     answered ? (right ? "right" : picked ? "wrong" : "dim") : picked ? "picked" : "idle";
 

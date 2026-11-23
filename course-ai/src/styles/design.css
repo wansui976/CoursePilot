@@ -1584,6 +1584,11 @@ button.ca-time:hover {
   color: var(--on-accent) !important;
 }
 
+/* 强调色按钮上的键帽：浅灰底配白字就成了一块白方块，改成一层半透明的白。 */
+.ca-grade[data-grade="3"] .ca-grade-key {
+  background: color-mix(in srgb, var(--on-accent) 20%, transparent);
+}
+
 .ca-grade-interval {
   font-family: var(--font-mono);
 }

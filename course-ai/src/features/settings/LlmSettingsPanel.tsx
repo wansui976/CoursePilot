@@ -688,7 +688,8 @@ export function LlmSettingsPanel({
             key={p.id}
             className={`space-y-2 rounded-xl border bg-[var(--surface-input)] p-3 transition ${
               isActive
-                ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
+                ? // 选中用中性的深一档边线；主题色只留给「使用中」那颗开关。
+                  "border-[var(--border-strong)]"
                 : "border-[var(--border-subtle)]"
             }`}
           >
@@ -710,7 +711,7 @@ export function LlmSettingsPanel({
                 <span
                   className={`grid h-3.5 w-3.5 place-items-center rounded-full border ${
                     isActive
-                      ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                      ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--on-accent)]"
                       : "border-[var(--text-faint)]"
                   }`}
                 >

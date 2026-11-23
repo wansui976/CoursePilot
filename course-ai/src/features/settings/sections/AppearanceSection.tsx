@@ -147,7 +147,7 @@ export function AppearanceSection() {
                   <span
                     className={`block h-14 w-20 overflow-hidden rounded-lg ring-2 transition ${
                       active
-                        ? "ring-[var(--accent)]"
+                        ? "ring-[var(--text-strong)]"
                         : "ring-[var(--border-subtle)] hover:ring-[var(--text-faint)]"
                     }`}
                   >
@@ -269,7 +269,7 @@ export function AppearanceSection() {
                   title={available ? undefined : t("settings.appearance.readingFontMissing")}
                   className={`flex flex-col items-start gap-1.5 rounded-lg border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                     selected
-                      ? "border-[var(--accent)] ring-1 ring-[var(--accent)]"
+                      ? "border-[var(--text-strong)] ring-1 ring-[var(--text-strong)]"
                       : "border-[var(--border-subtle)] hover:border-[var(--border-strong)]"
                   }`}
                 >
@@ -319,7 +319,7 @@ export function AppearanceSection() {
                 onClick={() => setNotePaper(option)}
                 className={`flex flex-col gap-1.5 rounded-lg border p-1.5 text-left text-xs transition-colors ${
                   notePaper === option
-                    ? "border-[var(--accent)] font-medium text-[var(--text-strong)] ring-1 ring-[var(--accent)]"
+                    ? "border-[var(--text-strong)] font-medium text-[var(--text-strong)] ring-1 ring-[var(--text-strong)]"
                     : "border-[var(--border-subtle)] text-[var(--text-muted)] hover:border-[var(--border-strong)]"
                 }`}
               >
