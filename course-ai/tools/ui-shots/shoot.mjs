@@ -260,7 +260,12 @@ function auditLayout() {
       if (style.visibility === "hidden" || style.opacity === "0") continue;
       // 用伪元素向外扩了点按区域的（.ca-hit-expand 等）按扩过的大小算。
       const after = getComputedStyle(el, "::after");
-      const grow = after.content !== "none" && after.position === "absolute" ? -2 * parseFloat(after.top) || 0 : 0;
+      const expanded = after.content !== "none" && after.position === "absolute";
+      const grow = expanded ? Math.max(0, -2 * parseFloat(after.top) || 0) : 0;
+      // 伪元素直接写了宽高的（开关的 44×44 居中热区）按它的大小算。
+      const afterW = expanded ? parseFloat(after.width) || 0 : 0;
+      const afterH = expanded ? parseFloat(after.height) || 0 : 0;
+      if (Math.max(rect.width + grow, afterW) >= 28 || Math.max(rect.height + grow, afterH) >= 28) continue;
       // 勾选框包在 label 里时，label（连同它向外扩的伪元素）才是点按区。
       const label = el.closest("label");
       if (label) {

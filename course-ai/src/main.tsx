@@ -14,6 +14,10 @@ import { startNativeInsets } from "@/lib/nativeInsets";
 import { startPlaybackHydration } from "@/lib/playback";
 import { flushDurableStore, loadDurableStore } from "@/lib/durableStore";
 import { preloadKatex } from "@/ui/MathText";
+import { isAndroid } from "@/lib/platform";
+
+// 平台标记：只给少数平台专属的样式用（如 Android 的中文衬线回退）。
+if (isAndroid()) document.documentElement.dataset.os = "android";
 
 startJobListener();
 startDownloadListener();

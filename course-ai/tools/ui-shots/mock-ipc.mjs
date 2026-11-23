@@ -839,6 +839,21 @@ export function installMockIpc({ theme, safeArea }) {
         return args.handler;
       }
       if (cmd === "plugin:dialog|open") return localStorage.getItem("__shot-folder");
+      // 数据线导入：两个拷完的视频、一个还在拷；Android 带「导入」文件夹的路径。
+      if (cmd === "plugin:mobile-files|list_cable_files") {
+        const android = /Android/i.test(navigator.userAgent);
+        const base = android ? "/storage/emulated/0/Android/media/dev.courseai.app/导入" : "/var/mobile/Documents";
+        const MB = 1024 * 1024;
+        return {
+          files: [
+            { name: "10 强化学习入门.mp4", path: `${base}/10 强化学习入门.mp4`, size: 412 * MB },
+            { name: "11 生成模型.mp4", path: `${base}/11 生成模型.mp4`, size: 1.6 * 1024 * MB },
+            { name: "12 期末复习.mp4", path: `${base}/12 期末复习.mp4`, size: 96 * MB, settling: true },
+          ],
+          scanned: 4,
+          folder: android ? "Android/media/dev.courseai.app/导入" : null,
+        };
+      }
       if (cmd === "plugin:app|version") return "0.4.1";
       if (cmd.startsWith("plugin:")) return null;
       const handler = handlers[cmd];

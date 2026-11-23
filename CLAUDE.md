@@ -38,6 +38,8 @@ https://claude.ai/artifact/Ki5ntSjcqdaysZd46WpzWc
 - 笔记格式条和右侧操作在笔记面板窄于 520（容器查询 `notes`）时拆成两行：上行格式条，下行保存状态 + 操作；操作里的导出菜单向下弹。
 - 触屏上的点按区至少 28px：看上去要小的按钮（设置里的 ⓘ、引导气泡的关闭、进度条上的点）用 `::after` 向外扩（`.ca-hit-expand`），不放大外观。
 - 不要在 `:root` 定义 `--tab-h`：笔记索引标签在用这个名字（底栏用 `--bottom-tab-h`）。
+- Android：横屏手机（触屏、矮于 500）和 iPhone 横屏一样走叠放外壳、按 medium 档排（视频与学习面板左右并排），不进桌面侧栏；UA 不带 Mobile 的 Android 算平板（`isTablet`）。`<html data-os="android">` 时标题和正文的中文衬线改用通用 `serif`（Android WebView 不按名字认系统字体）。
+- 数据线导入（`CableImportDialog`，只有手机 / 平板）：iOS 是 App「文稿」（Finder / Apple 设备文件共享）；Android 是 App 媒体目录里的「导入」文件夹（`Android/media/<包名>/导入`，USB 文件传输能看到、不需要存储权限）。对话框开着每 3 秒重看一次文件夹；几秒内刚改过的标「正在拷贝」不能勾；加进课程失败时把已挪走的文件放回原文件夹（`return_cable_file`）。新增 mobile-files 命令要同时写进 `build.rs` 的命令表，否则 ACL 会拒掉。
 - 改了界面就用 `pnpm shots --device ratios --audit` 拍一遍（SE、SE 横屏、折叠屏外屏 344、Pro Max、折叠屏展开、iPhone/iPad 横屏）。审计会报整页横向溢出、伸出屏幕的元素和触屏上小于 28px 的点按目标。
 
 ## 检查

@@ -28,8 +28,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { ipc, type FolderVideo } from "@/lib/ipc";
-import { pickDirectoryPath, pickPersistedFile } from "@/lib/mobileFiles";
-import { isIOS, isMobile } from "@/lib/platform";
+import { cableImportAvailable, pickDirectoryPath, pickPersistedFile } from "@/lib/mobileFiles";
+import { isMobile } from "@/lib/platform";
 
 // 按需懒加载：下载向导只在用户点击时才需要，避免把它（及 plugin-dialog 等）压进首屏 eager 包。
 const CableImportDialog = lazy(() =>
@@ -76,8 +76,9 @@ export function ImportVideoButton({
   const [importError, setImportError] = useState<string | null>(null);
   // 移动端无 yt-dlp sidecar / 无法扫描任意文件夹，隐藏「下载网络视频」「导入整个文件夹」入口。
   const mobile = isMobile();
-  // 数据线导入只在 iOS 有：Finder / Apple 设备能直接往 App 文稿里拖文件。
-  const ios = isIOS();
+  // 数据线导入只在手机 / 平板上有：iOS 用 Finder / Apple 设备往 App「文稿」里拖，
+  // Android 用 USB「文件传输」往 App 媒体目录的「导入」文件夹里拖。
+  const cable = cableImportAvailable();
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: qk.videos.list(courseId) });
 
@@ -230,7 +231,7 @@ export function ImportVideoButton({
               </span>
             </button>
 
-            {ios && (
+            {cable && (
               <button
                 role="menuitem"
                 tabIndex={-1}

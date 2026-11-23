@@ -169,7 +169,7 @@ export function Home() {
     },
     [dismissVisibleTransient, runAfterSettingsExit, selectedVideoId],
   );
-  const bucket = useContainerWidth(appRef);
+  const widthBucket = useContainerWidth(appRef);
   // 外壳横屏时有让开挖孔的左右内边距：选外壳看整宽（bucket），工作台排版看扣掉内边距的宽度。
   const appPixelWidth = useContainerPixelWidth(appRef, { contentBox: true });
   const isLightTheme = theme === "light";
@@ -178,7 +178,13 @@ export function Home() {
   const portrait = useIsPortrait();
   // 触控优先：iOS/iPad 竖屏一律走底部 Tab / 上下叠放布局；只有横屏才保留桌面式左右分栏。
   // 方向必须单独判断:12.9" iPad 竖屏宽 1024 会落入 wide 档,只看 bucket 仍会被当宽屏左右布局。
-  const stackedPortrait = portrait && (tabletDevice || coarsePointer());
+  // 横屏手机（矮于 500、触屏）也走叠放：Android 手机横屏常有 900 多宽，会落进 wide 档，
+  // 结果 256px 的侧栏塞进 400 高的屏幕、视频缩成一小块。iPhone 横屏 844 宽本来就不到 wide。
+  const shortTouchLandscape =
+    !portrait && !tabletDevice && coarsePointer() && typeof window !== "undefined" && window.innerHeight < 500;
+  const stackedPortrait = (portrait && (tabletDevice || coarsePointer())) || shortTouchLandscape;
+  // 横屏手机一律按 medium 排：和 iPhone 横屏一样视频、学习面板左右并排（并排规则只写在 medium 档）。
+  const bucket = shortTouchLandscape && widthBucket === "wide" ? "medium" : widthBucket;
   const shellWide = bucket === "wide" && !stackedPortrait;
   const tabletWide = tabletDevice && shellWide;
   const isPhoneDevice = !shellWide;

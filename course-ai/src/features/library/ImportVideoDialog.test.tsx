@@ -33,6 +33,7 @@ vi.mock("@/lib/ipc", () => ({
 vi.mock("@/lib/mobileFiles", () => ({
   pickPersistedFile: pickPersistedFileMock,
   pickDirectoryPath: pickDirectoryPathMock,
+  cableImportAvailable: () => isMobileMock(),
 }));
 // 组件从 @/lib/platform 取 isMobile（不是 mobileFiles）——mock 必须打在这里。
 vi.mock("@/lib/platform", () => ({

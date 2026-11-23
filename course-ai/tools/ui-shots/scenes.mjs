@@ -247,6 +247,18 @@ export const scenes = [
     },
   },
   {
+    // 数据线导入（只有手机 / 平板）：Android 给出「导入」文件夹路径，iOS 讲 Finder / Apple 设备。
+    name: "cable-import",
+    devices: ["phone", "tablet"],
+    run: async ({ page, shot }) => {
+      await openCourse(page);
+      await page.getByRole("button", { name: "导入" }).first().click();
+      await page.getByRole("menuitem", { name: /从电脑导入/ }).click();
+      await page.getByRole("checkbox", { name: /10 强化学习入门/ }).waitFor();
+      await shot();
+    },
+  },
+  {
     // 空课程中间的「导入」靠下：菜单下面放不下要往上弹，不能伸出窗口。
     name: "import-menu-empty",
     devices: ["desktop"],

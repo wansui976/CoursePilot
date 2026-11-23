@@ -34,8 +34,11 @@ export function isIOS() {
   return /iPhone|iPad|iPod/i.test(userAgent()) || isIPadOSDesktopClass();
 }
 
+/** 平板：iPad（含桌面模式），以及 UA 里不带 Mobile 的 Android（Android 平板的 Chrome / WebView
+ *  约定如此，手机一律带 Mobile）。以前只认 iPad，Android 平板横屏也按手机给底部抽屉式助手。 */
 export function isTablet() {
-  return /iPad/i.test(userAgent()) || isIPadOSDesktopClass();
+  const ua = userAgent();
+  return /iPad/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua)) || isIPadOSDesktopClass();
 }
 
 export function isMobile() {

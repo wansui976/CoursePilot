@@ -183,6 +183,15 @@
   --shadow-pop: 0 0 0 1px rgb(16 24 20 / 0.06), 0 4px 8px rgb(16 24 20 / 0.05),
     0 18px 44px -10px rgb(16 24 20 / 0.2);
 }
+/* Android 的 WebView 不按名字认系统字体：「Noto Serif CJK SC」写了也找不到，标题里的中文
+   掉回无衬线，和英文衬线混在一起。系统带了中文衬线时只有通用的 serif 能取到它，
+   放在无衬线之前；没带的机型照旧落到无衬线。别的平台的 serif 会取到宋体位图字，不加。 */
+:root[data-os="android"] {
+  --font-display: "Newsreader Variable", serif, var(--font-app);
+  --font-reading: "Newsreader Variable", serif, var(--font-app);
+  --font-app: "Instrument Sans Variable", "Noto Sans CJK SC", system-ui, sans-serif;
+}
+
 
 /* 深色「黑板」：深绿黑底、粉笔白字；不是浅色的反转。 */
 [data-theme="dark"] {

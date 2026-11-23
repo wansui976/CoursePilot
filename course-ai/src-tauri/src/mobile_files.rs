@@ -127,27 +127,45 @@ struct PickAndPersistFileResponse {
     duration_ms: Option<i64>,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Deserialize)]
 struct CableFileEntry {
     name: String,
     path: String,
     size: i64,
+    /// 几秒内刚改过：电脑那头可能还在写。旧版原生代码不带这个字段。
+    #[serde(default)]
+    settling: bool,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Deserialize)]
 struct ListCableFilesResponse {
     files: Vec<CableFileEntry>,
     scanned: i64,
+    /// Android：「导入」文件夹从「内部存储」往下的路径，给用户照着找。iOS 没有。
+    #[serde(default)]
+    folder: Option<String>,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TakeCableFileRequest {
     source_path: String,
     category: String,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Serialize)]
+struct ReturnCableFileRequest {
+    path: String,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[derive(Deserialize)]
+struct ReturnCableFileResponse {
+    path: String,
 }
 
 /// 原生截帧落地一张 JPEG，替代桌面端 ffmpeg（Android: MediaMetadataRetriever；
@@ -383,43 +401,51 @@ fn percent_decode_path(input: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| input.to_string())
 }
 
-/// 数据线导入（iOS）：列出用 Finder / Apple 设备拷进 App「文稿」的视频和音频。
-/// 其他平台没有这个入口，返回空列表。
+/// 数据线导入：列出用数据线从电脑拷进来的视频和音频。
+/// iOS 是 App「文稿」（Finder / Apple 设备的文件共享）；Android 是 App 专属媒体目录里的
+/// 「导入」文件夹（USB 文件传输 / MTP 能看到）。桌面没有这个入口，返回空列表。
 #[tauri::command]
 pub async fn list_cable_files<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let mobile_files = app.state::<MobileFiles<R>>();
         let response = mobile_files
             .0
             .run_mobile_plugin::<ListCableFilesResponse>("listCableFiles", serde_json::json!({}))
             .map_err(|error| error.to_string())?;
-        Ok(serde_json::json!({
-            "files": response
-                .files
-                .into_iter()
-                .map(|file| {
-                    serde_json::json!({
-                        "name": file.name,
-                        "path": file.path,
-                        "size": file.size,
-                    })
-                })
-                .collect::<Vec<_>>(),
-            "scanned": response.scanned,
-        }))
+        Ok(cable_scan_json(response))
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
-        Ok(serde_json::json!({ "files": [], "scanned": 0 }))
+        Ok(serde_json::json!({ "files": [], "scanned": 0, "folder": null }))
     }
 }
 
-/// 数据线导入（iOS）：把一个「文稿」里的文件移进 App 资料库并读取时长。
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn cable_scan_json(response: ListCableFilesResponse) -> serde_json::Value {
+    serde_json::json!({
+        "files": response
+            .files
+            .into_iter()
+            .map(|file| {
+                serde_json::json!({
+                    "name": file.name,
+                    "path": file.path,
+                    "size": file.size,
+                    "settling": file.settling,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "scanned": response.scanned,
+        "folder": response.folder,
+    })
+}
+
+/// 数据线导入：把一个拷进来的文件移进 App 资料库并读取时长。
 /// 移走而不是拷贝：视频动辄几个 G，避免一份内容占两份空间。
 #[tauri::command]
 pub async fn take_cable_file<R: Runtime>(
@@ -427,7 +453,7 @@ pub async fn take_cable_file<R: Runtime>(
     source_path: String,
     category: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let mobile_files = app.state::<MobileFiles<R>>();
         let response = mobile_files
@@ -448,9 +474,36 @@ pub async fn take_cable_file<R: Runtime>(
         }))
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, source_path, category);
+        Ok(None)
+    }
+}
+
+/// 数据线导入：文件已经挪进资料库、加进课程却失败了，把它放回原来的文件夹，
+/// 用户下次还能在列表里看到它，而不是凭空消失在 App 的私有目录里。
+#[tauri::command]
+pub async fn return_cable_file<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<Option<String>, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let mobile_files = app.state::<MobileFiles<R>>();
+        let response = mobile_files
+            .0
+            .run_mobile_plugin::<ReturnCableFileResponse>(
+                "returnCableFile",
+                ReturnCableFileRequest { path },
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(Some(response.path))
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = (app, path);
         Ok(None)
     }
 }
@@ -462,7 +515,8 @@ pub fn init() -> TauriPlugin<tauri::Wry> {
             pick_and_persist_file,
             share_file,
             list_cable_files,
-            take_cable_file
+            take_cable_file,
+            return_cable_file
         ])
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]

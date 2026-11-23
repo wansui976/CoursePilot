@@ -96,6 +96,13 @@ export function humanizeError(error: unknown, language?: string): string {
   if (s.includes("unsupported_media_format")) {
     return translated("unsupportedMediaFormat", locale);
   }
+  // 数据线导入：勾选之后、导入之前，文件在电脑那头被删了或挪走了（iOS / Android 原生层的两种说法）。
+  if (s.includes("cable_file_missing") || s.includes("moved or deleted before it could be imported")) {
+    return translated("cableFileMissing", locale);
+  }
+  if (s.includes("cable_folder_unavailable")) {
+    return translated("cableFolderUnavailable", locale);
+  }
   if (s.includes("大模型请求超时")) {
     return translated("longTimeout", locale);
   }

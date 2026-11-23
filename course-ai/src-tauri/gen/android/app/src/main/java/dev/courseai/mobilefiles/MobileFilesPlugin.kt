@@ -10,6 +10,8 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
+import android.media.MediaScannerConnection
+import android.os.Environment
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -83,7 +85,26 @@ class ShareFileArgs {
   lateinit var mime: String
 }
 
+@InvokeArg
+class TakeCableFileArgs {
+  lateinit var sourcePath: String
+  lateinit var category: String
+}
+
+@InvokeArg
+class ReturnCableFileArgs {
+  lateinit var path: String
+}
+
 private data class AudioExportResult(val path: String, val mime: String, val format: String)
+
+private const val CABLE_FOLDER = "导入"
+private const val CABLE_README = "把视频拷到这里.txt"
+private const val CABLE_SETTLE_MS = 3000L
+private val CABLE_EXTENSIONS = setOf(
+  "mp4", "m4v", "mov", "3gp", "mkv", "webm",
+  "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus",
+)
 
 @TauriPlugin
 class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
@@ -349,6 +370,163 @@ class MobileFilesPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (error: Exception) {
       invoke.reject(error.message ?: "Failed to recognize image text", error)
     }
+  }
+
+  // —— 数据线导入 ——
+  // 手机用数据线连上电脑、USB 选「文件传输」后，电脑上能看到「内部存储」。App 的专属媒体目录
+  // Android/media/<包名>/ 在电脑上可见、Android 11+ 的文件管理器里也不隐藏，App 读写它不需要
+  // 任何存储权限。我们在里面建一个「导入」文件夹，用户把视频拖进去，回到 App 勾选导入。
+
+  /** 列出「导入」文件夹里的视频 / 音频。scanned 是看到的全部文件数，用来区分「没拷进来」和「格式不对」。 */
+  @Command
+  fun listCableFiles(invoke: Invoke) {
+    runOnIoThread(invoke, "Failed to list cable files") {
+      val root = cableDir()
+      val files = JSONArray()
+      var scanned = 0
+      val now = System.currentTimeMillis()
+      val found = mutableListOf<File>()
+      fun walk(dir: File, depth: Int) {
+        val entries = dir.listFiles() ?: return
+        for (entry in entries) {
+          if (entry.name.startsWith(".") || entry.name == CABLE_README) continue
+          if (entry.isDirectory) {
+            if (depth < 5) walk(entry, depth + 1)
+            continue
+          }
+          if (!entry.isFile) continue
+          scanned += 1
+          if (entry.extension.lowercase() in CABLE_EXTENSIONS) found.add(entry)
+        }
+      }
+      walk(root, 0)
+      found.sortBy { it.relativeTo(root).path.lowercase() }
+      for (file in found) {
+        files.put(JSObject().apply {
+          put("name", file.relativeTo(root).path)
+          put("path", file.absolutePath)
+          put("size", file.length())
+          // 电脑那头还在往里写：几秒内刚改过的先别动，前端显示「正在拷贝」。
+          put("settling", now - file.lastModified() < CABLE_SETTLE_MS)
+        })
+      }
+      JSObject().apply {
+        put("files", files)
+        put("scanned", scanned)
+        put("folder", cableDisplayPath(root))
+      }
+    }
+  }
+
+  /** 把「导入」文件夹里的一个文件移进 App 资料库（与「选择文件」导入的放在一起），并读取时长。 */
+  @Command
+  fun takeCableFile(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(TakeCableFileArgs::class.java)
+      runOnIoThread(invoke, "Failed to import cable file") {
+        val root = cableDir().canonicalFile
+        val source = File(args.sourcePath).canonicalFile
+        if (!source.path.startsWith(root.path + File.separator)) {
+          throw IllegalArgumentException("File is not in the app's cable import folder")
+        }
+        if (!source.isFile) throw IllegalStateException("cable_file_missing")
+
+        // 先确认能读，再动文件：格式不支持时文件留在原地，别把用户唯一的那份挪走。
+        var durationMs: Long? = null
+        if (args.category == "videos") {
+          val read = try {
+            readDurationMs(source.absolutePath)
+          } catch (_: Exception) {
+            throw IllegalStateException("unsupported_media_format: ${source.extension.lowercase()}")
+          }
+          durationMs = if (read > 0) read else null
+        }
+
+        val dir = File(File(activity.dataDir, "picked"), sanitizeName(args.category, "picked"))
+        if (!dir.exists() && !dir.mkdirs()) {
+          throw IllegalStateException("Failed to create picked file directory")
+        }
+        // 内部存储和「导入」文件夹多半在同一块闪存上，但不是同一个分区，改名挪不过去时要整份
+        // 拷贝：先确认放得下（多留 64 MB 余量），免得拷到一半把手机塞满。
+        if (dir.usableSpace < source.length() + 64L * 1024 * 1024) {
+          throw IllegalStateException("No space left on device")
+        }
+        val destination = createUniqueFile(dir, sanitizeName(source.name, "video"))
+        moveFile(source, destination)
+        // 让电脑那头（MTP）刷新：不然导入后的文件还挂在「导入」文件夹里。
+        MediaScannerConnection.scanFile(activity, arrayOf(source.absolutePath), null, null)
+        JSObject().apply {
+          put("path", destination.absolutePath)
+          if (durationMs != null) put("durationMs", durationMs)
+        }
+      }
+    } catch (error: Exception) {
+      invoke.reject(error.message ?: "Failed to import cable file", error)
+    }
+  }
+
+  /** 导入失败时把已经挪进资料库的文件放回「导入」文件夹，用户的文件不会凭空消失。 */
+  @Command
+  fun returnCableFile(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(ReturnCableFileArgs::class.java)
+      runOnIoThread(invoke, "Failed to return cable file") {
+        val picked = File(activity.dataDir, "picked").canonicalFile
+        val source = File(args.path).canonicalFile
+        if (!source.path.startsWith(picked.path + File.separator)) {
+          throw IllegalArgumentException("File is not in the app's library")
+        }
+        if (!source.isFile) throw IllegalStateException("cable_file_missing")
+        val destination = createUniqueFile(cableDir(), source.name)
+        moveFile(source, destination)
+        MediaScannerConnection.scanFile(activity, arrayOf(destination.absolutePath), null, null)
+        JSObject().apply { put("path", destination.absolutePath) }
+      }
+    } catch (error: Exception) {
+      invoke.reject(error.message ?: "Failed to return cable file", error)
+    }
+  }
+
+  private fun cableDir(): File {
+    val media = activity.externalMediaDirs.firstOrNull { it != null }
+      ?: throw IllegalStateException("cable_folder_unavailable")
+    val dir = File(media, CABLE_FOLDER)
+    if (!dir.exists() && !dir.mkdirs()) throw IllegalStateException("cable_folder_unavailable")
+    val readme = File(dir, CABLE_README)
+    if (!readme.exists()) {
+      readme.writeText(
+        "把视频拷进这个文件夹，再回到 CoursePilot：课程 → 导入 → 从电脑导入。\n" +
+          "Copy videos into this folder, then open CoursePilot: Course → Import → From computer.\n",
+      )
+      // 新建的文件夹要被媒体库扫到，电脑上（MTP）才看得见；扫一个里面的文件就行。
+      MediaScannerConnection.scanFile(activity, arrayOf(readme.absolutePath), null, null)
+    }
+    return dir
+  }
+
+  /** 给用户看的路径：从「内部存储」往下数，如 Android/media/dev.courseai.app/导入。 */
+  private fun cableDisplayPath(dir: File): String {
+    val storage = Environment.getExternalStorageDirectory().absolutePath.trimEnd('/')
+    val path = dir.absolutePath
+    return if (path.startsWith("$storage/")) path.substring(storage.length + 1) else path
+  }
+
+  /** 同分区直接改名；跨分区整份拷贝再删原件，拷坏了删掉半截的目标、原件不动。 */
+  private fun moveFile(source: File, destination: File) {
+    if (source.renameTo(destination)) return
+    try {
+      source.inputStream().use { input ->
+        destination.outputStream().use { output -> input.copyTo(output, 1024 * 1024) }
+      }
+    } catch (error: Exception) {
+      destination.delete()
+      throw error
+    }
+    if (destination.length() != source.length()) {
+      destination.delete()
+      throw IllegalStateException("Copy was incomplete")
+    }
+    source.delete()
   }
 
   private fun runOnIoThread(

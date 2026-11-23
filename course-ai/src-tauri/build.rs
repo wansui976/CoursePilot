@@ -25,6 +25,10 @@ fn main() {
                         "system_bar_insets",
                         "move_task_to_back",
                         "network_info",
+                        // 数据线导入：不在这里列出就生成不了权限，前端调用会被 ACL 拒掉。
+                        "list_cable_files",
+                        "take_cable_file",
+                        "return_cable_file",
                     ])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             )

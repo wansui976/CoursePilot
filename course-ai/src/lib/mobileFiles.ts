@@ -74,34 +74,49 @@ export interface PersistedFilePickOptions {
   prompt?: string;
 }
 
-/** 数据线拷进 App「文稿」的文件（只 iOS 有）。 */
+/** 用数据线从电脑拷进来的文件：iOS 在 App「文稿」里，Android 在 App 媒体目录的「导入」文件夹里。 */
 export interface CableFile {
   name: string;
   path: string;
   size: number;
+  /** 几秒内刚改过：电脑那头可能还在写，先别导入。 */
+  settling?: boolean;
 }
 
 export interface CableScan {
   files: CableFile[];
-  /** 文稿里一共看到的文件数：用来区分「没拷进来」和「格式不对」。 */
+  /** 文件夹里一共看到的文件数：用来区分「没拷进来」和「格式不对」。 */
   scanned: number;
+  /** Android：「导入」文件夹从「内部存储」往下的路径（如 Android/media/dev.courseai.app/导入）。 */
+  folder?: string | null;
+}
+
+/** 数据线导入只有手机 / 平板有：桌面上的文件本来就在本机，直接选文件导入。 */
+export function cableImportAvailable() {
+  return isIOS() || isAndroid();
 }
 
 export async function listCableFiles(): Promise<CableScan> {
-  if (!isIOS()) return { files: [], scanned: 0 };
+  if (!cableImportAvailable()) return { files: [], scanned: 0 };
   return invoke<CableScan>("plugin:mobile-files|list_cable_files");
 }
 
-/** 把「文稿」里的文件移进 App 资料库，返回移动后的路径和时长。 */
+/** 把拷进来的文件移进 App 资料库，返回移动后的路径和时长。 */
 export async function takeCableFile(
   sourcePath: string,
   category: string,
 ): Promise<PickPersistedFileResult | null> {
-  if (!isIOS()) return null;
+  if (!cableImportAvailable()) return null;
   return invoke<PickPersistedFileResult | null>("plugin:mobile-files|take_cable_file", {
     sourcePath,
     category,
   });
+}
+
+/** 文件已经移进资料库、加进课程却失败了：放回原来的文件夹，下次还能在列表里看到。 */
+export async function returnCableFile(path: string): Promise<string | null> {
+  if (!cableImportAvailable()) return null;
+  return invoke<string | null>("plugin:mobile-files|return_cable_file", { path });
 }
 
 export async function pickPersistedFile({
