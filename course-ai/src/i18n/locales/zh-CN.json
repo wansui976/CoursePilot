@@ -903,7 +903,7 @@
       "haptics": "触感",
       "hapticsHint": "手机上滑动复习卡、答错、复习完时轻轻震一下。",
       "deskWindow": "课桌上的窗",
-      "deskWindowHint": "课桌左上角一扇小窗，按本地时间显示天色。纯装饰。",
+      "deskWindowHint": "课桌左上角一扇小窗，按本地时间显示天色；选了地点还会显示当地天气。纯装饰。",
       "notePaper": "笔记纸张",
       "notePaperHint": "笔记页底下的格子，像练习本一样。只是背景，不影响导出。",
       "notePapers": {
@@ -912,7 +912,19 @@
         "grid": "方格",
         "dots": "点阵",
         "mi": "米字格"
-      }
+      },
+      "weather": "窗外的天气",
+      "weatherHint": "选一个地点，窗外就会下当地的雨和雪。查天气时会把这个地点的大致坐标（约 1 公里）或城市名发给免费的天气服务 Open-Meteo，不带任何账号信息；地点只存在这台设备上。",
+      "weatherPlace": "地点",
+      "weatherOff": "未选（只按时辰画天色）",
+      "weatherClear": "不看天气",
+      "weatherSearch": "搜索",
+      "weatherSearchPlaceholder": "输入城市名，例如 上海",
+      "weatherLocate": "用当前位置",
+      "weatherHere": "当前位置",
+      "weatherLocateFailed": "拿不到当前位置（系统没给权限，或这台设备不支持）。可以直接搜城市名。",
+      "weatherNoResult": "没找到这个地方，换个写法试试。",
+      "weatherResults": "搜索结果"
     },
     "studyReminder": {
       "title": "学习提醒",
@@ -2545,7 +2557,18 @@
       "dawn": "窗外：清晨",
       "day": "窗外：白天",
       "dusk": "窗外：黄昏",
-      "night": "窗外：夜晚"
+      "night": "窗外：夜晚",
+      "weather": "{{place}} · {{condition}} {{temperature}}°",
+      "conditions": {
+        "clear": "晴",
+        "cloudy": "多云",
+        "overcast": "阴",
+        "fog": "雾",
+        "drizzle": "小雨",
+        "rain": "雨",
+        "snow": "雪",
+        "thunder": "雷雨"
+      }
     }
   },
   "memoryCurve": {

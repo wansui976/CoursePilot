@@ -105,6 +105,45 @@ export const scenes = [
     },
   },
   {
+    // 窗外的天气：选了上海以后，白天下雨、夜里下雪、起雾、雷雨。
+    name: "home-desk-weather",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-many-courses", "1");
+        localStorage.setItem("course-ai-home-layout", "desk");
+        localStorage.setItem("course-ai-weather-place", JSON.stringify({ name: "上海", region: "中国", latitude: 31.22, longitude: 121.46 }));
+      });
+      for (const [weather, hour] of [["rain", 10], ["snow", 21], ["fog", 7], ["thunder", 18]]) {
+        await page.evaluate((value) => localStorage.setItem("__shot-weather", value), weather);
+        await page.clock.setFixedTime(new Date(2026, 10, 23, hour, 0));
+        await page.reload({ waitUntil: "networkidle" });
+        await page.locator(".ca-desk-window-wrap figcaption").waitFor();
+        await shot(weather);
+      }
+    },
+  },
+  {
+    // 设置里选窗外天气的地点：搜「上海」出两个结果。
+    name: "settings-weather",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("course-ai-home-layout", "desk");
+        localStorage.removeItem("course-ai-weather-place");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await nav(page, "设置", "设置");
+      await page.getByRole("button", { name: /外观/ }).first().click().catch(() => {});
+      const input = page.getByPlaceholder(/输入城市名/);
+      await input.scrollIntoViewIfNeeded();
+      await input.fill("上海");
+      await page.getByRole("button", { name: "搜索", exact: true }).click();
+      await page.getByRole("list", { name: "搜索结果" }).waitFor();
+      await shot();
+    },
+  },
+  {
     // 书签丝带：第一门课停在第 3 讲；三周没打开时丝带褪色、封面落灰。
     name: "home-bookmark",
     devices: ["desktop"],

@@ -35,6 +35,31 @@ import type {
   WebDavSource,
 } from "./types";
 
+/** 窗外画得出来的几种天气（后端把 WMO 代码归成这几类）。 */
+export type WeatherCondition = "clear" | "cloudy" | "overcast" | "fog" | "drizzle" | "rain" | "snow" | "thunder";
+
+export interface WeatherNow {
+  condition: WeatherCondition;
+  is_day: boolean;
+  temperature_c: number;
+  fetched_at: number;
+}
+
+export interface WeatherPlace {
+  name: string;
+  region: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** 课桌窗外的天气（Open-Meteo，经后端请求；只发两位小数的坐标或城市名）。 */
+export const weather = {
+  now: (latitude: number, longitude: number): Promise<WeatherNow> =>
+    invoke("cmd_weather_now", { latitude, longitude }),
+  findPlace: (query: string, language: string): Promise<WeatherPlace[]> =>
+    invoke("cmd_weather_find_place", { query, language }),
+};
+
 export const app = {
   exit: (): Promise<void> => invoke("cmd_exit_app"),
   // Android 的 AppPlugin 接管了系统返回键；根页面没有可退层级时退到后台（不结束进程）。

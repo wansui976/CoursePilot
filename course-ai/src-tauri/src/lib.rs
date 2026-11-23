@@ -75,6 +75,7 @@ use crate::commands::study_marks::{
 use crate::commands::note_annotations::{
     cmd_annotate_notes, cmd_erase_note_annotation, cmd_note_annotations,
 };
+use crate::commands::weather::{cmd_weather_find_place, cmd_weather_now};
 use crate::commands::course_covers::{
     cmd_classify_course_cover, cmd_course_covers, cmd_set_course_cover_kind,
 };
@@ -534,6 +535,8 @@ pub fn run() {
             cmd_note_annotations,
             cmd_annotate_notes,
             cmd_erase_note_annotation,
+            cmd_weather_now,
+            cmd_weather_find_place,
             cmd_due_by_course,
             cmd_add_card,
             cmd_notify,

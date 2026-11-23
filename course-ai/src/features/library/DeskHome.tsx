@@ -14,8 +14,9 @@ import { LectureCover } from "./LectureCover";
 import { UpdateNotice } from "./UpdateNotice";
 import { DeskWindow } from "./DeskWindow";
 import { SolarTermBoard } from "./SolarTermBoard";
-import { daypartOf, lampOn } from "@/lib/daypart";
+import { daypartOf } from "@/lib/daypart";
 import { useNow } from "@/lib/useNow";
+import { useWindowWeather } from "@/lib/useWindowWeather";
 import { useHomeLayout } from "@/stores/homeLayout";
 
 type DeskSummary = {
@@ -56,6 +57,7 @@ export function DeskHome({
   const now = useNow();
   const part = daypartOf(now);
   const showWindow = useHomeLayout((state) => state.deskWindow);
+  const windowWeather = useWindowWeather(showWindow);
   const open = summaries.find((summary) => summary.resume) ?? null;
   const resume = open?.resume ?? null;
 
@@ -71,9 +73,8 @@ export function DeskHome({
           {t("desk.newCourse")}
         </Button>
       </header>
-      {/* 晚上台灯亮起：光圈落在摊开的那一讲上，周围暗一点。 */}
-      <div className="ca-desk-surface" data-lamp={lampOn(now) ? "" : undefined} data-window={showWindow ? "" : undefined}>
-        {showWindow && <DeskWindow part={part} />}
+      <div className="ca-desk-surface" data-window={showWindow ? "" : undefined}>
+        {showWindow && <DeskWindow part={part} weather={windowWeather.weather} placeName={windowWeather.place?.name} />}
         {createError && <ErrorNote error={createError} className="ca-desk-error" />}
         <UpdateNotice className="ca-desk-error" />
 

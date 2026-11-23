@@ -70,6 +70,12 @@
   --sun: #ffd27a;
   --moon: #eef2ec;
   --hill: rgb(23 33 28 / 0.55);
+  /* 窗外的天气：云、阴天的灰、雨丝、雪。 */
+  --cloud: #f1f4f5;
+  --cloud-dark: #8e989e;
+  --overcast: #9aa4aa;
+  --rain: rgb(225 236 244 / 0.75);
+  --snow: #f6f8f9;
   --chalk: #eef2ec;
   --chalk-dim: rgb(238 242 236 / 0.2);
   --stage-err: #ff8a7f;
@@ -158,11 +164,8 @@
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.09 0 0 0 0 0.08 0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --grain-opacity: 0.045;
   /* 直接当背景图用的颗粒（透明度已烘进去），用在页面、侧栏这类大面积底色上。 */
-  /* 课桌台灯：光圈里的暖光和光圈外的暗。 */
   /* 铅笔：页边批注的石墨灰。 */
   --pencil: #6f7471;
-  --lamp-glow: rgb(255 196 120 / 0.2);
-  --lamp-shade: rgb(16 24 20 / 0.12);
   --window-frame: #e8e2d6;
   --window-frame-edge: #cfc6b5;
   --grain-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.09 0 0 0 0 0.08 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -240,8 +243,6 @@
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.93 0 0 0 0 0.95 0 0 0 0 0.93 0 0 0 0.6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --grain-opacity: 0.05;
   --pencil: #a3a9a5;
-  --lamp-glow: rgb(255 190 110 / 0.14);
-  --lamp-shade: rgb(0 0 0 / 0.3);
   --window-frame: #3b423e;
   --window-frame-edge: #2c322f;
   --grain-bg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.93 0 0 0 0 0.95 0 0 0 0 0.93 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");

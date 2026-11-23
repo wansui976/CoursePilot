@@ -19,6 +19,7 @@ import {
   remoteSync,
   lanShare,
   webdavImport,
+  weather,
 } from "./system";
 import { downloads } from "./downloads";
 import { courses, folders, videos, trash, subscriptions } from "./library";
@@ -31,6 +32,7 @@ export * from "./types";
 
 export const ipc = {
   app,
+  weather,
   sync,
   clientStore,
   semantic,

@@ -528,6 +528,17 @@ export function installMockIpc({ theme, safeArea }) {
       return [7, 2, 0, 5, 1, 8, 3, 6, 4].map((i, order_index) => ({ ...list[i], order_index }));
     },
     cmd_video_cover: ({ videoId }) => cover(videoId),
+    // —— 窗外的天气：__shot-weather 指定天气（默认小雨）——
+    cmd_weather_now: () => ({
+      condition: localStorage.getItem("__shot-weather") || "drizzle",
+      is_day: true,
+      temperature_c: 9.6,
+      fetched_at: now,
+    }),
+    cmd_weather_find_place: () => [
+      { name: "上海", region: "中国", latitude: 31.22, longitude: 121.46 },
+      { name: "上海市", region: "吉林，中国", latitude: 43.5, longitude: 125.2 },
+    ],
     // —— 铅笔批注：设 __shot-pencil 时笔记页边有三条 ——
     cmd_note_annotations: () => (localStorage.getItem("__shot-pencil") === "1" ? pencilNotes : []),
     cmd_annotate_notes: () => pencilNotes,

@@ -940,9 +940,17 @@ button.ca-time:hover {
     "deck deck miss";
 }
 
-/* 窗：刷了漆的木框、十字窗棂，里面是按时间变的天色。 */
-.ca-desk-window {
+/* 窗：刷了漆的木框、十字窗棂，里面是按时间变的天色和当地的天气；下面一行地点、天气、气温。 */
+.ca-desk-window-wrap {
   grid-area: window;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.ca-desk-window {
+  display: block;
   position: relative;
   margin: 0;
   aspect-ratio: 10 / 7;
@@ -961,6 +969,54 @@ button.ca-time:hover {
   height: 100%;
 }
 
+/* 雨丝和雪片：两屏同样的图案上下接着，往下平移一屏，循环起来看不出接缝。 */
+.ca-window-fall.rain {
+  animation: ca-window-fall 0.9s linear infinite;
+}
+
+.ca-window-fall.snow {
+  animation: ca-window-fall 9s linear infinite;
+}
+
+@keyframes ca-window-fall {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(140px);
+  }
+}
+
+/* 雷雨：每隔几秒白一下。 */
+.ca-window-flash {
+  opacity: 0;
+  animation: ca-window-flash 7s linear infinite;
+}
+
+@keyframes ca-window-flash {
+  0%,
+  90%,
+  100% {
+    opacity: 0;
+  }
+  91% {
+    opacity: 0.55;
+  }
+  92% {
+    opacity: 0.1;
+  }
+  93% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ca-window-fall,
+  .ca-window-flash {
+    animation: none;
+  }
+}
+
 .ca-desk-window-bars {
   position: absolute;
   inset: 0;
@@ -968,40 +1024,6 @@ button.ca-time:hover {
   background:
     linear-gradient(var(--window-frame), var(--window-frame)) center / 6px 100% no-repeat,
     linear-gradient(var(--window-frame), var(--window-frame)) center / 100% 6px no-repeat;
-}
-
-/* 台灯：天黑以后，一圈暖光落在摊开的笔记本上，光圈外暗一点。 */
-.ca-desk-surface[data-lamp]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse 46% 52% at 50% 26%,
-    var(--lamp-glow) 0%,
-    transparent 70%,
-    var(--lamp-shade) 100%
-  );
-  /* 光没有边：上下两头淡出，不在桌面边缘留一道硬线。 */
-  -webkit-mask-image: linear-gradient(transparent, #000 80px, #000 calc(100% - 160px), transparent);
-  mask-image: linear-gradient(transparent, #000 80px, #000 calc(100% - 160px), transparent);
-  animation: ca-lamp-on 0.9s var(--ease-out);
-}
-
-@keyframes ca-lamp-on {
-  from {
-    opacity: 0;
-  }
-  35% {
-    opacity: 0.6;
-  }
-  45% {
-    opacity: 0.3;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 /* 节气那天：标题旁边一小块黑板，粉笔写着节气名和第一候。 */
@@ -1215,8 +1237,8 @@ button.ca-time:hover {
 }
 
 /* 窄屏不放窗：一列里它只是挡路的装饰。 */
-.ca-app[data-bucket="compact"] .ca-desk-window,
-.ca-app[data-bucket="medium"] .ca-desk-window {
+.ca-app[data-bucket="compact"] .ca-desk-window-wrap,
+.ca-app[data-bucket="medium"] .ca-desk-window-wrap {
   display: none;
 }
 

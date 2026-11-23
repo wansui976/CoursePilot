@@ -904,7 +904,7 @@
       "haptics": "Haptics",
       "hapticsHint": "A light tap on phones when you swipe a card, miss one, or finish a review.",
       "deskWindow": "Window on the desk",
-      "deskWindowHint": "A small window in the desk's corner that follows the local time of day. Decoration only.",
+      "deskWindowHint": "A small window in the desk's corner that follows the local time of day, and the local weather once you pick a place. Decoration only.",
       "notePaper": "Note paper",
       "notePaperHint": "The ruling under your notes, like an exercise book. Background only; exports are unaffected.",
       "notePapers": {
@@ -913,7 +913,19 @@
         "grid": "Grid",
         "dots": "Dots",
         "mi": "Practice grid"
-      }
+      },
+      "weather": "Weather outside",
+      "weatherHint": "Pick a place and the window shows its rain and snow. Fetching the weather sends the place's approximate coordinates (about 1 km) or the city name to the free service Open-Meteo, with no account details; the place is stored on this device only.",
+      "weatherPlace": "Place",
+      "weatherOff": "None (sky follows the time of day only)",
+      "weatherClear": "No weather",
+      "weatherSearch": "Search",
+      "weatherSearchPlaceholder": "City name, e.g. Shanghai",
+      "weatherLocate": "Use my location",
+      "weatherHere": "Current location",
+      "weatherLocateFailed": "Couldn't get your location (no permission, or not supported on this device). Search for a city instead.",
+      "weatherNoResult": "No place found. Try another spelling.",
+      "weatherResults": "Results"
     },
     "studyReminder": {
       "title": "Study Reminder",
@@ -2559,7 +2571,18 @@
       "dawn": "Outside: dawn",
       "day": "Outside: daytime",
       "dusk": "Outside: dusk",
-      "night": "Outside: night"
+      "night": "Outside: night",
+      "weather": "{{place}} · {{condition}} {{temperature}}°",
+      "conditions": {
+        "clear": "Clear",
+        "cloudy": "Partly cloudy",
+        "overcast": "Overcast",
+        "fog": "Fog",
+        "drizzle": "Drizzle",
+        "rain": "Rain",
+        "snow": "Snow",
+        "thunder": "Thunderstorm"
+      }
     }
   },
   "memoryCurve": {

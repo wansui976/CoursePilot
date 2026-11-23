@@ -12,6 +12,7 @@ import {
 import { DENSITIES, useDensity } from "@/stores/density";
 import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
 import { NOTE_PAPERS, useNotePaper } from "@/stores/notePaper";
+import { WeatherPlaceRow } from "./WeatherPlaceRow";
 import { useFeedbackPrefs, type SoundLevel } from "@/lib/feedback";
 import { Switch } from "@/ui/switch";
 import { Select, Group, Row, StackRow } from "@/features/settings/primitives";
@@ -338,6 +339,7 @@ export function AppearanceSection() {
             />
           </Row>
         )}
+        {homeLayout === "desk" && deskWindow && <WeatherPlaceRow />}
         <Row label={t("settings.appearance.uiSound")} hint={t("settings.appearance.uiSoundHint")} layout="inline">
           <Segmented
             label={t("settings.appearance.uiSound")}
