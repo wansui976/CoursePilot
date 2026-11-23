@@ -563,7 +563,10 @@ export const scenes = [
     name: "notes-pages",
     devices: ["desktop"],
     run: async ({ page, shot }) => {
-      await page.evaluate(() => localStorage.setItem("__shot-long-notes", "1"));
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-long-notes", "1");
+        localStorage.setItem("course-ai-note-paper", "lined");
+      });
       await page.reload({ waitUntil: "networkidle" });
       await openVideo(page);
       await page.getByRole("tab", { name: /笔记/ }).click();

@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import { tabLabel } from "@/lib/noteTabs";
 import type { Editor } from "@tiptap/react";
-import { COURSE_COLORS } from "@/lib/types";
 
 /** 至少这么多个二级标题、而且笔记比一屏长出一半，才贴标签。 */
 const MIN_SECTIONS = 3;
 
 type Section = { text: string; el: HTMLElement };
 
+
+
 /**
- * 长笔记的侧边索引标签：每个二级标题一张彩色小纸签，竖着贴在页面右边缘，
- * 当前读到的那一节的标签多探出来一点；点一下跳到那一节。
+ * 长笔记的侧边索引标签：每个二级标题一张小纸签，竖着贴在页面右边缘。
+ * 纸签都是同一种纸色，只有当前读到的那一节用主题色、多探出来一点——一页上只有一处强调色。
+ * 点一下跳到那一节。
  */
 export function NoteTabs({
   editor,
@@ -28,7 +31,7 @@ export function NoteTabs({
     const scroller = scrollRef.current;
     if (!root || !scroller) return;
     const headings = Array.from(root.querySelectorAll<HTMLElement>("h2"))
-      .map((el) => ({ text: (el.textContent ?? "").trim(), el }))
+      .map((el) => ({ text: tabLabel(el.textContent ?? ""), el }))
       .filter((section) => section.text);
     const long = scroller.scrollHeight > scroller.clientHeight * 1.5;
     const next = headings.length >= MIN_SECTIONS && long ? headings : [];
@@ -85,7 +88,6 @@ export function NoteTabs({
     <nav className="ca-note-tabs" aria-label={t("notes.tabs")}>
       <div className="ca-note-tabs-rail" style={{ "--tab-h": `${tabHeight}px` } as React.CSSProperties}>
         {sections.map((section, i) => {
-          const color = COURSE_COLORS[i % COURSE_COLORS.length];
           return (
             <button
               key={`${i}-${section.text}`}
@@ -93,12 +95,6 @@ export function NoteTabs({
               className="ca-note-tab"
               aria-current={i === active ? "location" : undefined}
               title={section.text}
-              style={
-                {
-                  "--tab-bg": `var(--tag-${color}-bg)`,
-                  "--tab-ink": `var(--tag-${color}-text)`,
-                } as React.CSSProperties
-              }
               onClick={() => section.el.scrollIntoView({ behavior: "smooth", block: "start" })}
             >
               {/[\u3400-\u9fff]/.test(section.text) ? (
