@@ -706,6 +706,10 @@ export const scenes = [
         await page.getByRole("button", { name: "打开 AI 助手" }).click();
       }
       await shot();
+      await page.getByLabel("对 AI 助手说").fill("学习率太大会怎样？");
+      await page.getByLabel("发送").click();
+      await page.getByText("课上建议先从").waitFor({ timeout: 4000 });
+      await shot("answer");
     },
   },
   {
