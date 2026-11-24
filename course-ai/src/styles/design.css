@@ -1322,6 +1322,11 @@ button.ca-time:hover {
   color: var(--text-normal);
 }
 
+/* 译文排在原文正下方、和原文同一列；不写的话网格会把它塞进下一行最窄的时间列。 */
+.ca-transcript-text > [data-transcript-translation] {
+  grid-column: 2;
+}
+
 .ca-tr-time {
   font-family: var(--font-mono);
   font-size: 11.5px;
