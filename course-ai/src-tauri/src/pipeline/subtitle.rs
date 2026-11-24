@@ -89,11 +89,9 @@ fn parse_cues(input: &str) -> Vec<Cue> {
     cues
 }
 
-/// YouTube 自动字幕是「滚动」的：每条显示「上一行 + 正在滚出来的新一行」，中间还夹着
-/// 只有 10 毫秒、重复上一行的定格条。原样入库，同一句话会出现两三遍（翻译也跟着译几遍）。
-/// 看起来像这种字幕时，把每条开头和上一条末尾重复的行去掉，只留新滚出来的那一行；
-/// 什么都不剩的定格条并进上一段。
-fn collapse_rolling_captions(cues: Vec<Cue>) -> Vec<Cue> {
+/// 是不是 YouTube 那种「滚动」自动字幕：每条显示「上一行 + 正在滚出来的新一行」，
+/// 中间还夹着只有 10 毫秒、重复上一行的定格条。
+fn is_rolling(cues: &[Cue]) -> bool {
     let repeats = cues
         .windows(2)
         .filter(|pair| {
@@ -101,9 +99,12 @@ fn collapse_rolling_captions(cues: Vec<Cue>) -> Vec<Cue> {
         })
         .count();
     // 普通字幕偶尔也会连着两条一样（「对。」「对。」），要成规模才算滚动字幕。
-    if repeats < 3 || repeats * 3 < cues.len() {
-        return cues;
-    }
+    repeats >= 3 && repeats * 3 >= cues.len()
+}
+
+/// 滚动字幕原样入库，同一句话会出现两三遍（翻译也跟着译几遍）：把每条开头和上一条
+/// 末尾重复的行去掉，只留新滚出来的那一行；什么都不剩的定格条并进上一段。
+fn collapse_rolling_captions(cues: Vec<Cue>) -> Vec<Cue> {
     let mut out: Vec<Cue> = Vec::with_capacity(cues.len() / 2);
     let mut shown: Vec<String> = Vec::new();
     for mut cue in cues {
@@ -129,11 +130,159 @@ fn collapse_rolling_captions(cues: Vec<Cue>) -> Vec<Cue> {
     out
 }
 
-/// 解析 SRT 文本为段落。容错：忽略空条目、缺时间轴的文字；多行文本用空格拼接；
-/// YouTube 的滚动自动字幕会去掉重复的行。
+/// 一段最长多久，到了就在行尾断开。老的自动字幕整篇没有标点，只能这样分段；
+/// 有标点的只给特别长的句子兜底。
+const MAX_UNPUNCTUATED_MS: i64 = 8_000;
+const MAX_SENTENCE_MS: i64 = 25_000;
+
+/// 一个词（或一段不带空格的中日文）和它大约什么时候说出来。
+struct Token {
+    text: String,
+    at_ms: i64,
+    /// 和前一个词之间要不要空格。
+    spaced: bool,
+    /// 这一条字幕的最后一个词：这里可以在行尾断开。
+    line_end: bool,
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x3000..=0x303F
+            | 0x3040..=0x30FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0xFF00..=0xFFEF
+    )
+}
+
+/// 把一条字幕拆成词，按字数在这条的时间里摊开估出每个词的时间（转成 SRT 后逐词时间已经没了，
+/// 一行只有两三秒，估出来差不到一秒）。中文没有空格，在句末标点后面断开。
+fn tokenize_cue(cue: &Cue, prev_last: Option<char>, out: &mut Vec<Token>) {
+    let text = cue.lines.join(" ");
+    let total = text.chars().count().max(1) as i64;
+    let span = (cue.end_ms - cue.start_ms).max(0);
+    let first = out.len();
+    let mut word = String::new();
+    let mut word_start = 0usize;
+    // 和上一条之间：英文照常空一格，中文接中文不空。
+    let mut spaced = prev_last.is_some_and(|last| {
+        !(is_cjk(last) && text.trim_start().chars().next().is_some_and(is_cjk))
+    });
+    for (i, c) in text.chars().enumerate() {
+        if c.is_whitespace() {
+            if !word.is_empty() {
+                out.push(Token {
+                    text: std::mem::take(&mut word),
+                    at_ms: cue.start_ms + span * word_start as i64 / total,
+                    spaced,
+                    line_end: false,
+                });
+            }
+            spaced = true;
+            continue;
+        }
+        if word.is_empty() {
+            word_start = i;
+        }
+        word.push(c);
+        if matches!(c, '。' | '！' | '？') {
+            out.push(Token {
+                text: std::mem::take(&mut word),
+                at_ms: cue.start_ms + span * word_start as i64 / total,
+                spaced,
+                line_end: false,
+            });
+            spaced = false;
+        }
+    }
+    if !word.is_empty() {
+        out.push(Token {
+            text: word,
+            at_ms: cue.start_ms + span * word_start as i64 / total,
+            spaced,
+            line_end: false,
+        });
+    }
+    if out.len() > first {
+        if let Some(last) = out.last_mut() {
+            last.line_end = true;
+        }
+    }
+}
+
+/// 这个词是不是一句话的结尾。缩写（Mr. / e.g. / U.S.）和小数不算。
+fn ends_sentence(word: &str) -> bool {
+    let core = word.trim_end_matches(['"', '\'', '”', '’', ')', '）', '」', '』']);
+    let Some(last) = core.chars().last() else {
+        return false;
+    };
+    if matches!(last, '。' | '！' | '？' | '?' | '!') {
+        return true;
+    }
+    if last != '.' || core.ends_with("..") {
+        return core.ends_with("...") || core.ends_with('…');
+    }
+    let stem = core.trim_end_matches('.').to_lowercase();
+    const ABBREVIATIONS: [&str; 12] = [
+        "mr", "mrs", "ms", "dr", "prof", "st", "vs", "etc", "e.g", "i.e", "jr", "sr",
+    ];
+    // 单个字母（「A.」）和中间也带点的（「U.S.」）多半是缩写。
+    !(ABBREVIATIONS.contains(&stem.as_str()) || stem.chars().count() == 1 || stem.contains('.'))
+}
+
+/// 滚动字幕按屏幕上的一行切，一句话常被拦腰截成两段（翻译也只能一段段译半句）。
+/// 去重后把各行连成词流，在句末标点处重新断句；没有标点的攒到七八秒在行尾断开。
+fn regroup_into_sentences(cues: Vec<Cue>) -> Vec<Cue> {
+    let Some(final_end) = cues.last().map(|cue| cue.end_ms) else {
+        return cues;
+    };
+    let mut tokens: Vec<Token> = Vec::new();
+    for cue in &cues {
+        let prev_last = tokens.last().and_then(|token| token.text.chars().last());
+        tokenize_cue(cue, prev_last, &mut tokens);
+    }
+    // 平均几十个词才有一个句末标点，就当这份字幕没有标点。
+    let sentence_ends = tokens.iter().filter(|token| ends_sentence(&token.text)).count();
+    let max_ms = if sentence_ends * 60 >= tokens.len() {
+        MAX_SENTENCE_MS
+    } else {
+        MAX_UNPUNCTUATED_MS
+    };
+    let mut out = Vec::new();
+    let mut text = String::new();
+    let mut start_ms = 0;
+    for (i, token) in tokens.iter().enumerate() {
+        if text.is_empty() {
+            start_ms = token.at_ms;
+        } else if token.spaced {
+            text.push(' ');
+        }
+        text.push_str(&token.text);
+        let next_at = tokens.get(i + 1).map_or(final_end, |next| next.at_ms);
+        let too_long = token.line_end && next_at - start_ms >= max_ms;
+        if ends_sentence(&token.text) || too_long || i + 1 == tokens.len() {
+            out.push(Cue {
+                start_ms,
+                end_ms: next_at.max(start_ms),
+                lines: vec![std::mem::take(&mut text)],
+            });
+        }
+    }
+    out
+}
+
+/// 解析 SRT 文本为段落。容错：忽略空条目、缺时间轴的文字；多行文本用空格拼接。
+/// YouTube 的滚动自动字幕会去掉重复的行，并按句子重新分段。
 pub fn parse_srt(input: &str) -> Vec<SubSegment> {
-    collapse_rolling_captions(parse_cues(input))
-        .into_iter()
+    let cues = parse_cues(input);
+    let cues = if is_rolling(&cues) {
+        regroup_into_sentences(collapse_rolling_captions(cues))
+    } else {
+        cues
+    };
+    cues.into_iter()
         .filter_map(|cue| {
             let text = cue.lines.join(" ").trim().to_string();
             (!text.is_empty()).then_some(SubSegment {
@@ -252,21 +401,106 @@ mod tests {
 
     #[test]
     fn youtube_rolling_captions_keep_each_line_once() {
+        // 这份没有标点：去重后攒到七八秒在行尾断开。
         let segs = parse_srt(YOUTUBE_ROLLING_SRT);
         let texts: Vec<&str> = segs.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(
             texts,
             vec![
-                "hi this is the first lecture in MIT s",
-                "course 1806 linear algebra and I'm",
-                "Gilbert Strang the text for the course",
-                "is this book introduction to linear",
+                "hi this is the first lecture in MIT s course 1806 linear algebra and I'm",
+                "Gilbert Strang the text for the course is this book introduction to linear",
             ]
         );
-        // 第一条（时间轴和文字之间夹着空行）不能丢；10 毫秒的定格条并进上一段。
-        assert_eq!((segs[0].start_ms, segs[0].end_ms), (7940, 12150));
-        assert_eq!((segs[1].start_ms, segs[1].end_ms), (12150, 16680));
-        assert_eq!(segs[3].start_ms, 20640);
+        // 第一条（时间轴和文字之间夹着空行）不能丢。
+        assert_eq!((segs[0].start_ms, segs[0].end_ms), (7940, 16680));
+        assert_eq!((segs[1].start_ms, segs[1].end_ms), (16680, 24710));
+    }
+
+    /// 按 yt-dlp 转出来的样子拼一份滚动字幕：每行一条「上一行 + 新行」，后面跟一条 10 毫秒的定格条。
+    fn rolling_srt(lines: &[(i64, &str)], end_ms: i64) -> String {
+        let fmt = |ms: i64| {
+            format!(
+                "{:02}:{:02}:{:02},{:03}",
+                ms / 3_600_000,
+                ms / 60_000 % 60,
+                ms / 1000 % 60,
+                ms % 1000
+            )
+        };
+        let mut out = String::new();
+        let mut index = 1;
+        for (i, (start, text)) in lines.iter().enumerate() {
+            let next = lines.get(i + 1).map_or(end_ms, |(at, _)| *at);
+            let prev = if i == 0 { "" } else { lines[i - 1].1 };
+            out += &format!(
+                "{index}\r\n{} --> {}\r\n{prev}\r\n{text}\r\n\r\n",
+                fmt(*start),
+                fmt(next - 10)
+            );
+            out += &format!(
+                "{}\r\n{} --> {}\r\n{text}\r\n \r\n\r\n",
+                index + 1,
+                fmt(next - 10),
+                fmt(next)
+            );
+            index += 2;
+        }
+        out
+    }
+
+    #[test]
+    fn youtube_rolling_captions_are_regrouped_into_sentences() {
+        // 「Yes, you should panic about AI」开头：句号常落在一行中间。
+        let srt = rolling_srt(
+            &[
+                (0, "Imagine you've got two groups of"),
+                (2000, "experts. Group one says all kinds of"),
+                (4319, "reasonable things you intuitively agree"),
+                (6319, "with, but they've been wrong again and"),
+                (8480, "again for over a decade. Then there's"),
+                (10960, "group two. They say Mr. Smith was right"),
+            ],
+            13360,
+        );
+        let segs = parse_srt(&srt);
+        let texts: Vec<&str> = segs.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "Imagine you've got two groups of experts.",
+                "Group one says all kinds of reasonable things you intuitively agree with, \
+                 but they've been wrong again and again for over a decade.",
+                "Then there's group two.",
+                "They say Mr. Smith was right",
+            ]
+        );
+        // 句中断开的地方按字数在那一行里估时间：「Group」大约在第二行的四分之一处。
+        assert_eq!(segs[0].start_ms, 0);
+        assert!((2000..2900).contains(&segs[1].start_ms), "{}", segs[1].start_ms);
+        assert_eq!(segs[0].end_ms, segs[1].start_ms);
+        assert_eq!(segs.last().unwrap().end_ms, 13360);
+    }
+
+    #[test]
+    fn chinese_rolling_captions_split_after_full_stops() {
+        let srt = rolling_srt(
+            &[
+                (0, "我们先回忆一下上节课的"),
+                (2000, "损失函数。梯度指向函数"),
+                (4000, "值增长最快的方向。"),
+                (6000, "所以要沿着负梯度走"),
+            ],
+            8000,
+        );
+        let texts: Vec<String> = parse_srt(&srt).into_iter().map(|s| s.text).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "我们先回忆一下上节课的损失函数。",
+                "梯度指向函数值增长最快的方向。",
+                "所以要沿着负梯度走",
+            ]
+        );
     }
 
     #[test]
