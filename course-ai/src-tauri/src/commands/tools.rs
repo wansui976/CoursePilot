@@ -290,30 +290,14 @@ async fn import_webdav_file(
     on_event: &(dyn Fn(download::DownloadEvent) + Send + Sync),
     begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<Video> {
-    use tauri::Manager;
     let root_path: String =
         sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
             .bind(course_id)
             .fetch_optional(&state.db.pool)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
-    let out_dir = if root_path.trim().is_empty() {
-        app.path()
-            .app_data_dir()
-            .map_err(|error| AppError::Config(error.to_string()))?
-            .join("webdav-downloads")
-            .join(course_id)
-    } else {
-        PathBuf::from(&root_path)
-    };
-    // 课程没有目录时，下载队列按空目录拼出来的是相对路径：换到实际下载的地方。
-    let staging = staging
-        .filter(|path| path.is_absolute())
-        .unwrap_or_else(|| {
-            out_dir
-                .join(".courseai-import")
-                .join(uuid::Uuid::new_v4().to_string())
-        });
+    let out_dir = course_download_dir(app, course_id, &root_path, "webdav-downloads")?;
+    let staging = download_staging(staging, &out_dir);
     let file =
         crate::webdav_import::download(&state.db, &url, &out_dir, &staging, on_event, begin_import)
             .await?;
@@ -327,6 +311,38 @@ async fn import_webdav_file(
     video.source_type = crate::webdav_import::SOURCE_TYPE.into();
     video.source_uri = Some(url);
     Ok(video)
+}
+
+/// 下载的视频放哪：课程有自己的目录就放进去；没有目录（新建时没选文件夹，root_path
+/// 为空）就放进应用数据目录下按课程分开的子目录。不能直接用空路径：那是相对路径，
+/// 文件会落进进程的当前目录（开发时是源码目录），库里登记的也是相对路径。
+pub(crate) fn course_download_dir(
+    app: &tauri::AppHandle,
+    course_id: &str,
+    root_path: &str,
+    subdir: &str,
+) -> AppResult<PathBuf> {
+    use tauri::Manager;
+    if !root_path.trim().is_empty() {
+        return Ok(PathBuf::from(root_path));
+    }
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| AppError::Config(error.to_string()))?
+        .join(subdir)
+        .join(course_id))
+}
+
+/// 暂存目录：下载队列传进来的是按课程目录拼的，课程没有目录时那是相对路径，换到实际下载的地方。
+fn download_staging(staging: Option<PathBuf>, out_dir: &Path) -> PathBuf {
+    staging
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| {
+            out_dir
+                .join(".courseai-import")
+                .join(uuid::Uuid::new_v4().to_string())
+        })
 }
 
 /// 下载并登记一个网络视频。`staging` 为 None 时用临时目录；后台下载队列传入自己的
@@ -378,12 +394,8 @@ pub async fn import_url_with(
     } else {
         None
     };
-    let out_dir = PathBuf::from(&root_path);
-    let staging = staging.unwrap_or_else(|| {
-        out_dir
-            .join(".courseai-import")
-            .join(uuid::Uuid::new_v4().to_string())
-    });
+    let out_dir = course_download_dir(&app, &course_id, &root_path, "downloads")?;
+    let staging = download_staging(staging, &out_dir);
     let result = download::download(
         &url,
         &out_dir,

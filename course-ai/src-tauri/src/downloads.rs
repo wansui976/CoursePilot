@@ -230,7 +230,7 @@ impl DownloadQueue {
     fn register(
         &self,
         course_id: &str,
-        root_path: &str,
+        root: &std::path::Path,
         items: Vec<(DownloadRequest, Option<String>)>,
     ) -> Vec<DownloadJob> {
         let batch_id = Uuid::new_v4().to_string();
@@ -238,7 +238,7 @@ impl DownloadQueue {
         let mut created = Vec::new();
         for (item, progress_event) in items {
             let id = Uuid::new_v4().to_string();
-            let staging = PathBuf::from(root_path).join(".courseai-import").join(&id);
+            let staging = root.join(".courseai-import").join(&id);
             let title = if item.title.trim().is_empty() {
                 item.url.clone()
             } else {
@@ -661,7 +661,7 @@ pub async fn cmd_enqueue_downloads(
             break;
         }
     }
-    let root_path = download_root(&state, &course_id, all_webdav).await?;
+    let root_path = download_root(&app, &state, &course_id, all_webdav).await?;
     let created = app.state::<DownloadQueue>().register(
         &course_id,
         &root_path,
@@ -684,7 +684,7 @@ pub async fn download_and_wait(
     let webdav_only = crate::webdav_import::source_for_url(&state.db, &request.url)
         .await?
         .is_some();
-    let root_path = download_root(&state, &course_id, webdav_only).await?;
+    let root_path = download_root(app, &state, &course_id, webdav_only).await?;
     let queue = app.state::<DownloadQueue>();
     let (tx, rx) = tokio::sync::oneshot::channel();
     let created = queue.register(&course_id, &root_path, vec![(request, progress_event)]);
@@ -703,18 +703,31 @@ pub async fn download_and_wait(
     }
 }
 
-/// 下载要落到的课程目录；移动端不支持网络视频下载（网盘文件除外）。
-async fn download_root(state: &AppState, course_id: &str, webdav_only: bool) -> AppResult<String> {
+/// 下载要落到的目录（课程没有目录时是应用数据目录下的一个子目录）；
+/// 移动端不支持网络视频下载（网盘文件除外）。
+async fn download_root(
+    app: &AppHandle,
+    state: &AppState,
+    course_id: &str,
+    webdav_only: bool,
+) -> AppResult<PathBuf> {
     if is_mobile_os() && !webdav_only {
         return Err(AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
         ));
     }
-    sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
-        .bind(course_id)
-        .fetch_optional(&state.db.pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))
+    let root_path: String =
+        sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
+            .bind(course_id)
+            .fetch_optional(&state.db.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
+    let subdir = if webdav_only {
+        "webdav-downloads"
+    } else {
+        "downloads"
+    };
+    crate::commands::tools::course_download_dir(app, course_id, &root_path, subdir)
 }
 
 /// 推出入队快照并给每个任务起后台下载。
@@ -927,7 +940,7 @@ mod tests {
         let queue = DownloadQueue::default();
         let jobs = queue.register(
             "c1",
-            "/tmp/course",
+            std::path::Path::new("/tmp/course"),
             vec![(request("u1"), None), (request("u2"), None)],
         );
         // 没给标题时用链接占位，同一批共用 batch_id。
@@ -961,7 +974,11 @@ mod tests {
     #[test]
     fn a_failed_job_is_requeued_as_its_own_batch() {
         let queue = DownloadQueue::default();
-        let jobs = queue.register("c1", "/tmp/course", vec![(request("u1"), None)]);
+        let jobs = queue.register(
+            "c1",
+            std::path::Path::new("/tmp/course"),
+            vec![(request("u1"), None)],
+        );
         let id = jobs[0].id.clone();
         assert!(queue.requeue_failed(&id).is_none(), "只有失败的才能重试");
         queue.set_status(&id, "failed", Some("HTTP Error 412".into()), None);
