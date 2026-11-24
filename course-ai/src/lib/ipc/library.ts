@@ -119,6 +119,9 @@ export const videos = {
     invoke("cmd_video_cover", { videoId }),
   updateTitle: (id: string, title: string): Promise<Video> =>
     invoke("cmd_update_video_title", { id, title }),
+  /** 文稿页「没拿到字幕」的说明点掉后不再显示。 */
+  dismissSubtitleMissing: (videoId: string): Promise<void> =>
+    invoke("cmd_dismiss_subtitle_missing", { videoId }),
   delete: (id: string): Promise<void> => invoke("cmd_delete_video", { id }),
   restore: (id: string): Promise<void> => invoke("cmd_restore_video", { id }),
   purge: (id: string): Promise<void> => invoke("cmd_purge_video", { id }),

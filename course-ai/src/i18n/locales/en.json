@@ -677,7 +677,13 @@
     "quoteToNotes": "Quote to notes",
     "quotedToNotes": "Quoted to notes",
     "quoteToNotesFailed": "Couldn't add to notes. Try again.",
-    "guideMe": "Guide me"
+    "guideMe": "Guide me",
+    "subtitleMissing": {
+      "skipped": "This episode had no subtitles in the chosen language, so the transcript is made with speech recognition.",
+      "rateLimited": "The site kept rate-limiting the subtitle download, so the transcript is made with speech recognition.",
+      "failed": "Subtitles couldn't be downloaded (expired login, network or timeout), so the transcript is made with speech recognition."
+    },
+    "subtitleMissingDismiss": "Got it"
   },
   "notes": {
     "unsaved": "Unsaved",
@@ -2122,7 +2128,8 @@
     "cancelAll": "Cancel all",
     "retryAll": "Retry all",
     "readingFocus": "Focus reading",
-    "exitReadingFocus": "Exit focus reading (Esc)"
+    "exitReadingFocus": "Exit focus reading (Esc)",
+    "queueSubtitleMissing": "No subtitles; making the transcript with speech recognition"
   },
   "time": {
     "justNow": "Just now",

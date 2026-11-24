@@ -393,6 +393,11 @@ pub async fn ingest_subtitle(
         })
         .collect();
     let count = store_segments_with_backup(db, video_id, "bilibili_sub", &segs).await?;
+    // 字幕到底还是来了（比如之后手动导入）：「没拿到字幕」的说明作废。
+    sqlx::query("UPDATE videos SET subtitle_missing=NULL WHERE id=?")
+        .bind(video_id)
+        .execute(&db.pool)
+        .await?;
     if let Some((provider, model)) = correct {
         transcript_correction::autocorrect_transcript(db, &provider, &model, video_id, progress)
             .await?;
@@ -703,6 +708,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cnt, 2);
+        // 字幕到底还是导进来了：下载时记下的「没拿到字幕」作废。
+        sqlx::query("UPDATE videos SET subtitle_missing='rateLimited' WHERE id=?")
+            .bind(&video.id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        ingest_subtitle(&db, &video.id, srt, None, None)
+            .await
+            .unwrap();
+        let missing: Option<String> =
+            sqlx::query_scalar("SELECT subtitle_missing FROM videos WHERE id=?")
+                .bind(&video.id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(missing, None);
     }
 
     /// 字幕纠错也要逐批报进度：此前整段停在 60%，进度条只靠前端按时间估着往前挪。

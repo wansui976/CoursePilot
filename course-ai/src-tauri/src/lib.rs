@@ -121,9 +121,9 @@ use crate::commands::translate::{
 };
 use crate::commands::videos::{
     cmd_add_local_batch, cmd_add_local_video, cmd_cancel_crop_detect, cmd_delete_video,
-    cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url,
-    cmd_purge_trash, cmd_purge_video, cmd_restore_video, cmd_scan_folder, cmd_update_video_title,
-    cmd_video_codec, cmd_video_cover,
+    cmd_dismiss_subtitle_missing, cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash,
+    cmd_list_videos, cmd_media_url, cmd_purge_trash, cmd_purge_video, cmd_restore_video,
+    cmd_scan_folder, cmd_update_video_title, cmd_video_codec, cmd_video_cover,
 };
 use crate::commands::weather::{cmd_weather_find_place, cmd_weather_now};
 use crate::commands::webdav_import::{
@@ -357,6 +357,7 @@ pub fn run() {
             cmd_add_local_batch,
             cmd_list_videos,
             cmd_update_video_title,
+            cmd_dismiss_subtitle_missing,
             cmd_delete_video,
             cmd_ensure_playable,
             cmd_ensure_crop,

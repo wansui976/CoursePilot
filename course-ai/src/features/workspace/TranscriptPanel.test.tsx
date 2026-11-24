@@ -8,7 +8,7 @@ import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
 import { usePlayer } from "@/stores/player";
 import { useCaptionPrefs } from "@/stores/captionPrefs";
-import type { TranscriptSegment } from "@/lib/types";
+import type { SubtitleMissing, TranscriptSegment } from "@/lib/types";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
@@ -27,6 +27,9 @@ const { mockIpc } = vi.hoisted(() => ({
       run: vi.fn(),
       cancel: vi.fn(),
     },
+    videos: {
+      dismissSubtitleMissing: vi.fn(),
+    },
   },
 }));
 
@@ -44,7 +47,7 @@ function makeSegments(count: number): TranscriptSegment[] {
 }
 
 // 原生滚动列表：直接渲染即可（不再需要虚拟列表的视口/行高注入）。
-function renderTranscriptPanel(instanceKey = "one") {
+function renderTranscriptPanel(instanceKey = "one", subtitleMissing: SubtitleMissing | null = null) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -55,7 +58,7 @@ function renderTranscriptPanel(instanceKey = "one") {
   const ui = (videoId: string) => (
     <QueryClientProvider client={queryClient}>
       <div data-theme="light">
-        <TranscriptPanel key={instanceKey} videoId={videoId} />
+        <TranscriptPanel key={instanceKey} videoId={videoId} subtitleMissing={subtitleMissing} />
       </div>
     </QueryClientProvider>
   );
@@ -98,6 +101,27 @@ describe("TranscriptPanel", () => {
 
     expect(screen.getByRole("status", { name: "正在加载文稿" })).toBeInTheDocument();
     expect(screen.queryByText(/尚无文稿/)).not.toBeInTheDocument();
+  });
+
+  it("下载时没拿到字幕：顶上说明文稿是语音识别生成的，点「知道了」后不再显示", async () => {
+    mockIpc.transcripts.list.mockResolvedValue(makeSegments(2));
+    mockIpc.videos.dismissSubtitleMissing.mockResolvedValue(undefined);
+    renderTranscriptPanel("missing", "rateLimited");
+
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("一直被网站限流");
+    expect(note).toHaveTextContent("语音识别");
+    fireEvent.click(within(note).getByRole("button", { name: "知道了" }));
+
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    expect(mockIpc.videos.dismissSubtitleMissing).toHaveBeenCalledWith("video-1");
+  });
+
+  it("还没生成文稿时，空状态直接说明没拿到字幕", async () => {
+    mockIpc.transcripts.list.mockResolvedValue([]);
+    renderTranscriptPanel("missing-empty", "failed");
+
+    expect(await screen.findByText(/字幕没下成/)).toBeInTheDocument();
   });
 
   it("shows transcript load errors and retries them", async () => {

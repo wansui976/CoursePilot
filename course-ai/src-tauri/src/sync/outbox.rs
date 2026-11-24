@@ -656,7 +656,8 @@ mod tests {
         sqlx::query(
             "UPDATE videos SET file_path='/new/video.mp4',data_dir='/new/data',
                     processed_status='done',subtitle_path='/new/subtitle.srt',crop_top=0.1,
-                    media_state='missing',sync_updated_at=2,width=1920,height=1080
+                    media_state='missing',sync_updated_at=2,width=1920,height=1080,
+                    subtitle_missing='rateLimited'
              WHERE id='video-1'",
         )
         .execute(&db.pool)

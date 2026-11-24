@@ -422,6 +422,15 @@ pub async fn import_url_with(
         .await?;
     video.source_type = source_type.into();
     video.source_uri = Some(url);
+    // 请求了字幕却没拿到：记下原因，文稿页说明文稿是语音识别生成的。
+    if let Some(reason) = result.subtitle_missing {
+        sqlx::query("UPDATE videos SET subtitle_missing=? WHERE id=?")
+            .bind(reason)
+            .bind(&video.id)
+            .execute(&state.db.pool)
+            .await?;
+        video.subtitle_missing = Some(reason.to_string());
+    }
     // 若下到了字幕，挂到 video 上供流水线消化；一并记录导入时选的纠错偏好
     // （NULL = 跟随全局设置），后续「重新处理」也按它来。
     if let (Some(lang), Some(sub_path)) = (sub_lang.as_deref(), result.subtitle.as_ref()) {

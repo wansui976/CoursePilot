@@ -14,6 +14,8 @@ export type QueueItem = {
   video: Video;
   percent: number;
   message: string | null;
+  /** 下载时没拿到字幕：说明这一条在用语音识别生成文稿。 */
+  note?: string | null;
   failed: boolean;
   canCancel: boolean;
   jobLoadError: unknown;
@@ -312,6 +314,11 @@ export function ProcessingQueuePanel({
                     >
                       {message}
                     </div>
+                    {item.note && !failed && (
+                      <div className="mt-0.5 text-xs leading-relaxed text-[var(--text-faint)]">
+                        {item.note}
+                      </div>
+                    )}
                   </button>
                   {item.jobLoadError != null && (
                     <div className="border-t border-[var(--border-faint)] px-4 py-2">

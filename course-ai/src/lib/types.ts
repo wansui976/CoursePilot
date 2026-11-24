@@ -28,6 +28,9 @@ export const COURSE_COLORS = [
 ] as const;
 export type CourseColor = (typeof COURSE_COLORS)[number];
 
+/** 字幕没拿到的原因：这一集没有该语言的轨 / 一直被限流 / 别的原因没下成。 */
+export type SubtitleMissing = "skipped" | "rateLimited" | "failed";
+
 export interface Video {
   id: string;
   course_id: string;
@@ -46,6 +49,8 @@ export interface Video {
   subtitle_lang?: string | null;
   // 视频级字幕 AI 纠错偏好（B站导入时勾选）；缺省/NULL = 跟随全局设置。
   subtitle_autocorrect?: boolean | null;
+  /** 下载时请求了字幕却没拿到的原因；文稿页据此说明文稿是语音识别生成的。只存本机。 */
+  subtitle_missing?: SubtitleMissing | null;
   // 自带黑边四边裁剪占比（0~1），导入时 cropdetect 探测；缺省/NULL=无黑边。
   crop_top?: number | null;
   crop_right?: number | null;

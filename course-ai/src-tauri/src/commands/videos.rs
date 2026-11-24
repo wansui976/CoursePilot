@@ -31,6 +31,10 @@ pub struct Video {
     pub subtitle_lang: Option<String>,
     // 视频级字幕 AI 纠错偏好；NULL = 跟随全局设置。
     pub subtitle_autocorrect: Option<bool>,
+    /// 下载时请求了字幕却没拿到的原因（skipped / rateLimited / failed）；文稿页据此说明
+    /// 文稿是语音识别生成的。只存本机。
+    #[sqlx(default)]
+    pub subtitle_missing: Option<String>,
     // 视频在 B 站的 cid，弹幕抓取用；仅 bilibili 视频有。缺省时可按 source_uri 反查。
     pub bilibili_cid: Option<String>,
     // 自带黑边的四边裁剪占比（0~1），导入时 cropdetect 探测；NULL=未探测/无黑边。
@@ -273,6 +277,7 @@ pub async fn add_local_video(
         subtitle_path: None,
         subtitle_lang: None,
         subtitle_autocorrect: None,
+        subtitle_missing: None,
         bilibili_cid: None,
         crop_top: None,
         crop_right: None,
@@ -1088,6 +1093,19 @@ pub async fn cmd_update_video_title(
     title: String,
 ) -> AppResult<Video> {
     update_video_title(&state.db, &id, title).await
+}
+
+/// 文稿页上「没拿到字幕」的说明点掉之后不再显示。
+#[tauri::command]
+pub async fn cmd_dismiss_subtitle_missing(
+    state: State<'_, AppState>,
+    video_id: String,
+) -> AppResult<()> {
+    sqlx::query("UPDATE videos SET subtitle_missing=NULL WHERE id=?")
+        .bind(&video_id)
+        .execute(&state.db.pool)
+        .await?;
+    Ok(())
 }
 
 #[tauri::command]

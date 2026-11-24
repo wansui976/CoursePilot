@@ -191,6 +191,8 @@ pub(crate) fn is_bilibili_url(url: &str) -> bool {
 pub struct DownloadResult {
     pub video: PathBuf,
     pub subtitle: Option<PathBuf>,
+    /// 请求了字幕却没拿到的原因（skipped / rateLimited / failed），写进 videos.subtitle_missing。
+    pub subtitle_missing: Option<&'static str>,
 }
 
 /// 下载到 out_dir。max_height=None 取最高可用；sub_lang=Some 时一并下字幕。
@@ -269,6 +271,7 @@ pub async fn download(
         return Err(AppError::Pipeline(format!("yt-dlp failed: {stderr}")));
     }
     // 视频已经下好，再单独拿字幕。拿不到就不要了：导入后照常用语音识别生成文稿。
+    let mut subtitle_missing = None;
     if let Some(lang) = sub_lang.filter(|lang| !lang.trim().is_empty()) {
         let outcome = fetch_subtitles(
             &ytdlp,
@@ -281,6 +284,11 @@ pub async fn download(
         .await;
         let landed = newest_with_ext(staging, "srt").ok().flatten().is_some();
         if !landed {
+            subtitle_missing = Some(match outcome {
+                SubtitleOutcome::RateLimited => "rateLimited",
+                SubtitleOutcome::Failed => "failed",
+                SubtitleOutcome::Finished => "skipped",
+            });
             on_event(DownloadEvent::SubtitlesSkipped {
                 rate_limited: outcome == SubtitleOutcome::RateLimited,
                 failed: outcome == SubtitleOutcome::Failed,
@@ -293,7 +301,10 @@ pub async fn download(
     }
     let claimed = claim_downloaded(staging, out_dir, sub_lang);
     let _ = std::fs::remove_dir_all(staging);
-    claimed
+    claimed.map(|result| DownloadResult {
+        subtitle_missing,
+        ..result
+    })
 }
 
 /// 下完但入库前发现任务已被取消时的错误。
@@ -638,6 +649,7 @@ fn claim_downloaded(
     Ok(DownloadResult {
         video: move_into(out_dir, &video)?,
         subtitle: subtitle.map(|path| move_into(out_dir, &path)).transpose()?,
+        subtitle_missing: None,
     })
 }
 

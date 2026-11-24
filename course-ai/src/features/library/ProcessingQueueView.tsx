@@ -82,6 +82,7 @@ export function ProcessingQueueView({
       video,
       percent: Math.floor(queue.pipelineProgressFor(video.id) * 100),
       message,
+      note: video.subtitle_missing ? t("home.queueSubtitleMissing") : null,
       failed: active?.status === "failed",
       canCancel: active?.status === "running" || active?.status === "pending",
       jobLoadError,

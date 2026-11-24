@@ -86,7 +86,11 @@ export function VideoWorkbench({
       shellWide={shellWide}
       availableWidth={availableWidth}
       panel={
-        <TabsPanel videoId={video.id} allowSplit={allowsNotesSplit(shellWide, availableWidth)} />
+        <TabsPanel
+          videoId={video.id}
+          subtitleMissing={video.subtitle_missing ?? null}
+          allowSplit={allowsNotesSplit(shellWide, availableWidth)}
+        />
       }
       player={
         <section aria-label={t("home.workbench")} className="ca-player-col">

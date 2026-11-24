@@ -10,6 +10,7 @@ import {
   Languages,
   ChevronDown,
   ChevronUp,
+  Info,
   Locate,
   LocateFixed,
   Search,
@@ -27,7 +28,7 @@ import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
-import type { TranscriptSegment } from "@/lib/types";
+import type { SubtitleMissing, TranscriptSegment } from "@/lib/types";
 import { findActiveSegmentIndex } from "@/lib/transcript";
 import { TRANSLATION_LANGS, useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
 import type { TranslateProgress } from "@/lib/ipc";
@@ -214,9 +215,26 @@ function TranscriptText({ text }: { text: string }) {
   return <>{parts}</>;
 }
 
-export function TranscriptPanel({ videoId }: { videoId: string }) {
+export function TranscriptPanel({
+  videoId,
+  subtitleMissing = null,
+}: {
+  videoId: string;
+  /** 下载时没拿到字幕的原因：顶上说明这份文稿是语音识别生成的，可以点掉。 */
+  subtitleMissing?: SubtitleMissing | null;
+}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const [missingDismissed, setMissingDismissed] = useState(false);
+  const missingNote =
+    subtitleMissing && !missingDismissed ? t(`transcript.subtitleMissing.${subtitleMissing}`) : null;
+  const dismissMissing = () => {
+    setMissingDismissed(true);
+    void ipc.videos
+      .dismissSubtitleMissing(videoId)
+      .then(() => qc.invalidateQueries({ queryKey: qk.videos.all() }))
+      .catch(() => {});
+  };
   const transcriptQuery = useQuery(queries.transcripts(videoId));
   const segments = transcriptQuery.data ?? EMPTY_SEGMENTS;
   const requestSeek = usePlayer((s) => s.requestSeek);
@@ -683,7 +701,7 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
     return (
       <PanelEmptyState
         title={t("transcript.emptyTitle")}
-        description={t("transcript.emptyDescription")}
+        description={missingNote ?? t("transcript.emptyDescription")}
       />
     );
   }
@@ -839,6 +857,22 @@ export function TranscriptPanel({ videoId }: { videoId: string }) {
           </div>
         )}
       </div>
+      {missingNote && (
+        <div
+          role="note"
+          className="flex flex-none items-start gap-2 border-b border-[var(--border-subtle)] px-4 py-2 text-xs leading-relaxed text-[var(--text-muted)]"
+        >
+          <Info aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 flex-none text-[var(--text-faint)]" />
+          <span className="min-w-0 flex-1">{missingNote}</span>
+          <button
+            type="button"
+            onClick={dismissMissing}
+            className="ca-touch-44 flex-none rounded px-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
+          >
+            {t("transcript.subtitleMissingDismiss")}
+          </button>
+        </div>
+      )}
       <div
         ref={scrollerRef}
         tabIndex={-1}

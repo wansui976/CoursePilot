@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo,
 import { useContainerPixelWidth } from "@/lib/useContainerWidth";
 import { SPLIT_NOTES_MIN_WIDTH } from "./workbenchLayout";
 import { queries } from "@/lib/queries";
+import type { SubtitleMissing } from "@/lib/types";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
@@ -91,7 +92,15 @@ function TabBadge({ tab, videoId }: { tab: Tab; videoId: string }) {
   return null;
 }
 
-function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean }) {
+function VideoTabsPanel({
+  videoId,
+  subtitleMissing,
+  split,
+}: {
+  videoId: string;
+  subtitleMissing: SubtitleMissing | null;
+  split: boolean;
+}) {
   const { t } = useTranslation();
   // 存量恢复：练习已并入「更多」，读到旧值 "quiz" 时落到更多并直接定位练习视图。
   const [restored] = useState(() => readVideoResumeState(videoId));
@@ -222,7 +231,10 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
 
   const panels: { tab: Tab; node: React.ReactNode }[] = [
     { tab: "overview", node: <AiViewPanel videoId={videoId} /> },
-    { tab: "transcript", node: <TranscriptPanel videoId={videoId} /> },
+    {
+      tab: "transcript",
+      node: <TranscriptPanel videoId={videoId} subtitleMissing={subtitleMissing} />,
+    },
     { tab: "notes", node: <NotesPanel videoId={videoId} /> },
     {
       tab: "more",
@@ -315,9 +327,12 @@ function VideoTabsPanel({ videoId, split }: { videoId: string; split: boolean })
 
 export const TabsPanel = memo(function TabsPanel({
   videoId,
+  subtitleMissing = null,
   allowSplit = false,
 }: {
   videoId: string;
+  /** 下载时没拿到字幕的原因：文稿页顶上说明文稿是语音识别生成的。 */
+  subtitleMissing?: SubtitleMissing | null;
   /** 布局允许分栏（播放器不与面板并排）；真正分不分，看面板自身是否够宽。 */
   allowSplit?: boolean;
 }) {
@@ -328,7 +343,12 @@ export const TabsPanel = memo(function TabsPanel({
   // activeTab，同时让 visited 只从当前标签开始，避免上一视频的重面板继续保活。
   return (
     <div ref={rootRef} className="h-full min-h-0">
-      <VideoTabsPanel key={videoId} videoId={videoId} split={split} />
+      <VideoTabsPanel
+        key={videoId}
+        videoId={videoId}
+        subtitleMissing={subtitleMissing}
+        split={split}
+      />
     </div>
   );
 });

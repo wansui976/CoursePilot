@@ -675,7 +675,13 @@
     "quoteToNotes": "摘到笔记",
     "quotedToNotes": "已摘到笔记",
     "quoteToNotesFailed": "没能写进笔记，请重试",
-    "guideMe": "引导我理解"
+    "guideMe": "引导我理解",
+    "subtitleMissing": {
+      "skipped": "下载时这一集没有所选语言的字幕，文稿改用语音识别生成。",
+      "rateLimited": "下载字幕时一直被网站限流，文稿改用语音识别生成。",
+      "failed": "下载时字幕没下成（登录失效、网络或超时），文稿改用语音识别生成。"
+    },
+    "subtitleMissingDismiss": "知道了"
   },
   "notes": {
     "unsaved": "未保存",
@@ -2110,7 +2116,8 @@
     "cancelAll": "全部取消",
     "retryAll": "全部重试",
     "readingFocus": "专注阅读",
-    "exitReadingFocus": "退出专注阅读（Esc）"
+    "exitReadingFocus": "退出专注阅读（Esc）",
+    "queueSubtitleMissing": "没拿到字幕，正在用语音识别生成文稿"
   },
   "time": {
     "justNow": "刚刚",
