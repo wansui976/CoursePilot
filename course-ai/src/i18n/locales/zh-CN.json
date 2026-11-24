@@ -1764,7 +1764,8 @@
     "subtitles": "视频已下好，正在下载字幕…",
     "subtitlesWaiting": "字幕被网站限流（HTTP 429），{{seconds}} 秒后重试…",
     "subtitlesRateLimited": "字幕一直被网站限流，先不要了：导入后用语音识别生成文稿。",
-    "subtitlesSkipped": "这一集没有所选语言的字幕：导入后用语音识别生成文稿。"
+    "subtitlesSkipped": "这一集没有所选语言的字幕：导入后用语音识别生成文稿。",
+    "subtitlesFailed": "字幕没下成（登录失效、网络或超时）：导入后用语音识别生成文稿。"
   },
   "downloads": {
     "sectionTitle": "正在下载",

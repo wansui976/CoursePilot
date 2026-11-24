@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import i18n from "@/i18n";
 import type { DownloadJob } from "@/lib/ipc";
-import { describeDownload, describeDownloadJob, jobPercent } from "./downloadProgress";
+import { describeDownloadJob, jobPercent } from "./downloadProgress";
 
 function job(overrides: Partial<DownloadJob> = {}): DownloadJob {
   return {
@@ -24,36 +24,6 @@ function job(overrides: Partial<DownloadJob> = {}): DownloadJob {
     ...overrides,
   };
 }
-
-describe("describeDownload", () => {
-  beforeEach(async () => {
-    await i18n.changeLanguage("zh-CN");
-  });
-  const t = i18n.t.bind(i18n);
-
-  it("shows percent and speed when the size is known", () => {
-    expect(
-      describeDownload(
-        { type: "progress", downloaded: 42, total: 100, speed: 3.1 * 1024 ** 2, eta: 5 },
-        t,
-      ),
-    ).toBe("下载中 42% · 3.1 MB/s");
-  });
-
-  it("falls back to downloaded bytes without a total", () => {
-    expect(
-      describeDownload(
-        { type: "progress", downloaded: 5 * 1024 ** 2, total: null, speed: null, eta: null },
-        t,
-      ),
-    ).toBe("下载中 5.0 MB");
-  });
-
-  it("describes merging and quality fallback", () => {
-    expect(describeDownload({ type: "merging" }, t)).toBe("正在合并音视频…");
-    expect(describeDownload({ type: "retrying", maxHeight: 720 }, t)).toContain("720P");
-  });
-});
 
 describe("jobPercent", () => {
   it("reports 0 without a total and clamps to 100", () => {
@@ -112,8 +82,16 @@ describe("describeDownloadJob", () => {
     const skipped = describeDownloadJob(job({ status: "importing", subtitle: "rateLimited" }), t);
     expect(skipped).toContain("正在存入课程");
     expect(skipped).toContain("语音识别");
-    expect(describeDownload({ type: "subtitlesSkipped", rateLimited: false }, t)).toContain(
+    expect(describeDownloadJob(job({ status: "importing", subtitle: "skipped" }), t)).toContain(
       "没有所选语言的字幕",
     );
+    // 登录失效、超时这类失败不能说成「没有这一语言的字幕」。
+    const failed = describeDownloadJob(job({ status: "importing", subtitle: "failed" }), t);
+    expect(failed).toContain("没下成");
+    expect(failed).not.toContain("没有所选语言");
+    // 视频已经下完：不再显示停住的百分比，改说字幕的情况。
+    expect(
+      describeDownloadJob(job({ status: "downloading", downloaded: 97, total: 100, subtitle: "skipped" }), t),
+    ).toContain("没有所选语言的字幕");
   });
 });

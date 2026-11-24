@@ -244,11 +244,11 @@ export type UrlImportEvent =
   | { type: "subtitles" }
   /** 字幕被限流（HTTP 429），等这么多秒再试。 */
   | { type: "subtitlesWaiting"; seconds: number }
-  /** 没拿到字幕（没有这一语言的轨，或一直被限流）：导入后改用语音识别。 */
-  | { type: "subtitlesSkipped"; rateLimited: boolean };
+  /** 没拿到字幕（没有这一语言的轨、一直被限流或别的原因没下成）：导入后改用语音识别。 */
+  | { type: "subtitlesSkipped"; rateLimited: boolean; failed: boolean };
 
 /** 下载任务里字幕那一步的状态（视频下完后单独下，拿不到不算失败）。 */
-export type DownloadSubtitleState = "fetching" | "waiting" | "skipped" | "rateLimited";
+export type DownloadSubtitleState = "fetching" | "waiting" | "skipped" | "rateLimited" | "failed";
 
 /** 后台下载队列里的一个任务（`download:update` 事件与 `cmd_list_downloads` 共用）。 */
 export type DownloadStatus =

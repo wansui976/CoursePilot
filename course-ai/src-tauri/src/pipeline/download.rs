@@ -98,7 +98,8 @@ fn push_site_args(args: &mut Vec<String>, url: &str, cookies: Option<&str>) {
 
 /// 字幕被限流（HTTP 429）时，重试前各等几秒。YouTube 的限流通常几十秒内就松开。
 const SUBTITLE_BACKOFF_SECS: [u64; 2] = [10, 30];
-/// 一次字幕请求最多等多久：字幕只有几十 KB，卡住多半是被限流后挂着不回。
+/// 一次字幕请求最多等多久（字幕只有几十 KB，大部分时间花在解析页面上）。超时就不要了，
+/// 不重试：一个卡住的字幕请求不该把队列占着好几分钟。
 const SUBTITLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 /// 字幕这一步的结果。
@@ -108,7 +109,7 @@ pub enum SubtitleOutcome {
     Finished,
     /// 一直被限流，重试后仍拿不到。
     RateLimited,
-    /// 别的原因失败（登录、网络、格式转换……）。
+    /// 别的原因失败（登录、网络、格式转换、超时……）。
     Failed,
 }
 
@@ -145,8 +146,10 @@ async fn fetch_subtitles(
                 tracing::warn!(%error, "字幕下载启动失败");
                 return SubtitleOutcome::Failed;
             }
-            // 超时按限流处理：被限流的请求常常挂着不回。
-            Err(_) => "HTTP Error 429: timed out".to_string(),
+            Err(_) => {
+                tracing::warn!("字幕下载超时，放弃");
+                return SubtitleOutcome::Failed;
+            }
         };
         if !is_rate_limited(&stderr) {
             tracing::warn!(stderr = %stderr_tail(&stderr), "字幕下载失败");
@@ -280,6 +283,7 @@ pub async fn download(
         if !landed {
             on_event(DownloadEvent::SubtitlesSkipped {
                 rate_limited: outcome == SubtitleOutcome::RateLimited,
+                failed: outcome == SubtitleOutcome::Failed,
             });
         }
     }
@@ -374,9 +378,10 @@ pub enum DownloadEvent {
     Subtitles,
     /// 字幕被限流（HTTP 429），等这么多秒再试。
     SubtitlesWaiting { seconds: u64 },
-    /// 没拿到字幕（这一集没有该语言的轨，或一直被限流），改用语音识别生成文稿。
+    /// 没拿到字幕，改用语音识别生成文稿。`rate_limited`：一直被限流；`failed`：别的原因
+    /// 没下成（登录失效、网络、超时……）；都不是就是这一集没有该语言的轨。
     #[serde(rename_all = "camelCase")]
-    SubtitlesSkipped { rate_limited: bool },
+    SubtitlesSkipped { rate_limited: bool, failed: bool },
 }
 
 /// 跑一次 yt-dlp，边跑边把进度推出去。返回 `Some(stderr)` 表示 yt-dlp 失败退出。

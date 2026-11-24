@@ -1769,7 +1769,8 @@
     "subtitles": "Video downloaded, fetching subtitles…",
     "subtitlesWaiting": "Subtitles are rate-limited by the site (HTTP 429). Retrying in {{seconds}}s…",
     "subtitlesRateLimited": "Subtitles kept getting rate-limited, so they were skipped. A transcript will be made with speech recognition after import.",
-    "subtitlesSkipped": "This episode has no subtitles in the chosen language. A transcript will be made with speech recognition after import."
+    "subtitlesSkipped": "This episode has no subtitles in the chosen language. A transcript will be made with speech recognition after import.",
+    "subtitlesFailed": "Subtitles couldn't be downloaded (expired login, network or timeout). A transcript will be made with speech recognition after import."
   },
   "downloads": {
     "sectionTitle": "Downloading",

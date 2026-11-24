@@ -52,7 +52,8 @@ pub struct DownloadJob {
     /// 只给数字，提示文案由前端按界面语言写。
     pub retry_height: Option<u32>,
     /// 字幕这一步（视频下完后单独下）：fetching 正在下 | waiting 被限流、等着重试 |
-    /// skipped 这一集没有该语言的字幕 | rateLimited 一直被限流、放弃了。后两种都改用语音识别。
+    /// skipped 这一集没有该语言的字幕 | rateLimited 一直被限流、放弃了 |
+    /// failed 别的原因没下成。后三种都改用语音识别。
     pub subtitle: Option<String>,
     /// waiting 时还要等几秒。
     pub subtitle_wait: Option<u64>,
@@ -185,6 +186,10 @@ impl DownloadQueue {
                 job.subtitle_wait = None;
             }
             DownloadEvent::Subtitles => {
+                // 视频已经下完：单文件下载（不经过合并）最后一次进度可能停在 97%，补满。
+                if let Some(total) = job.total.filter(|total| *total > 0) {
+                    job.downloaded = total;
+                }
                 job.speed = None;
                 job.eta = None;
                 job.subtitle = Some("fetching".into());
@@ -194,15 +199,18 @@ impl DownloadQueue {
                 job.subtitle = Some("waiting".into());
                 job.subtitle_wait = Some(seconds);
             }
-            DownloadEvent::SubtitlesSkipped { rate_limited } => {
-                job.subtitle = Some(
-                    if rate_limited {
-                        "rateLimited"
-                    } else {
-                        "skipped"
-                    }
-                    .into(),
-                );
+            DownloadEvent::SubtitlesSkipped {
+                rate_limited,
+                failed,
+            } => {
+                let state = if rate_limited {
+                    "rateLimited"
+                } else if failed {
+                    "failed"
+                } else {
+                    "skipped"
+                };
+                job.subtitle = Some(state.into());
                 job.subtitle_wait = None;
             }
         }
@@ -722,12 +730,7 @@ async fn download_root(
             .fetch_optional(&state.db.pool)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
-    let subdir = if webdav_only {
-        "webdav-downloads"
-    } else {
-        "downloads"
-    };
-    crate::commands::tools::course_download_dir(app, course_id, &root_path, subdir)
+    crate::commands::tools::course_download_dir(app, course_id, &root_path)
 }
 
 /// 推出入队快照并给每个任务起后台下载。
@@ -1054,22 +1057,47 @@ mod tests {
             .lock()
             .unwrap()
             .jobs
-            .insert("j1".into(), sample_job("j1"));
+            .insert(
+                "j1".into(),
+                DownloadJob {
+                    downloaded: 97,
+                    total: Some(100),
+                    ..sample_job("j1")
+                },
+            );
         let fetching = queue.apply_event("j1", DownloadEvent::Subtitles).unwrap();
         assert_eq!(fetching.subtitle.as_deref(), Some("fetching"));
+        // 视频已经下完，进度条不该停在 97%。
+        assert_eq!(fetching.downloaded, 100);
         let waiting = queue
             .apply_event("j1", DownloadEvent::SubtitlesWaiting { seconds: 10 })
             .unwrap();
         assert_eq!(waiting.subtitle.as_deref(), Some("waiting"));
         assert_eq!(waiting.subtitle_wait, Some(10));
         let skipped = queue
-            .apply_event("j1", DownloadEvent::SubtitlesSkipped { rate_limited: true })
+            .apply_event(
+                "j1",
+                DownloadEvent::SubtitlesSkipped {
+                    rate_limited: true,
+                    failed: false,
+                },
+            )
             .unwrap();
         assert_eq!(skipped.subtitle.as_deref(), Some("rateLimited"));
         assert_eq!(skipped.subtitle_wait, None);
         // 字幕没拿到不算失败：任务状态不动，error 仍为空。
         assert_ne!(skipped.status, "failed");
         assert_eq!(skipped.error, None);
+        let failed = queue
+            .apply_event(
+                "j1",
+                DownloadEvent::SubtitlesSkipped {
+                    rate_limited: false,
+                    failed: true,
+                },
+            )
+            .unwrap();
+        assert_eq!(failed.subtitle.as_deref(), Some("failed"));
     }
 
     #[test]
