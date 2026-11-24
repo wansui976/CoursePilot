@@ -32,7 +32,9 @@ export const TimestampNode = Node.create({
           ? "ca-ts-chip ca-ts-source-chip cursor-pointer rounded px-1 text-xs text-[var(--text-muted)] align-middle"
           : "ca-ts-chip ca-time cursor-pointer align-middle",
       }),
-      `${source ? "" : "▶ "}${HTMLAttributes.label || formatMs(ms)}`,
+      // 统一按播放器同款格式显示（>=1 小时为 hh:mm:ss，否则 mm:ss），
+      // 不再沿用导入时模型/字幕写下的「总分钟:秒」，免得笔记里的时间与进度条对不上。
+      `${source ? "" : "▶ "}${formatMs(ms)}`,
     ];
   },
 });

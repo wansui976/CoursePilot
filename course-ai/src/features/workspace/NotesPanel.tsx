@@ -73,6 +73,9 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   const qc = useQueryClient();
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  // 是否已经真正按历史位置恢复过（而不是只在骨架上试了一下）。
+  // StrictMode（dev）挂载后会立刻跑一次 cleanup，那时还没恢复，不能把 0 写回本地。
+  const restoreReadyRef = useRef<string | null>(null);
   const [writeState, setWriteState] = useState(() =>
     notesCoordinator.getState(videoId),
   );
@@ -343,7 +346,9 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     // 把 ref 快照进闭包：cleanup 运行时 scrollerRef.current 可能已被 React 置空。
     const scroller = scrollerRef.current;
     return () => {
-      if (scroller) {
+      // StrictMode（dev）会在首次挂载后立刻跑一次 cleanup：此时正文可能还没装载，
+      // scroller.scrollTop 还是 0，写回会把真正的历史位置抹掉。只有真正恢复过才补写。
+      if (scroller && restoreReadyRef.current === videoId) {
         writeVideoResumeState(videoId, {
           notesScrollTop: scroller.scrollTop,
         });
@@ -353,9 +358,13 @@ export function NotesPanel({ videoId }: { videoId: string }) {
 
   useEffect(() => {
     if (!scrollerRef.current) return;
+    // 正文还没落定先不动：在骨架上恢复会被浏览器夹回 0，也会让上面的 cleanup 误以为
+    // 「当前就在顶部」。等真正的正文（或本地草稿）渲染出来再恢复。
+    if (notesQuery.isPending) return;
     const savedScrollTop = readVideoResumeState(videoId).notesScrollTop;
     scrollerRef.current.scrollTop = savedScrollTop;
-  }, [notesContent, videoId]);
+    restoreReadyRef.current = videoId;
+  }, [notesContent, videoId, notesQuery.isPending]);
 
   function rememberNotesScroll() {
     if (!scrollerRef.current) return;

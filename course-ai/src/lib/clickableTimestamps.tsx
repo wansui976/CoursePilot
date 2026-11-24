@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { formatMs } from "@/lib/time";
 import { parseTimestamp, TIMESTAMP_RE } from "@/lib/markdownToTiptap";
 
 /**
@@ -31,7 +32,7 @@ export function withClickableTimestamps(
         onClick={() => onSeek(ms)}
         className="ca-ts-chip mx-0.5 inline-flex items-center rounded px-0.5 align-baseline [font-family:var(--font-app)] text-xs tabular-nums text-[var(--accent-text)] hover:bg-[var(--surface-card-hover)]"
       >
-        ▶ {match[1]}
+        ▶ {formatMs(ms)}
       </button>,
     );
     last = match.index + match[0].length;

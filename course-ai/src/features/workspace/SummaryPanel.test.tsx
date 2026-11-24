@@ -1,8 +1,10 @@
 import "@/i18n";
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { SummaryPanel } from "./SummaryPanel";
 
 const { mockIpc, player } = vi.hoisted(() => ({
@@ -22,18 +24,19 @@ vi.mock("@/stores/player", () => {
   return { usePlayer };
 });
 
-function renderSummaryPanel() {
+function renderSummaryPanel(strict = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
-  return render(
+  const tree = (
     <QueryClientProvider client={queryClient}>
       <SummaryPanel videoId="video-1" />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 describe("SummaryPanel", () => {
@@ -67,6 +70,37 @@ describe("SummaryPanel", () => {
       "aria-expanded",
       "false",
     );
+  });
+
+  it("restores the saved summary scroll position after remounting", async () => {
+    writeVideoResumeState("video-1", { summaryScrollTop: 180 });
+    const { container } = renderSummaryPanel();
+
+    await screen.findByText("这是整体摘要正文。");
+    const scroller = container.querySelector<HTMLElement>(".ca-panel-scroll-end");
+    await waitFor(() => expect(scroller?.scrollTop).toBe(180));
+  });
+
+  it("does not wipe the saved scroll during StrictMode's mount/cleanup cycle", async () => {
+    writeVideoResumeState("video-1", { summaryScrollTop: 180 });
+    let resolveSummary!: (value: string) => void;
+    mockIpc.ai.getSummary.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveSummary = resolve;
+      }),
+    );
+
+    const { container } = renderSummaryPanel(true);
+    // StrictMode 已跑过一次挂载→cleanup：加载中的 0 不能覆盖真正的历史位置。
+    expect(readVideoResumeState("video-1").summaryScrollTop).toBe(180);
+
+    await act(async () => {
+      resolveSummary("这是整体摘要正文。");
+    });
+    await screen.findByText("这是整体摘要正文。");
+
+    const scroller = container.querySelector<HTMLElement>(".ca-panel-scroll-end");
+    await waitFor(() => expect(scroller?.scrollTop).toBe(180));
   });
 
   it("shows a retryable read error instead of the empty state or generation entry", async () => {

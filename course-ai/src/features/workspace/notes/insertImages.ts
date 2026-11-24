@@ -53,7 +53,7 @@ export function imageFilesFromTransfer(data: Transfer | null | undefined): File[
 
 /**
  * 插入一组块。`at` 给定时插在那个位置（拖放落点）；否则编辑器有焦点就插在光标处，
- * 没有焦点（光标还停在开头的默认位置）就接在末尾——和「记一笔」一样。
+ * 没有焦点（光标还停在开头的默认位置）就接在末尾，免得落到文档开头。
  */
 export function insertBlocks(editor: Editor, content: JSONContent[], at?: number) {
   if (at != null) {

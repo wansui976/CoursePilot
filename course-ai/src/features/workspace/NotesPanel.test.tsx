@@ -2,9 +2,10 @@ import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotesPanel } from "./NotesPanel";
-import { readVideoResumeState } from "@/lib/resumeState";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
 
 const { mockIpc, editorCapture, confirmMock } = vi.hoisted(() => ({
@@ -113,7 +114,7 @@ vi.mock("@tiptap/react", () => ({
   },
 }));
 
-function renderNotesPanel(videoId = "video-1", instanceKey = "one") {
+function renderNotesPanel(videoId = "video-1", instanceKey = "one", strict = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -121,11 +122,12 @@ function renderNotesPanel(videoId = "video-1", instanceKey = "one") {
     },
   });
 
-  return render(
+  const tree = (
     <QueryClientProvider client={queryClient}>
       <NotesPanel key={instanceKey} videoId={videoId} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 describe("NotesPanel", () => {
@@ -205,6 +207,35 @@ describe("NotesPanel", () => {
     await waitFor(() => {
       expect(remountedScroller.scrollTop).toBe(360);
     });
+  });
+
+  it("waits for notes content before applying the saved scroll under StrictMode", async () => {
+    writeVideoResumeState("video-1", { notesScrollTop: 380 });
+    let resolveNotes!: (value: string) => void;
+    mockIpc.ai.getNotes.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveNotes = resolve;
+      }),
+    );
+
+    renderNotesPanel("video-1", "strict-scroll", true);
+    const scroller = await screen.findByLabelText("笔记内容滚动区");
+
+    // 骨架阶段不能先恢复（浏览器会把 scrollTop 夹回 0，StrictMode 的首次 cleanup
+    // 再把这个 0 写回本地，历史位置就丢了）。
+    expect(scroller.scrollTop).toBe(0);
+
+    await act(async () => {
+      resolveNotes(
+        JSON.stringify({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "笔记正文" }] }],
+        }),
+      );
+    });
+    await screen.findByText("笔记正文");
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(380));
   });
 
   it("keeps notes scroll positions isolated by video", async () => {

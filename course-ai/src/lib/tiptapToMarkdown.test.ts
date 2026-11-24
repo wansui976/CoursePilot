@@ -23,7 +23,7 @@ describe("tiptapToMarkdown", () => {
     );
   });
 
-  it("keeps source timestamps from a Tiptap snapshot", () => {
+  it("normalizes source timestamps to the player's clock format", () => {
     expect(
       tiptapToMarkdown({
         type: "doc",
@@ -37,7 +37,7 @@ describe("tiptapToMarkdown", () => {
           },
         ],
       }),
-    ).toBe("来源 [105:30]");
+    ).toBe("来源 [01:45:30]");
   });
 });
 

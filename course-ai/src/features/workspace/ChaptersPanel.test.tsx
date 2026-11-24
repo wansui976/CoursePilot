@@ -1,8 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { ChaptersPanel } from "./ChaptersPanel";
 
 const { mockIpc, player, feynman } = vi.hoisted(() => ({
@@ -26,18 +28,19 @@ vi.mock("@/stores/player", () => {
   return { usePlayer };
 });
 
-function renderChaptersPanel() {
+function renderChaptersPanel(strict = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
-  return render(
+  const tree = (
     <QueryClientProvider client={queryClient}>
       <ChaptersPanel videoId="video-1" />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 describe("ChaptersPanel", () => {
@@ -80,6 +83,56 @@ describe("ChaptersPanel", () => {
     await waitFor(() => {
       expect(player.requestSeek).toHaveBeenCalledWith(5000);
     });
+  });
+
+  it("restores the saved chapters scroll position when the panel remounts", async () => {
+    writeVideoResumeState("video-1", { chaptersScrollTop: 120 });
+    mockIpc.ai.getChapters.mockResolvedValue([
+      { id: "c1", start_ms: 0, title: "开场", summary: "介绍" },
+      { id: "c2", start_ms: 10_000, title: "第二讲", summary: "继续" },
+    ]);
+
+    const { container } = renderChaptersPanel();
+    await screen.findByText("开场");
+
+    const scroller = container.querySelector<HTMLElement>(".ca-panel-scroll-end");
+    await waitFor(() => expect(scroller?.scrollTop).toBe(120));
+  });
+
+  it("does not wipe the saved scroll during StrictMode's mount/cleanup cycle", async () => {
+    writeVideoResumeState("video-1", { chaptersScrollTop: 120 });
+    let resolveChapters!: (value: { id: string; start_ms: number; title: string; summary: string }[]) => void;
+    mockIpc.ai.getChapters.mockReturnValue(
+      new Promise((resolve) => {
+        resolveChapters = resolve;
+      }),
+    );
+
+    const { container } = renderChaptersPanel(true);
+    // StrictMode 已跑过一次挂载→cleanup：加载中的 0 不能覆盖真正的历史位置。
+    expect(readVideoResumeState("video-1").chaptersScrollTop).toBe(120);
+
+    await act(async () => {
+      resolveChapters([{ id: "c1", start_ms: 0, title: "开场", summary: "介绍" }]);
+    });
+    await screen.findByText("开场");
+
+    const scroller = container.querySelector<HTMLElement>(".ca-panel-scroll-end");
+    await waitFor(() => expect(scroller?.scrollTop).toBe(120));
+  });
+
+  it("offers a follow-playback toggle that is on by default", async () => {
+    mockIpc.ai.getChapters.mockResolvedValue([
+      { id: "c1", start_ms: 0, title: "开场", summary: "介绍" },
+    ]);
+    renderChaptersPanel();
+
+    const follow = await screen.findByRole("button", { name: "跟随" });
+    expect(follow).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(follow);
+
+    expect(follow).toHaveAttribute("aria-pressed", "false");
   });
 
   it("offers one text button to pick a chapter instead of a mic on every chapter", async () => {

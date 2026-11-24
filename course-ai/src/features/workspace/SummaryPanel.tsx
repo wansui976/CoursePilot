@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { usePlayer } from "@/stores/player";
 import { TextSkeleton } from "@/ui/skeleton";
 import { PanelEmptyState } from "@/ui/empty-state";
@@ -42,6 +43,46 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
     refetch,
   } = useQuery(queries.summary(videoId));
   const generate = useAiGeneration(videoId, "summary");
+  // 概览滚到哪儿记在本地：切到处理队列再回来、或收起再展开时都能接着看，
+  // 不用重新往下找。滚动时节流写入（400ms），卸载时补最后一次。
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const savedScrollTop = useRef(0);
+  const saveTimer = useRef<number | undefined>(undefined);
+  const restoredForRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    // 摘要异步加载，等正文真正渲染出来（高度就位）再恢复，否则会被夹回 0。
+    if (collapsed || isLoading) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    if (restoredForRef.current !== videoId) {
+      savedScrollTop.current = readVideoResumeState(videoId).summaryScrollTop;
+      restoredForRef.current = videoId;
+    }
+    scroller.scrollTop = savedScrollTop.current;
+  }, [videoId, collapsed, isLoading, summary]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      // StrictMode（dev）挂载后会立刻跑一次 cleanup：此时摘要可能还在加载，
+      // savedScrollTop 仍是 0，写回去会把真正的历史位置抹掉。只有真正恢复过才补写。
+      if (restoredForRef.current === videoId) {
+        writeVideoResumeState(videoId, { summaryScrollTop: savedScrollTop.current });
+      }
+    };
+  }, [videoId]);
+
+  function onScroll() {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    savedScrollTop.current = scroller.scrollTop;
+    if (saveTimer.current) return;
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = undefined;
+      writeVideoResumeState(videoId, { summaryScrollTop: savedScrollTop.current });
+    }, 400);
+  }
 
   function toggleCollapsed() {
     setCollapsed((c) => {
@@ -88,7 +129,11 @@ export function SummaryPanel({ videoId }: { videoId: string }) {
       )}
       {!collapsed && (
         <>
-          <div className="ca-panel-scroll-end min-h-0 flex-1 overflow-y-auto px-3 pt-1">
+          <div
+            ref={scrollerRef}
+            onScroll={onScroll}
+            className="ca-panel-scroll-end min-h-0 flex-1 overflow-y-auto px-3 pt-1"
+          >
             {!isError && generate.isError && (
               <ErrorNote
                 className="mb-2"

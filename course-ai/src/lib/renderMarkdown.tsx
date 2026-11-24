@@ -3,6 +3,7 @@ import { CodeBlock } from "@/ui/CodeBlock";
 import { MathText } from "@/ui/MathText";
 import i18n from "@/i18n";
 import { withClickableTimestamps } from "@/lib/clickableTimestamps";
+import { formatMs } from "@/lib/time";
 import {
   isTableDivider,
   isTableRow,
@@ -127,11 +128,11 @@ function timestampSources(sources: TimestampSource[], onSeek: Seek) {
         <button
           key={`${source.ms}-${index}`}
           type="button"
-          aria-label={i18n.t("markdown.jumpTo", { time: source.label })}
+          aria-label={i18n.t("markdown.jumpTo", { time: formatMs(source.ms) })}
           onClick={() => onSeek(source.ms)}
           className="ca-ts-chip rounded px-1.5 py-0.5 tabular-nums text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
         >
-          {source.label}
+          {formatMs(source.ms)}
         </button>
       ))}
     </span>

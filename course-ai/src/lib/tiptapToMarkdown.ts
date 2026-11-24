@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { formatMs } from "@/lib/time";
 
 // 方括号不转义：`\[ … \]` 是行间公式的定界符，转义了读回来会变成公式。
 function escapeText(value: string): string {
@@ -7,13 +8,9 @@ function escapeText(value: string): string {
     .replace(/([`*_~])/g, "\\$1");
 }
 
+// 导出统一用播放器同款时间格式：>=1 小时写 hh:mm:ss，否则 mm:ss。
 function timestampLabel(node: JSONContent): string {
-  const label = node.attrs?.label;
-  if (typeof label === "string" && label.trim()) return label.trim();
-  const totalSeconds = Math.max(0, Math.floor(Number(node.attrs?.ms ?? 0) / 1000));
-  const seconds = totalSeconds % 60;
-  const minutes = Math.floor(totalSeconds / 60);
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return formatMs(Number(node.attrs?.ms ?? 0));
 }
 
 type Mark = NonNullable<JSONContent["marks"]>[number];

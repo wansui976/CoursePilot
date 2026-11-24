@@ -20,6 +20,8 @@ describe("resumeState", () => {
       activeTab: "notes",
       notesScrollTop: 120,
       transcriptScrollTop: 0,
+      summaryScrollTop: 0,
+      chaptersScrollTop: 0,
       studyPanelWidth: null,
       studyPanelCollapsed: false,
     });
@@ -76,6 +78,8 @@ describe("resumeState", () => {
       activeTab: null,
       notesScrollTop: 0,
       transcriptScrollTop: 0,
+      summaryScrollTop: 0,
+      chaptersScrollTop: 0,
       studyPanelWidth: null,
       studyPanelCollapsed: false,
     });
@@ -86,5 +90,18 @@ describe("resumeState", () => {
 
     expect(readVideoResumeState("video-1").studyPanelCollapsed).toBe(true);
     expect(readVideoResumeState("video-2").studyPanelCollapsed).toBe(false);
+  });
+
+  it("keeps overview and chapters scroll positions per video", () => {
+    writeVideoResumeState("video-1", { summaryScrollTop: 80, chaptersScrollTop: 160 });
+
+    expect(readVideoResumeState("video-1")).toMatchObject({
+      summaryScrollTop: 80,
+      chaptersScrollTop: 160,
+    });
+    expect(readVideoResumeState("video-2")).toMatchObject({
+      summaryScrollTop: 0,
+      chaptersScrollTop: 0,
+    });
   });
 });
