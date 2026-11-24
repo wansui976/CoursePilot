@@ -44,14 +44,22 @@ chmod 755 "$ffmpeg"
 xattr -c "$ffmpeg" 2>/dev/null || true
 codesign --force --sign - "$ffmpeg"
 
-ytdlp="$binary_dir/yt-dlp-$target"
-echo "Downloading yt-dlp for $target"
+# yt-dlp 用官方的「目录版」（yt-dlp_macos.zip，程序 + _internal/ 库目录，通用二进制），
+# 作为资源整个放进 Resources/yt-dlp-dist/（tauri.macos.conf.json）。单文件版 yt-dlp_macos
+# 每次启动都把自己解压到新的临时目录，macOS 每次重新扫描，光 --version 就要二十多秒；
+# 目录版只在第一次被扫，之后启动 0.2 秒。
+ytdlp_dist="$binary_dir/yt-dlp-dist"
+ytdlp="$ytdlp_dist/yt-dlp_macos"
+echo "Downloading yt-dlp (onedir) for $target"
+rm -rf "$ytdlp_dist"
 curl -L --fail --retry 3 --retry-delay 2 \
-  -o "$ytdlp" \
-  "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+  -o "$binary_dir/yt-dlp_macos.zip" \
+  "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos.zip"
+mkdir -p "$ytdlp_dist"
+ditto -x -k "$binary_dir/yt-dlp_macos.zip" "$ytdlp_dist"
+rm -f "$binary_dir/yt-dlp_macos.zip"
 chmod 755 "$ytdlp"
-xattr -c "$ytdlp" 2>/dev/null || true
-codesign --force --sign - "$ytdlp"
+xattr -cr "$ytdlp_dist" 2>/dev/null || true
 
 # llama-server（本地识别 Qwen3-ASR 用的引擎，llama.cpp）。官方 macOS 包拆成一堆 @rpath 动态库，
 # 塞进 .app 还得处理加载路径；这里从源码静态编一个只依赖系统框架的单文件：
@@ -159,3 +167,4 @@ echo "Prepared macOS sidecars:"
 "$ytdlp" --version
 "$llama" --version 2>&1 | tail -n 2
 ls -lh "$ffmpeg" "$ytdlp" "$llama" "$sherpa_dir"/*.dylib
+du -sh "$ytdlp_dist"

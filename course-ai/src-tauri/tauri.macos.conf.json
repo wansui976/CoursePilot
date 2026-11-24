@@ -2,9 +2,11 @@
   "bundle": {
     "externalBin": [
       "binaries/ffmpeg",
-      "binaries/yt-dlp",
       "binaries/llama-server"
     ],
+    "resources": {
+      "binaries/yt-dlp-dist/": "yt-dlp-dist/"
+    },
     "macOS": {
       "hardenedRuntime": false,
       "minimumSystemVersion": "14.0",

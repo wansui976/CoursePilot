@@ -6,37 +6,49 @@ use std::path::{Path, PathBuf};
 pub struct BinarySpec {
     pub name: &'static str,
     pub candidates_on_path: &'static [&'static str],
+    /// 解压即用的「目录版」（程序和它的库放在一个目录里），相对附带程序目录的路径；
+    /// 有就优先用。见 [`YTDLP`]。
+    pub onedir: &'static [&'static str],
 }
 
 pub const FFMPEG: BinarySpec = BinarySpec {
     name: "ffmpeg",
     candidates_on_path: &["ffmpeg"],
+    onedir: &[],
 };
 
 /// llama.cpp 的 llama-server：桌面上跑 Qwen3-ASR（能用 GPU）。
 pub const LLAMA_SERVER: BinarySpec = BinarySpec {
     name: "llama-server",
     candidates_on_path: &["llama-server"],
+    onedir: &[],
 };
 
 pub const TESSERACT: BinarySpec = BinarySpec {
     name: "tesseract",
     candidates_on_path: &["tesseract"],
+    onedir: &[],
 };
 
+/// yt-dlp 官方的单文件版（PyInstaller onefile）每次启动都把自己解压到一个新的临时目录，
+/// macOS 每次都要重新扫一遍解压出来的库：光 `--version` 就要二十多秒，一个视频探测、
+/// 下视频、下字幕各跑一次就是一分多钟。目录版（yt-dlp_macos.zip）只在第一次被扫，
+/// 之后启动 0.2 秒。Mac 安装包把它放在 Resources/yt-dlp-dist/。
 pub const YTDLP: BinarySpec = BinarySpec {
     name: "yt-dlp",
     candidates_on_path: &["yt-dlp", "youtube-dl"],
+    onedir: &["yt-dlp-dist/yt-dlp_macos"],
 };
 
 pub fn resolve(spec: &BinarySpec, sidecar_dir: Option<&PathBuf>) -> AppResult<PathBuf> {
-    if let Some(dir) = sidecar_dir {
-        if let Some(path) = find_in_dir(spec, dir) {
-            return Ok(path);
-        }
-    }
-    for dir in bundled_sidecar_dirs() {
-        if let Some(path) = find_in_dir(spec, &dir) {
+    let dirs: Vec<PathBuf> = sidecar_dir
+        .cloned()
+        .into_iter()
+        .chain(bundled_sidecar_dirs())
+        .collect();
+    // 按目录的先后找；同一个目录里目录版优先于单文件版。
+    for dir in &dirs {
+        if let Some(path) = find_onedir(spec, dir).or_else(|| find_in_dir(spec, dir)) {
             return Ok(path);
         }
     }
@@ -74,6 +86,13 @@ pub fn bundled_tessdata_dir(tesseract: &Path) -> Option<&'static str> {
         .find(|relative| dir.join(relative).is_dir())
 }
 
+fn find_onedir(spec: &BinarySpec, dir: &Path) -> Option<PathBuf> {
+    spec.onedir
+        .iter()
+        .map(|relative| dir.join(relative))
+        .find(|path| path.is_file())
+}
+
 fn find_in_dir(spec: &BinarySpec, dir: &std::path::Path) -> Option<PathBuf> {
     candidate_file_names(spec)
         .into_iter()
@@ -90,6 +109,9 @@ fn bundled_sidecar_dirs() -> Vec<PathBuf> {
             dirs.push(dir.join("../Resources"));
         }
     }
+    // 开发时（tauri dev）直接用源码里 binaries/ 下准备好的那份。
+    #[cfg(debug_assertions)]
+    dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"));
     dirs
 }
 
@@ -165,12 +187,33 @@ mod tests {
         assert_eq!(resolved, fake);
     }
 
+    #[test]
+    fn prefers_the_onedir_build_over_the_single_file() {
+        let dir = tempdir().unwrap();
+        let single = dir.path().join("yt-dlp");
+        File::create(&single).unwrap();
+        make_executable(&single);
+        let dist = dir.path().join("yt-dlp-dist");
+        fs::create_dir_all(dist.join("_internal")).unwrap();
+        let onedir = dist.join("yt-dlp_macos");
+        File::create(&onedir).unwrap();
+        make_executable(&onedir);
+
+        let resolved = resolve(&YTDLP, Some(&dir.path().to_path_buf())).unwrap();
+        assert_eq!(resolved, onedir);
+        // 没有目录版时照旧用单文件版。
+        fs::remove_dir_all(&dist).unwrap();
+        let resolved = resolve(&YTDLP, Some(&dir.path().to_path_buf())).unwrap();
+        assert_eq!(resolved, single);
+    }
+
     #[cfg(unix)]
     #[test]
     fn falls_back_to_path_when_sidecar_missing() {
         let spec = BinarySpec {
             name: "sh",
             candidates_on_path: &["sh"],
+            onedir: &[],
         };
         let path = resolve(&spec, None).unwrap();
         assert!(path.is_file(), "expected to find sh on PATH");
@@ -181,6 +224,7 @@ mod tests {
         let spec = BinarySpec {
             name: "definitely-does-not-exist-xyz",
             candidates_on_path: &["definitely-does-not-exist-xyz"],
+            onedir: &[],
         };
         assert!(resolve(&spec, None).is_err());
     }
@@ -210,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn ytdlp_is_configured_as_bundled_sidecar() {
+    fn ytdlp_is_bundled_as_the_onedir_build() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let tauri_config = fs::read_to_string(manifest_dir.join("tauri.macos.conf.json")).unwrap();
         let config: serde_json::Value = serde_json::from_str(&tauri_config).unwrap();
@@ -224,12 +268,19 @@ mod tests {
                 .any(|value| value.as_str() == Some("binaries/ffmpeg")),
             "bundle.externalBin should include binaries/ffmpeg"
         );
+        // yt-dlp 用目录版，作为资源整个目录放进 Resources/yt-dlp-dist/（见 YTDLP）；
+        // 不再附带单文件版——每次启动都要等二十多秒。
         assert!(
-            external_bin
+            !external_bin
                 .iter()
                 .any(|value| value.as_str() == Some("binaries/yt-dlp")),
-            "bundle.externalBin should include binaries/yt-dlp"
+            "macOS should bundle the onedir yt-dlp, not the slow single-file build"
         );
+        assert_eq!(
+            config.pointer("/bundle/resources/binaries~1yt-dlp-dist~1"),
+            Some(&serde_json::Value::String("yt-dlp-dist/".into()))
+        );
+        assert!(YTDLP.onedir.contains(&"yt-dlp-dist/yt-dlp_macos"));
         assert_eq!(
             config.pointer("/bundle/macOS/hardenedRuntime"),
             Some(&serde_json::Value::Bool(false)),
