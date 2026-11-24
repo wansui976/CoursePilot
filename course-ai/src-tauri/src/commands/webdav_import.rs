@@ -121,18 +121,14 @@ pub async fn cmd_webdav_download_video(
     state: State<'_, AppState>,
     video_id: String,
 ) -> AppResult<Video> {
-    let root_path: String = sqlx::query_scalar(
-        "SELECT c.root_path FROM courses c JOIN videos v ON v.course_id=c.id WHERE v.id=?",
+    let (course_id, root_path): (String, String) = sqlx::query_as(
+        "SELECT c.id, c.root_path FROM courses c JOIN videos v ON v.course_id=c.id WHERE v.id=?",
     )
     .bind(&video_id)
     .fetch_optional(&state.db.pool)
     .await?
-    .unwrap_or_default();
-    let out_dir = if root_path.trim().is_empty() {
-        app_data(&app)?.join("webdav-downloads")
-    } else {
-        PathBuf::from(root_path)
-    };
+    .ok_or_else(|| AppError::NotFound(format!("video {video_id}")))?;
+    let out_dir = crate::commands::tools::course_download_dir(&app, &course_id, &root_path)?;
     let emitter = app.clone();
     let id = video_id.clone();
     let on_event = move |event: DownloadEvent| {

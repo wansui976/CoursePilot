@@ -296,7 +296,7 @@ async fn import_webdav_file(
             .fetch_optional(&state.db.pool)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
-    let out_dir = course_download_dir(app, course_id, &root_path, "webdav-downloads")?;
+    let out_dir = course_download_dir(app, course_id, &root_path)?;
     let staging = download_staging(staging, &out_dir);
     let file =
         crate::webdav_import::download(&state.db, &url, &out_dir, &staging, on_event, begin_import)
@@ -314,13 +314,13 @@ async fn import_webdav_file(
 }
 
 /// 下载的视频放哪：课程有自己的目录就放进去；没有目录（新建时没选文件夹，root_path
-/// 为空）就放进应用数据目录下按课程分开的子目录。不能直接用空路径：那是相对路径，
-/// 文件会落进进程的当前目录（开发时是源码目录），库里登记的也是相对路径。
+/// 为空）就放进应用数据目录下 `downloads/<课程 id>`（网络视频、网盘文件都放这里）。
+/// 不能直接用空路径：那是相对路径，文件会落进进程的当前目录（开发时是源码目录），
+/// 库里登记的也是相对路径。
 pub(crate) fn course_download_dir(
     app: &tauri::AppHandle,
     course_id: &str,
     root_path: &str,
-    subdir: &str,
 ) -> AppResult<PathBuf> {
     use tauri::Manager;
     if !root_path.trim().is_empty() {
@@ -330,7 +330,7 @@ pub(crate) fn course_download_dir(
         .path()
         .app_data_dir()
         .map_err(|error| AppError::Config(error.to_string()))?
-        .join(subdir)
+        .join("downloads")
         .join(course_id))
 }
 
@@ -394,7 +394,7 @@ pub async fn import_url_with(
     } else {
         None
     };
-    let out_dir = course_download_dir(&app, &course_id, &root_path, "downloads")?;
+    let out_dir = course_download_dir(&app, &course_id, &root_path)?;
     let staging = download_staging(staging, &out_dir);
     let result = download::download(
         &url,
