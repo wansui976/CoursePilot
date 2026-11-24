@@ -51,6 +51,11 @@ pub struct DownloadJob {
     /// 视频流中途断开、正在降到这一档清晰度重下；正常进度时为空。
     /// 只给数字，提示文案由前端按界面语言写。
     pub retry_height: Option<u32>,
+    /// 字幕这一步（视频下完后单独下）：fetching 正在下 | waiting 被限流、等着重试 |
+    /// skipped 这一集没有该语言的字幕 | rateLimited 一直被限流、放弃了。后两种都改用语音识别。
+    pub subtitle: Option<String>,
+    /// waiting 时还要等几秒。
+    pub subtitle_wait: Option<u64>,
     pub error: Option<String>,
     pub video_id: Option<String>,
     /// 第几次尝试；断流降档重下时 +1，前端据此重置进度条。
@@ -176,6 +181,29 @@ impl DownloadQueue {
                 job.speed = None;
                 job.eta = None;
                 job.retry_height = Some(max_height);
+                job.subtitle = None;
+                job.subtitle_wait = None;
+            }
+            DownloadEvent::Subtitles => {
+                job.speed = None;
+                job.eta = None;
+                job.subtitle = Some("fetching".into());
+                job.subtitle_wait = None;
+            }
+            DownloadEvent::SubtitlesWaiting { seconds } => {
+                job.subtitle = Some("waiting".into());
+                job.subtitle_wait = Some(seconds);
+            }
+            DownloadEvent::SubtitlesSkipped { rate_limited } => {
+                job.subtitle = Some(
+                    if rate_limited {
+                        "rateLimited"
+                    } else {
+                        "skipped"
+                    }
+                    .into(),
+                );
+                job.subtitle_wait = None;
             }
         }
         Some(job.clone())
@@ -228,6 +256,8 @@ impl DownloadQueue {
                 speed: None,
                 eta: None,
                 retry_height: None,
+                subtitle: None,
+                subtitle_wait: None,
                 error: None,
                 video_id: None,
                 attempt: 1,
@@ -822,6 +852,8 @@ mod tests {
             speed: None,
             eta: None,
             retry_height: None,
+            subtitle: None,
+            subtitle_wait: None,
             error: None,
             video_id: None,
             attempt: 1,
@@ -995,6 +1027,32 @@ mod tests {
         assert_eq!(updated.downloaded, 0);
         assert_eq!(updated.total, None);
         assert_eq!(updated.retry_height, Some(720));
+    }
+
+    #[test]
+    fn subtitle_steps_are_tracked_without_failing_the_job() {
+        let queue = DownloadQueue::default();
+        queue
+            .inner
+            .lock()
+            .unwrap()
+            .jobs
+            .insert("j1".into(), sample_job("j1"));
+        let fetching = queue.apply_event("j1", DownloadEvent::Subtitles).unwrap();
+        assert_eq!(fetching.subtitle.as_deref(), Some("fetching"));
+        let waiting = queue
+            .apply_event("j1", DownloadEvent::SubtitlesWaiting { seconds: 10 })
+            .unwrap();
+        assert_eq!(waiting.subtitle.as_deref(), Some("waiting"));
+        assert_eq!(waiting.subtitle_wait, Some(10));
+        let skipped = queue
+            .apply_event("j1", DownloadEvent::SubtitlesSkipped { rate_limited: true })
+            .unwrap();
+        assert_eq!(skipped.subtitle.as_deref(), Some("rateLimited"));
+        assert_eq!(skipped.subtitle_wait, None);
+        // 字幕没拿到不算失败：任务状态不动，error 仍为空。
+        assert_ne!(skipped.status, "failed");
+        assert_eq!(skipped.error, None);
     }
 
     #[test]

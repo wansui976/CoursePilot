@@ -117,6 +117,10 @@ export function humanizeError(error: unknown, language?: string): string {
   ) {
     return translated("network", locale);
   }
+  // 视频网站（YouTube 最常见）限流：yt-dlp 报 HTTP Error 429 / Too Many Requests。
+  if (s.includes("http error 429") || s.includes("too many requests")) {
+    return translated("siteRateLimited", locale);
+  }
   if (s.includes("rate") && s.includes("limit")) {
     return translated("rateLimit", locale);
   }

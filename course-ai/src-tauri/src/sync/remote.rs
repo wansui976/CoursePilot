@@ -351,11 +351,9 @@ fn lan_advert_outdated() -> bool {
     }
     static NUDGED: OnceLock<Mutex<Option<Option<crate::lan_share::Advert>>>> = OnceLock::new();
     let current = crate::lan_share::advert();
-    let outdated = prepared()
-        .lock()
-        .unwrap()
-        .values()
-        .any(|prepared| matches!(&prepared.lan_published, Some(published) if *published != current));
+    let outdated = prepared().lock().unwrap().values().any(
+        |prepared| matches!(&prepared.lan_published, Some(published) if *published != current),
+    );
     if !outdated {
         return false;
     }

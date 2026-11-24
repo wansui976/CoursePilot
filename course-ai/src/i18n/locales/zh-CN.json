@@ -1741,7 +1741,11 @@
     "bytes": "下载中 {{size}}",
     "speed": "{{label}} · {{speed}}/s",
     "merging": "正在合并音视频…",
-    "retrying": "视频流中途断开，正在降到 {{height}}P 重新下载…"
+    "retrying": "视频流中途断开，正在降到 {{height}}P 重新下载…",
+    "subtitles": "视频已下好，正在下载字幕…",
+    "subtitlesWaiting": "字幕被网站限流（HTTP 429），{{seconds}} 秒后重试…",
+    "subtitlesRateLimited": "字幕一直被网站限流，先不要了：导入后用语音识别生成文稿。",
+    "subtitlesSkipped": "这一集没有所选语言的字幕：导入后用语音识别生成文稿。"
   },
   "downloads": {
     "sectionTitle": "正在下载",
@@ -2118,6 +2122,7 @@
     "timeout": "请求超时，请检查网络后重试。",
     "network": "网络连接失败，请检查网络后重试。",
     "rateLimit": "请求过于频繁（限流），请稍后重试。",
+    "siteRateLimited": "视频网站暂时限制了下载频率（HTTP 429）。过几分钟再试；常换节点的代理容易触发，可以换个网络。",
     "disk": "磁盘空间不足，请清理后重试。",
     "permission": "没有文件访问权限，请检查目录权限后重试。",
     "ffmpeg": "缺少 ffmpeg 或音频处理失败。",

@@ -405,9 +405,7 @@ fn percent_decode_path(input: &str) -> String {
 /// iOS 是 App「文稿」（Finder / Apple 设备的文件共享）；Android 是 App 专属媒体目录里的
 /// 「导入」文件夹（USB 文件传输 / MTP 能看到）。桌面没有这个入口，返回空列表。
 #[tauri::command]
-pub async fn list_cable_files<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<serde_json::Value, String> {
+pub async fn list_cable_files<R: Runtime>(app: AppHandle<R>) -> Result<serde_json::Value, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let mobile_files = app.state::<MobileFiles<R>>();

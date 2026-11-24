@@ -239,7 +239,16 @@ export type UrlImportEvent =
     }
   | { type: "merging" }
   /** 视频流中途断开，正在降到这一档清晰度重下。 */
-  | { type: "retrying"; maxHeight: number };
+  | { type: "retrying"; maxHeight: number }
+  /** 视频下完了，正在单独下字幕。 */
+  | { type: "subtitles" }
+  /** 字幕被限流（HTTP 429），等这么多秒再试。 */
+  | { type: "subtitlesWaiting"; seconds: number }
+  /** 没拿到字幕（没有这一语言的轨，或一直被限流）：导入后改用语音识别。 */
+  | { type: "subtitlesSkipped"; rateLimited: boolean };
+
+/** 下载任务里字幕那一步的状态（视频下完后单独下，拿不到不算失败）。 */
+export type DownloadSubtitleState = "fetching" | "waiting" | "skipped" | "rateLimited";
 
 /** 后台下载队列里的一个任务（`download:update` 事件与 `cmd_list_downloads` 共用）。 */
 export type DownloadStatus =
@@ -267,6 +276,10 @@ export interface DownloadJob {
   eta: number | null;
   /** 视频流中途断开、正在降到这一档清晰度重下；正常进度时为 null。 */
   retryHeight: number | null;
+  /** 字幕这一步；没请求字幕或还没到这一步时为 null。 */
+  subtitle: DownloadSubtitleState | null;
+  /** subtitle 为 waiting 时还要等几秒。 */
+  subtitleWait: number | null;
   error: string | null;
   videoId: string | null;
   /** 第几次尝试；断流降档重下时 +1，进度条据此归零重来。 */

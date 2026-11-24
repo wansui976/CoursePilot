@@ -1643,13 +1643,24 @@ mod tests {
     async fn lan_pc_for_manual_test() {
         let env = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("要设置 {key}"));
         let dir = tempfile::tempdir().unwrap();
-        let db = Db::connect_and_migrate(&dir.path().join("pc.db")).await.unwrap();
-        let course = crate::commands::courses::create_course(&db, "局域网测试课".into(), dir.path().to_string_lossy().into())
+        let db = Db::connect_and_migrate(&dir.path().join("pc.db"))
             .await
             .unwrap();
-        let video = crate::commands::videos::add_local_video(&db, &course.id, env("COURSEPILOT_VIDEO").into(), None)
-            .await
-            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "局域网测试课".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let video = crate::commands::videos::add_local_video(
+            &db,
+            &course.id,
+            env("COURSEPILOT_VIDEO").into(),
+            None,
+        )
+        .await
+        .unwrap();
         let config = crate::sync::remote::RemoteConfig {
             url: env("COURSEPILOT_DAV_URL"),
             folder: crate::sync::remote::DEFAULT_FOLDER.into(),
@@ -1657,15 +1668,24 @@ mod tests {
             password: env("COURSEPILOT_DAV_PASSWORD"),
         };
         let sync = |db: Db, config: crate::sync::remote::RemoteConfig, root: std::path::PathBuf| async move {
-            crate::sync::remote::run_once(&db, &config, &root.join("sync"), &root.join("videos")).await
+            crate::sync::remote::run_once(&db, &config, &root.join("sync"), &root.join("videos"))
+                .await
         };
-        println!("同步：{:?}", sync(db.clone(), config.clone(), dir.path().to_path_buf()).await.unwrap());
+        println!(
+            "同步：{:?}",
+            sync(db.clone(), config.clone(), dir.path().to_path_buf())
+                .await
+                .unwrap()
+        );
         let port = start(db.clone()).await.unwrap();
         let mut published = advert().expect("开着共享");
         if let Ok(extra) = std::env::var("COURSEPILOT_EXTRA_ADDR") {
             published.addresses.insert(0, extra);
         }
-        let own = crate::sync::identity::ensure_sync_identity(&db).await.unwrap().device_id;
+        let own = crate::sync::identity::ensure_sync_identity(&db)
+            .await
+            .unwrap()
+            .device_id;
         let dav = config.client().unwrap();
         dav.put(
             &format!("{}{own}/{ADVERT_FILE}", crate::sync::remote::DEVICES_DIR),
@@ -1673,7 +1693,10 @@ mod tests {
         )
         .await
         .unwrap();
-        println!("电脑端就绪：端口 {port}，地址 {:?}，视频 {}（{}）", published.addresses, video.title, video.id);
+        println!(
+            "电脑端就绪：端口 {port}，地址 {:?}，视频 {}（{}）",
+            published.addresses, video.title, video.id
+        );
         loop {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let _ = sync(db.clone(), config.clone(), dir.path().to_path_buf()).await;

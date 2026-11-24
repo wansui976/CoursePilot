@@ -9,7 +9,6 @@ pub mod export;
 pub mod jobs;
 pub mod keep_alive;
 pub mod lan_share;
-pub mod webdav_import;
 pub mod llm;
 pub mod media_server;
 pub mod mobile_files;
@@ -19,27 +18,28 @@ pub mod sidecar;
 pub mod storage;
 pub mod sync;
 mod usage_log;
+pub mod webdav_import;
 
 use crate::commands::ai::{
-    cmd_generate_ai, cmd_get_chapters, cmd_get_highlights, cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes,
-    cmd_delete_quiz_set, cmd_get_quiz, cmd_get_quiz_course_rules, cmd_get_summary, cmd_grade_quiz_answer, cmd_set_quiz_course_rules, cmd_detect_ollama, cmd_has_api_key, cmd_list_models, cmd_save_llm_profiles, cmd_save_notes,
-    cmd_set_api_key, cmd_stale_ai_artifacts,
+    cmd_delete_quiz_set, cmd_detect_ollama, cmd_generate_ai, cmd_get_chapters, cmd_get_highlights,
+    cmd_get_llm_profiles, cmd_get_mindmap, cmd_get_notes, cmd_get_quiz, cmd_get_quiz_course_rules,
+    cmd_get_summary, cmd_grade_quiz_answer, cmd_has_api_key, cmd_list_models,
+    cmd_save_llm_profiles, cmd_save_notes, cmd_set_api_key, cmd_set_quiz_course_rules,
+    cmd_stale_ai_artifacts,
 };
-use crate::commands::app::{cmd_check_update, cmd_exit_app, cmd_updater_check, cmd_updater_install};
+use crate::commands::app::{
+    cmd_check_update, cmd_exit_app, cmd_updater_check, cmd_updater_install,
+};
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
 use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
+use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
 use crate::commands::concepts::{
     cmd_analyze_course_concepts, cmd_cancel_course_analysis, cmd_course_knowledge_chat_stream,
     cmd_generate_course_knowledge, cmd_get_course_knowledge, cmd_list_course_concepts,
 };
-use crate::commands::review_book::{
-    cmd_cancel_review_book, cmd_generate_review_book, cmd_get_review_book, cmd_review_book_running,
-};
-use crate::commands::search::cmd_search_course;
-use crate::commands::folders::{
-    cmd_create_folder, cmd_delete_folder, cmd_list_folders, cmd_move_items, cmd_rename_folder,
-    cmd_reorder_container, cmd_set_folder_color,
+use crate::commands::course_covers::{
+    cmd_classify_course_cover, cmd_course_covers, cmd_set_course_cover_kind,
 };
 use crate::commands::courses::{
     cmd_create_course, cmd_delete_course, cmd_list_courses, cmd_relink_course_root,
@@ -47,8 +47,19 @@ use crate::commands::courses::{
 };
 use crate::commands::danmaku::{cmd_get_comments, cmd_get_danmaku};
 use crate::commands::export::{
-    cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_notes_print, cmd_export_quiz,
-    cmd_export_subtitles, cmd_save_share_image,
+    cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_notes_print,
+    cmd_export_quiz, cmd_export_subtitles, cmd_save_share_image,
+};
+use crate::commands::folders::{
+    cmd_create_folder, cmd_delete_folder, cmd_list_folders, cmd_move_items, cmd_rename_folder,
+    cmd_reorder_container, cmd_set_folder_color,
+};
+use crate::commands::lan_share::{
+    cmd_lan_download_video, cmd_lan_share_set_enabled, cmd_lan_share_status, cmd_lan_stream_url,
+    cmd_remote_stream_problem,
+};
+use crate::commands::note_annotations::{
+    cmd_annotate_notes, cmd_erase_note_annotation, cmd_note_annotations,
 };
 use crate::commands::note_history::cmd_list_note_versions;
 use crate::commands::note_images::{cmd_read_note_image, cmd_save_note_image};
@@ -56,47 +67,38 @@ use crate::commands::notify::cmd_notify;
 use crate::commands::rag::{
     cmd_cancel_rag_query, cmd_rag_query, cmd_rag_query_stream, cmd_search_transcript,
 };
+use crate::commands::remote_sync::{
+    cmd_remote_sync_download_video, cmd_remote_sync_media_size, cmd_remote_sync_now,
+    cmd_remote_sync_nudge, cmd_remote_sync_retire_device, cmd_remote_sync_save,
+    cmd_remote_sync_set_enabled, cmd_remote_sync_set_upload_media, cmd_remote_sync_status,
+    cmd_remote_sync_test,
+};
+use crate::commands::review_book::{
+    cmd_cancel_review_book, cmd_generate_review_book, cmd_get_review_book, cmd_review_book_running,
+};
+use crate::commands::search::cmd_search_course;
+use crate::commands::semantic::{
+    cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild,
+    cmd_semantic_resume, cmd_semantic_save, cmd_semantic_status, cmd_semantic_test,
+};
 use crate::commands::settings::{cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting};
-use crate::commands::storage::{cmd_cleanup_orphan_media, cmd_storage_usage};
 use crate::commands::silence::cmd_video_skips;
 use crate::commands::slides::{
     cmd_cancel_slides_extract, cmd_cancel_slides_ocr, cmd_capture_frame, cmd_capture_frame_image,
-    cmd_extract_slides,
-    cmd_get_screenshots, cmd_get_slides, cmd_ocr_slides, cmd_read_slide_image,
+    cmd_extract_slides, cmd_get_screenshots, cmd_get_slides, cmd_ocr_slides, cmd_read_slide_image,
 };
 use crate::commands::srs::{
     cmd_add_card, cmd_concept_due_counts, cmd_count_due, cmd_due_by_course, cmd_due_cards,
     cmd_due_cards_by_concept, cmd_generate_cards, cmd_generate_cards_for_concept, cmd_review_card,
     cmd_weak_concepts,
 };
-use crate::commands::study_marks::{
-    cmd_card_history, cmd_card_marks, cmd_concept_mastery, cmd_mistake_cards, cmd_review_mistake,
-};
-use crate::commands::note_annotations::{
-    cmd_annotate_notes, cmd_erase_note_annotation, cmd_note_annotations,
-};
-use crate::commands::weather::{cmd_weather_find_place, cmd_weather_now};
-use crate::commands::course_covers::{
-    cmd_classify_course_cover, cmd_course_covers, cmd_set_course_cover_kind,
-};
-use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
-use crate::commands::remote_sync::{
-    cmd_remote_sync_now, cmd_remote_sync_nudge, cmd_remote_sync_save, cmd_remote_sync_set_enabled,
-    cmd_remote_sync_status, cmd_remote_sync_test, cmd_remote_sync_set_upload_media,
-    cmd_remote_sync_media_size, cmd_remote_sync_download_video, cmd_remote_sync_retire_device,
-};
-use crate::commands::webdav_import::{
-    cmd_webdav_browse, cmd_webdav_download_video, cmd_webdav_import_stream, cmd_webdav_source_delete,
-    cmd_webdav_source_save, cmd_webdav_source_test, cmd_webdav_sources, cmd_webdav_stream_url,
-};
-use crate::commands::lan_share::{cmd_lan_download_video, cmd_lan_share_set_enabled, cmd_lan_share_status, cmd_lan_stream_url, cmd_remote_stream_problem};
-use crate::commands::semantic::{
-    cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild, cmd_semantic_resume,
-    cmd_semantic_save, cmd_semantic_status, cmd_semantic_test,
-};
 use crate::commands::stats::{
     cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals,
     cmd_log_watch, cmd_next_due_at, cmd_save_video_progress, cmd_video_progress,
+};
+use crate::commands::storage::{cmd_cleanup_orphan_media, cmd_storage_usage};
+use crate::commands::study_marks::{
+    cmd_card_history, cmd_card_marks, cmd_concept_mastery, cmd_mistake_cards, cmd_review_mistake,
 };
 use crate::commands::subscriptions::{
     cmd_check_subscription, cmd_create_subscription, cmd_delete_subscription,
@@ -108,24 +110,31 @@ use crate::commands::sync::{
     cmd_sync_status,
 };
 use crate::commands::tools::{
-    cmd_bilibili_login_state, cmd_find_explanations, cmd_has_bilibili_cookies, cmd_import_bilibili, cmd_ocr_image, cmd_ocr_region,
-    cmd_probe_bilibili, cmd_probe_playlist, cmd_set_bilibili_cookies,
+    cmd_bilibili_login_state, cmd_find_explanations, cmd_has_bilibili_cookies, cmd_import_bilibili,
+    cmd_ocr_image, cmd_ocr_region, cmd_probe_bilibili, cmd_probe_playlist,
+    cmd_set_bilibili_cookies,
 };
+use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
 use crate::commands::transcripts::{cmd_list_transcripts, cmd_update_transcript};
 use crate::commands::translate::{
     cmd_cancel_translation, cmd_get_translations, cmd_translate_transcript,
 };
 use crate::commands::videos::{
     cmd_add_local_batch, cmd_add_local_video, cmd_cancel_crop_detect, cmd_delete_video,
-    cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url, cmd_video_codec,
-    cmd_purge_trash, cmd_purge_video, cmd_restore_video, cmd_scan_folder,
-    cmd_update_video_title, cmd_video_cover,
+    cmd_ensure_crop, cmd_ensure_playable, cmd_list_trash, cmd_list_videos, cmd_media_url,
+    cmd_purge_trash, cmd_purge_video, cmd_restore_video, cmd_scan_folder, cmd_update_video_title,
+    cmd_video_codec, cmd_video_cover,
 };
-use crate::commands::transcode::{cmd_start_transcode, cmd_transcode_status};
+use crate::commands::weather::{cmd_weather_find_place, cmd_weather_now};
+use crate::commands::webdav_import::{
+    cmd_webdav_browse, cmd_webdav_download_video, cmd_webdav_import_stream,
+    cmd_webdav_source_delete, cmd_webdav_source_save, cmd_webdav_source_test, cmd_webdav_sources,
+    cmd_webdav_stream_url,
+};
 use crate::commands::whisper::{
-    cmd_delete_asr_model, cmd_delete_legacy_models, cmd_download_whisper_model, cmd_get_models_dir,
-    cmd_delete_paddle_ocr, cmd_download_paddle_ocr, cmd_paddle_ocr_status,
-    cmd_list_whisper_models, cmd_set_models_dir,
+    cmd_delete_asr_model, cmd_delete_legacy_models, cmd_delete_paddle_ocr, cmd_download_paddle_ocr,
+    cmd_download_whisper_model, cmd_get_models_dir, cmd_list_whisper_models, cmd_paddle_ocr_status,
+    cmd_set_models_dir,
 };
 use crate::db::Db;
 use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
@@ -136,11 +145,11 @@ use crate::downloads::{
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
     cmd_cancel_processing, cmd_dismiss_processing_video, cmd_list_processing_videos,
-    cmd_list_recent_processed_videos,
-    cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
+    cmd_list_recent_processed_videos, cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
 };
 use crate::usage_log::{
-    cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_deepseek_balance, cmd_llm_usage, cmd_video_ai_usage,
+    cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_deepseek_balance, cmd_llm_usage,
+    cmd_video_ai_usage,
 };
 use tauri::Manager;
 

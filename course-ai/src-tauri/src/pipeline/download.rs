@@ -18,13 +18,16 @@ fn is_mobile_os(os: &str) -> bool {
     os == "android" || os == "ios"
 }
 
-/// 构造 yt-dlp 参数：输出 mp4，可选 cookies、清晰度上限、字幕轨。
+/// 构造 yt-dlp 参数（只下音视频）：输出 mp4，可选 cookies、清晰度上限。
+///
+/// 字幕不在这里一起下，见 [`build_subtitle_args`]：字幕和视频放在同一次 yt-dlp 里时，
+/// 字幕那一步一出错（YouTube 自动字幕常被限流，HTTP 429）整个下载就判失败，
+/// 已经下好的视频也跟着作废。
 pub fn build_ytdlp_args(
     url: &str,
     out_template: &str,
     cookies: Option<&str>,
     max_height: Option<u32>,
-    sub_lang: Option<&str>,
 ) -> Vec<String> {
     let mut args = vec![
         "-o".to_string(),
@@ -46,18 +49,38 @@ pub fn build_ytdlp_args(
     // 不会为了 H.264 把 4K（只有 VP9 / AV1）降成 1080p，也不会挑到更低清的 AVC。
     args.push("-S".to_string());
     args.push("res,+vcodec:avc".to_string());
-    if let Some(lang) = sub_lang {
-        if !lang.trim().is_empty() {
-            // B站 AI 字幕（ai-zh）在 yt-dlp 里需 --write-auto-subs 才会拉取；
-            // 普通 CC 字幕走 --write-subs。两者都带，覆盖不同视频。
-            args.push("--write-subs".to_string());
-            args.push("--write-auto-subs".to_string());
-            args.push("--sub-langs".to_string());
-            args.push(lang.to_string());
-            args.push("--convert-subs".to_string());
-            args.push("srt".to_string());
-        }
-    }
+    push_site_args(&mut args, url, cookies);
+    args
+}
+
+/// 构造只下字幕的 yt-dlp 参数（视频下完后单独跑一次，失败不影响视频）。
+pub fn build_subtitle_args(
+    url: &str,
+    out_template: &str,
+    cookies: Option<&str>,
+    sub_lang: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        "-o".to_string(),
+        out_template.to_string(),
+        "--skip-download".to_string(),
+        "--no-playlist".to_string(),
+        // B站 AI 字幕（ai-zh）在 yt-dlp 里需 --write-auto-subs 才会拉取；
+        // 普通 CC 字幕走 --write-subs。两者都带，覆盖不同视频；同一语言两种都有时
+        // yt-dlp 优先取手打的。
+        "--write-subs".to_string(),
+        "--write-auto-subs".to_string(),
+        "--sub-langs".to_string(),
+        sub_lang.to_string(),
+        "--convert-subs".to_string(),
+        "srt".to_string(),
+    ];
+    push_site_args(&mut args, url, cookies);
+    args
+}
+
+/// 站点相关的请求头与 cookies，最后放上链接本身。
+fn push_site_args(args: &mut Vec<String>, url: &str, cookies: Option<&str>) {
     if is_bilibili_url(url) {
         args.push("--user-agent".to_string());
         args.push(BROWSER_USER_AGENT.to_string());
@@ -71,7 +94,73 @@ pub fn build_ytdlp_args(
         }
     }
     args.push(url.to_string());
-    args
+}
+
+/// 字幕被限流（HTTP 429）时，重试前各等几秒。YouTube 的限流通常几十秒内就松开。
+const SUBTITLE_BACKOFF_SECS: [u64; 2] = [10, 30];
+/// 一次字幕请求最多等多久：字幕只有几十 KB，卡住多半是被限流后挂着不回。
+const SUBTITLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// 字幕这一步的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubtitleOutcome {
+    /// yt-dlp 正常结束（有没有这一语言的轨由落地的 .srt 说了算）。
+    Finished,
+    /// 一直被限流，重试后仍拿不到。
+    RateLimited,
+    /// 别的原因失败（登录、网络、格式转换……）。
+    Failed,
+}
+
+/// stderr 里是不是被限流了：YouTube 的 timedtext 接口回 429 Too Many Requests。
+pub fn is_rate_limited(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("http error 429") || lower.contains("too many requests")
+}
+
+/// 单独下字幕：被限流就等一会儿重试，还不行就放弃。不管成败都不影响已经下好的视频，
+/// 没有字幕时导入流程会照常用语音识别生成文稿。
+async fn fetch_subtitles(
+    ytdlp: &Path,
+    url: &str,
+    out_template: &str,
+    cookies: Option<&str>,
+    sub_lang: &str,
+    on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
+) -> SubtitleOutcome {
+    let args = build_subtitle_args(url, out_template, cookies, sub_lang);
+    on_event(DownloadEvent::Subtitles);
+    let mut attempt = 0;
+    loop {
+        let run = crate::sidecar::command(ytdlp)
+            .args(ffmpeg_location_args())
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output();
+        let stderr = match tokio::time::timeout(SUBTITLE_TIMEOUT, run).await {
+            Ok(Ok(output)) if output.status.success() => return SubtitleOutcome::Finished,
+            Ok(Ok(output)) => String::from_utf8_lossy(&output.stderr).into_owned(),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "字幕下载启动失败");
+                return SubtitleOutcome::Failed;
+            }
+            // 超时按限流处理：被限流的请求常常挂着不回。
+            Err(_) => "HTTP Error 429: timed out".to_string(),
+        };
+        if !is_rate_limited(&stderr) {
+            tracing::warn!(stderr = %stderr_tail(&stderr), "字幕下载失败");
+            return SubtitleOutcome::Failed;
+        }
+        let Some(&wait) = SUBTITLE_BACKOFF_SECS.get(attempt) else {
+            tracing::warn!(stderr = %stderr_tail(&stderr), "字幕一直被限流，放弃");
+            return SubtitleOutcome::RateLimited;
+        };
+        attempt += 1;
+        on_event(DownloadEvent::SubtitlesWaiting { seconds: wait });
+        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+        on_event(DownloadEvent::Subtitles);
+    }
 }
 
 /// 解析 ffmpeg sidecar 路径，供 yt-dlp 合并 DASH 流 / 转字幕用（尽力而为）。
@@ -150,7 +239,7 @@ pub async fn download(
     let mut height = max_height;
     let mut fallbacks = 0;
     loop {
-        let args = build_ytdlp_args(url, &template.to_string_lossy(), cookies, height, sub_lang);
+        let args = build_ytdlp_args(url, &template.to_string_lossy(), cookies, height);
         let stderr = match run_ytdlp(&ytdlp, &args, on_event).await {
             Ok(None) => break,
             Ok(Some(stderr)) => stderr,
@@ -175,6 +264,24 @@ pub async fn download(
         }
         let _ = std::fs::remove_dir_all(staging);
         return Err(AppError::Pipeline(format!("yt-dlp failed: {stderr}")));
+    }
+    // 视频已经下好，再单独拿字幕。拿不到就不要了：导入后照常用语音识别生成文稿。
+    if let Some(lang) = sub_lang.filter(|lang| !lang.trim().is_empty()) {
+        let outcome = fetch_subtitles(
+            &ytdlp,
+            url,
+            &template.to_string_lossy(),
+            cookies,
+            lang,
+            on_event,
+        )
+        .await;
+        let landed = newest_with_ext(staging, "srt").ok().flatten().is_some();
+        if !landed {
+            on_event(DownloadEvent::SubtitlesSkipped {
+                rate_limited: outcome == SubtitleOutcome::RateLimited,
+            });
+        }
     }
     if !begin_import() {
         let _ = std::fs::remove_dir_all(staging);
@@ -263,6 +370,13 @@ pub enum DownloadEvent {
     /// 视频流中途断开，正在降到这一档清晰度重下。
     #[serde(rename_all = "camelCase")]
     Retrying { max_height: u32 },
+    /// 视频下完了，正在单独下字幕。
+    Subtitles,
+    /// 字幕被限流（HTTP 429），等这么多秒再试。
+    SubtitlesWaiting { seconds: u64 },
+    /// 没拿到字幕（这一集没有该语言的轨，或一直被限流），改用语音识别生成文稿。
+    #[serde(rename_all = "camelCase")]
+    SubtitlesSkipped { rate_limited: bool },
 }
 
 /// 跑一次 yt-dlp，边跑边把进度推出去。返回 `Some(stderr)` 表示 yt-dlp 失败退出。
@@ -633,6 +747,12 @@ fn collect_tracks(map: Option<&serde_json::Value>, from_auto: bool, out: &mut Ve
         if lang == "danmaku" || out.iter().any(|t| t.lang == *lang) {
             continue;
         }
+        // YouTube 的自动字幕会附带一百多条「机器翻译」轨（地址里带 tlang=）：列表被淹没，
+        // 而且翻译轨是 YouTube 限流最狠的（HTTP 429），选了就常常拿不到。只留原语言的
+        // 那条（yt-dlp 记作 xx-orig）；要中文对照用应用自己的翻译。
+        if from_auto && is_translated_caption(entries) {
+            continue;
+        }
         let auto = from_auto || lang.starts_with("ai-");
         let name = entries
             .as_array()
@@ -647,6 +767,22 @@ fn collect_tracks(map: Option<&serde_json::Value>, from_auto: bool, out: &mut Ve
             auto,
         });
     }
+}
+
+/// YouTube 自动字幕里的机器翻译轨：各个格式的地址都带 `tlang=` 参数。
+fn is_translated_caption(entries: &serde_json::Value) -> bool {
+    entries
+        .as_array()
+        .map(|formats| {
+            !formats.is_empty()
+                && formats.iter().all(|format| {
+                    format
+                        .get("url")
+                        .and_then(|url| url.as_str())
+                        .is_some_and(|url| url.contains("tlang="))
+                })
+        })
+        .unwrap_or(false)
 }
 
 /// 解析 `yt-dlp -J` 输出：标题、字幕轨（subtitles + automatic_captions）、清晰度（formats.height）。
@@ -1083,7 +1219,6 @@ mod tests {
             "/out/%(title)s.%(ext)s",
             None,
             Some(720),
-            None,
         );
         let format = &args[args.iter().position(|a| a == "-f").unwrap() + 1];
         assert_eq!(format, "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba");
@@ -1093,13 +1228,7 @@ mod tests {
 
     #[test]
     fn ytdlp_args_basic() {
-        let args = build_ytdlp_args(
-            "https://b23.tv/x",
-            "/out/%(title)s.%(ext)s",
-            None,
-            None,
-            None,
-        );
+        let args = build_ytdlp_args("https://b23.tv/x", "/out/%(title)s.%(ext)s", None, None);
         assert!(args.contains(&"--merge-output-format".to_string()));
         assert!(args.contains(&"mp4".to_string()));
         let f = args.iter().position(|a| a == "-f").unwrap();
@@ -1112,7 +1241,7 @@ mod tests {
     fn downloads_prefer_h264_only_within_the_same_resolution() {
         // B 站同一条片同时有 AV1 / HEVC / AVC；老款 iPad 的 WKWebView 没有 AV1 解码器，
         // 下到 AV1 同步过去就是黑屏。但不能为此降画质：排序先比分辨率，再比编码。
-        let args = build_ytdlp_args("https://www.bilibili.com/video/BV1", "t", None, None, None);
+        let args = build_ytdlp_args("https://www.bilibili.com/video/BV1", "t", None, None);
         let sort = &args[args.iter().position(|a| a == "-S").unwrap() + 1];
         assert_eq!(sort, "res,+vcodec:avc");
         let format = &args[args.iter().position(|a| a == "-f").unwrap() + 1];
@@ -1129,7 +1258,7 @@ mod tests {
 
     #[test]
     fn ytdlp_args_with_cookies() {
-        let args = build_ytdlp_args("u", "t", Some("/path/cookies.txt"), None, None);
+        let args = build_ytdlp_args("u", "t", Some("/path/cookies.txt"), None);
         let pos = args.iter().position(|a| a == "--cookies").unwrap();
         assert_eq!(args[pos + 1], "/path/cookies.txt");
     }
@@ -1184,7 +1313,7 @@ mod tests {
 
     #[test]
     fn ytdlp_args_ignore_blank_cookies() {
-        let args = build_ytdlp_args("u", "t", Some("   "), None, None);
+        let args = build_ytdlp_args("u", "t", Some("   "), None);
         assert!(!args.contains(&"--cookies".to_string()));
     }
 
@@ -1193,7 +1322,6 @@ mod tests {
         let args = build_ytdlp_args(
             "https://www.bilibili.com/video/BV1Gp5u6JEpc/?p=3",
             "t",
-            None,
             None,
             None,
         );
@@ -1205,26 +1333,67 @@ mod tests {
 
     #[test]
     fn ytdlp_args_with_quality_and_subs() {
-        let args = build_ytdlp_args(
-            "https://www.bilibili.com/video/BV1x",
-            "t",
-            None,
-            Some(720),
-            Some("ai-zh"),
-        );
+        let args = build_ytdlp_args("https://www.bilibili.com/video/BV1x", "t", None, Some(720));
         let f = args.iter().position(|a| a == "-f").unwrap();
         assert_eq!(
             args[f + 1],
             "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b/ba"
         );
+        // 视频这一步不再带字幕参数：字幕单独下，失败不连累视频。
+        assert!(!args.contains(&"--write-subs".to_string()));
+        assert!(!args.contains(&"--write-auto-subs".to_string()));
+    }
+
+    #[test]
+    fn subtitle_args_skip_the_video_and_keep_site_headers() {
+        let args = build_subtitle_args(
+            "https://www.bilibili.com/video/BV1x",
+            "t",
+            Some("/c.txt"),
+            "ai-zh",
+        );
+        assert!(args.contains(&"--skip-download".to_string()));
         assert!(args.contains(&"--write-subs".to_string()));
+        assert!(args.contains(&"--write-auto-subs".to_string()));
         let sl = args.iter().position(|a| a == "--sub-langs").unwrap();
         assert_eq!(args[sl + 1], "ai-zh");
+        let conv = args.iter().position(|a| a == "--convert-subs").unwrap();
+        assert_eq!(args[conv + 1], "srt");
+        assert!(args.contains(&"--referer".to_string()));
+        assert!(args.contains(&"--cookies".to_string()));
+        assert_eq!(args.last().unwrap(), "https://www.bilibili.com/video/BV1x");
+        assert!(!args.contains(&"-f".to_string()), "只下字幕不选格式");
+    }
+
+    #[test]
+    fn probe_drops_youtube_machine_translated_captions() {
+        let json = r#"{
+            "title": "Lecture",
+            "subtitles": {},
+            "automatic_captions": {
+                "en-orig": [{"ext":"vtt","name":"English (Original)","url":"https://www.youtube.com/api/timedtext?v=x&lang=en&kind=asr"}],
+                "en": [{"ext":"vtt","name":"English","url":"https://www.youtube.com/api/timedtext?v=x&lang=en&kind=asr&tlang=en"}],
+                "zh-Hans": [{"ext":"vtt","name":"Chinese (Simplified)","url":"https://www.youtube.com/api/timedtext?v=x&lang=en&kind=asr&tlang=zh-Hans"}]
+            }
+        }"#;
+        let probe = parse_probe_json(json).unwrap();
+        let langs: Vec<&str> = probe.tracks.iter().map(|t| t.lang.as_str()).collect();
+        assert_eq!(langs, vec!["en-orig"]);
+        assert_eq!(pick_default_track(&probe.tracks).unwrap().lang, "en-orig");
+    }
+
+    #[test]
+    fn recognizes_youtube_subtitle_rate_limits() {
+        assert!(is_rate_limited(
+            "ERROR: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests"
+        ));
+        assert!(is_rate_limited("WARNING: too many requests, slow down"));
+        assert!(!is_rate_limited("ERROR: Requested format is not available"));
     }
 
     #[test]
     fn ytdlp_args_no_quality_no_subs() {
-        let args = build_ytdlp_args("https://b23.tv/x", "t", None, None, None);
+        let args = build_ytdlp_args("https://b23.tv/x", "t", None, None);
         // 不限清晰度时仍要给格式：默认的 bv*+ba/b 在纯音频来源上选不到东西。
         let f = args.iter().position(|a| a == "-f").unwrap();
         assert!(!args[f + 1].contains("height"));

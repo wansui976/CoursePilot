@@ -16,6 +16,8 @@ function job(overrides: Partial<DownloadJob> = {}): DownloadJob {
     speed: null,
     eta: null,
     retryHeight: null,
+    subtitle: null,
+    subtitleWait: null,
     error: null,
     videoId: null,
     attempt: 0,
@@ -98,5 +100,20 @@ describe("describeDownloadJob", () => {
       describeDownloadJob(job({ status: "failed", error: "会员专享" }), t),
     ).toBe("会员专享");
     expect(describeDownloadJob(job({ status: "failed" }), t)).toBe("下载失败");
+  });
+
+  it("字幕被限流时说明在等、放弃后说明改用语音识别，都不算失败", () => {
+    expect(
+      describeDownloadJob(job({ status: "merging", subtitle: "fetching" }), t),
+    ).toBe("视频已下好，正在下载字幕…");
+    expect(
+      describeDownloadJob(job({ status: "merging", subtitle: "waiting", subtitleWait: 30 }), t),
+    ).toContain("30 秒后重试");
+    const skipped = describeDownloadJob(job({ status: "importing", subtitle: "rateLimited" }), t);
+    expect(skipped).toContain("正在存入课程");
+    expect(skipped).toContain("语音识别");
+    expect(describeDownload({ type: "subtitlesSkipped", rateLimited: false }, t)).toContain(
+      "没有所选语言的字幕",
+    );
   });
 });

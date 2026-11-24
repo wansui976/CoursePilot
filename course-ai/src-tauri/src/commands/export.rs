@@ -149,8 +149,8 @@ fn strip_scripts(html: &str) -> String {
 
 /// 把 src="note-image:<id>" 换成 data URI，打印页离开应用也能显示图片。
 async fn inline_html_note_images(db: &crate::db::Db, html: &str) -> AppResult<String> {
-    use base64::Engine as _;
     use crate::commands::note_images::{read_note_image, IMAGE_REF_PREFIX};
+    use base64::Engine as _;
     let needle = format!("src=\"{IMAGE_REF_PREFIX}");
     let mut out = String::with_capacity(html.len());
     let mut rest = html;
@@ -179,7 +179,10 @@ async fn inline_html_note_images(db: &crate::db::Db, html: &str) -> AppResult<St
 }
 
 fn escape_html(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// 打印页模板。装订线和两个孔用 position: fixed，打印时每一页都有。
@@ -471,7 +474,10 @@ mod print_tests {
 
     #[test]
     fn scripts_are_removed_from_the_body() {
-        assert_eq!(strip_scripts("<p>a</p><SCRIPT>x()</script><p>b</p>"), "<p>a</p><p>b</p>");
+        assert_eq!(
+            strip_scripts("<p>a</p><SCRIPT>x()</script><p>b</p>"),
+            "<p>a</p><p>b</p>"
+        );
         assert_eq!(strip_scripts("<p>a</p><script>never closed"), "<p>a</p>");
     }
 }
