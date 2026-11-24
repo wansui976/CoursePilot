@@ -1239,6 +1239,8 @@
     "hintFor": "「{{label}}」的说明",
     "processing": {
       "title": "处理队列",
+      "autoProcess": "导入后立刻处理",
+      "autoProcessHint": "导入视频（本地文件、网络视频、网盘）后马上开始生成文稿、摘要和笔记，不用再点「开始处理」。关掉后导入的视频先放着，等你自己开始。订阅的自动导入按各自的设置。",
       "concurrency": "同时处理的视频数",
       "concurrencyHint": "同时最多处理几个视频，其余按点「开始处理」的先后排队。数越大总体越快，但电脑越卡。本地语音识别另外一次只跑一个视频（显卡和 CPU 都让给它），其余视频的课件、AI 步骤照常并行。",
       "videos": "{{count}} 个"
@@ -1552,6 +1554,7 @@
     "importSuccess": "视频已导入，但后续处理失败：{{error}}。重试只会继续处理，不会重复下载。",
     "noCookies": "还没有导入 B 站 cookies，下载会被拦截。请先在导入对话框里导入一次 cookies.txt",
     "cookieExpired": "B 站登录态已失效，没拿到自带字幕：视频已导入，可以在处理队列里开始语音转写。需要 AI 字幕的话，请在浏览器登录后重新导出 cookies.txt，再从导入对话框导入。",
+    "cookieExpiredProcessing": "B 站登录态已失效，没拿到自带字幕：视频已导入，正在用语音识别生成文稿。需要 AI 字幕的话，请在浏览器登录后重新导出 cookies.txt，再从导入对话框导入。",
     "noCourseId": "没有指定要导入到哪门课程",
     "completeResult": "已完成{{title}}：{{details}}",
     "refreshFailed": "操作已经完成，但列表没有自动刷新。请手动刷新后确认结果。",

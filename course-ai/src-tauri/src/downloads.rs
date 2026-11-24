@@ -72,9 +72,19 @@ pub struct DownloadRequest {
     pub max_height: Option<u32>,
     pub sub_lang: Option<String>,
     pub subtitle_autocorrect: Option<bool>,
-    /// 这一集下完后是否自动跑流水线（批量导入为 true）。
+    /// 这一集下完后是否自动跑流水线。不给（None）就按设置「导入后立刻处理」；
+    /// 订阅、助手这类自己决定要不要处理的调用方给明确的值。
     #[serde(default)]
-    pub auto_process: bool,
+    pub auto_process: Option<bool>,
+}
+
+/// 设置「导入后立刻处理」：导入视频后马上跑流水线。没设置过算开。
+pub async fn auto_process_imports(db: &crate::db::Db) -> bool {
+    crate::commands::settings::get_setting(db, "auto_process_imports")
+        .await
+        .ok()
+        .flatten()
+        .is_none_or(|value| value != "false")
 }
 
 #[derive(Clone)]
@@ -278,7 +288,7 @@ impl DownloadQueue {
                     max_height: item.max_height,
                     sub_lang: item.sub_lang,
                     subtitle_autocorrect: item.subtitle_autocorrect,
-                    auto_process: item.auto_process,
+                    auto_process: item.auto_process.unwrap_or(false),
                     progress_event,
                 },
             );
@@ -580,7 +590,7 @@ async fn finish_batch(app: &AppHandle, batch_id: &str) {
 
 /// 依次给一批刚下完的视频起处理流水线，同时最多跑 BATCH_PROCESS_CONCURRENCY 条，
 /// 跑完一条再起下一条。用户「全部取消」后不再起新的，并停掉这里起的、还在跑的。
-fn spawn_batch_processing(app: AppHandle, videos: Vec<String>) {
+pub(crate) fn spawn_batch_processing(app: AppHandle, videos: Vec<String>) {
     if videos.is_empty() {
         return;
     }
@@ -670,10 +680,17 @@ pub async fn cmd_enqueue_downloads(
         }
     }
     let root_path = download_root(&app, &state, &course_id, all_webdav).await?;
+    let auto_process = auto_process_imports(&state.db).await;
     let created = app.state::<DownloadQueue>().register(
         &course_id,
         &root_path,
-        items.into_iter().map(|item| (item, None)).collect(),
+        items
+            .into_iter()
+            .map(|mut item| {
+                item.auto_process.get_or_insert(auto_process);
+                (item, None)
+            })
+            .collect(),
     );
     start_jobs(&app, &created);
     Ok(created)
@@ -934,7 +951,7 @@ mod tests {
             max_height: None,
             sub_lang: None,
             subtitle_autocorrect: None,
-            auto_process: false,
+            auto_process: None,
         }
     }
 
@@ -1047,6 +1064,35 @@ mod tests {
         assert_eq!(updated.downloaded, 0);
         assert_eq!(updated.total, None);
         assert_eq!(updated.retry_height, Some(720));
+    }
+
+    #[tokio::test]
+    async fn imports_are_processed_right_away_unless_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        // 没设置过算开。
+        assert!(auto_process_imports(&db).await);
+        crate::commands::settings::set_setting(&db, "auto_process_imports", "false")
+            .await
+            .unwrap();
+        assert!(!auto_process_imports(&db).await);
+        crate::commands::settings::set_setting(&db, "auto_process_imports", "true")
+            .await
+            .unwrap();
+        assert!(auto_process_imports(&db).await);
+    }
+
+    #[test]
+    fn requests_without_auto_process_follow_the_setting() {
+        // 导入对话框不再传 autoProcess：解析成 None，由入队时按设置补上。
+        let request: DownloadRequest =
+            serde_json::from_str(r#"{"url":"https://example.com/v"}"#).unwrap();
+        assert_eq!(request.auto_process, None);
+        let explicit: DownloadRequest =
+            serde_json::from_str(r#"{"url":"u","autoProcess":false}"#).unwrap();
+        assert_eq!(explicit.auto_process, Some(false));
     }
 
     #[test]

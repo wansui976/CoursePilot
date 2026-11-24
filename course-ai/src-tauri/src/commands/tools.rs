@@ -273,7 +273,7 @@ pub async fn cmd_import_bilibili(
             max_height,
             sub_lang,
             subtitle_autocorrect,
-            auto_process: false,
+            auto_process: Some(false),
         },
         request_id.map(|id| format!("url-import:{id}")),
     )

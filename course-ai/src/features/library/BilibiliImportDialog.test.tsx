@@ -229,7 +229,6 @@ describe("BilibiliImportDialog", () => {
           maxHeight: 1080,
           subLang: "zh-CN",
           subtitleAutocorrect: false,
-          autoProcess: true,
         },
       ]),
     );
@@ -310,7 +309,6 @@ describe("BilibiliImportDialog", () => {
           maxHeight: 1080,
           subLang: undefined,
           subtitleAutocorrect: undefined,
-          autoProcess: false,
         },
       ]),
     );

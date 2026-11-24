@@ -912,6 +912,10 @@ pub async fn cmd_add_local_video(
     // 导入即转码：这台设备解不了的编码（老 iPad 上的 AV1）不等用户点播放就先转好，
     // 省得他打开时先看到一块黑屏再等两分钟。
     start_transcode_if_needed(&app, &video);
+    // 设置「导入后立刻处理」开着：马上排进流水线（受全局同时处理数限制）。
+    if crate::downloads::auto_process_imports(&state.db).await {
+        crate::downloads::spawn_batch_processing(app.clone(), vec![video.id.clone()]);
+    }
     Ok(video)
 }
 
@@ -941,6 +945,10 @@ pub async fn cmd_add_local_batch(
     for video in &imported.videos {
         crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
         start_transcode_if_needed(&app, video);
+    }
+    if crate::downloads::auto_process_imports(&state.db).await {
+        let ids = imported.videos.iter().map(|video| video.id.clone()).collect();
+        crate::downloads::spawn_batch_processing(app.clone(), ids);
     }
     Ok(imported)
 }

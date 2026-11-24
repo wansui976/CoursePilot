@@ -1241,6 +1241,8 @@
     "hintFor": "About “{{label}}”",
     "processing": {
       "title": "Processing queue",
+      "autoProcess": "Process right after import",
+      "autoProcessHint": "Start making the transcript, summary and notes as soon as a video is imported (local files, web videos, cloud drives), without clicking \"Start processing\". When off, imported videos wait until you start them. Subscription auto-imports follow their own setting.",
       "concurrency": "Videos processed at once",
       "concurrencyHint": "How many videos are processed at the same time; the rest wait in the order you started them. Higher is faster overall but makes the computer busier. Local speech recognition always runs one video at a time (it gets the GPU and CPU to itself); slides and AI steps of other videos keep going in parallel.",
       "videos": "{{count}}"
@@ -1555,6 +1557,7 @@
     "importSuccess": "Video imported, but processing failed: {{error}}. Retry will continue processing without re-downloading.",
     "noCookies": "Bilibili cookies not imported — downloads will be blocked. Please import cookies.txt in the import dialog first",
     "cookieExpired": "Your Bilibili login has expired, so no built-in subtitles were available. The video was imported — start speech recognition from the processing queue. For AI subtitles, log in in your browser, export cookies.txt again, then import it from the import dialog.",
+    "cookieExpiredProcessing": "Your Bilibili login has expired, so no built-in subtitles were available. The video was imported and the transcript is being made with speech recognition. For AI subtitles, log in in your browser, export cookies.txt again, then import it from the import dialog.",
     "noCourseId": "No target course specified",
     "completeResult": "Completed {{title}}: {{details}}",
     "refreshFailed": "Action completed, but the list didn't refresh automatically. Please refresh manually to confirm.",

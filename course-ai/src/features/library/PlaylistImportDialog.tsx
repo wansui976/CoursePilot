@@ -184,8 +184,7 @@ export function PlaylistImportDialog({
             maxHeight,
             subLang: useSub ? "ai-zh" : undefined,
             subtitleAutocorrect: useSub ? autocorrect : undefined,
-            // 批量导入：整批下完后再统一跑流水线（见后端 finish_batch）。
-            autoProcess: true,
+            // 要不要处理按设置「导入后立刻处理」；处理的话整批下完再起（见后端 finish_batch）。
           })),
         );
         enqueuedRef.current = true;

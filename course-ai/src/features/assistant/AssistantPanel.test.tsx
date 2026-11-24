@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import i18n from "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { AssistantPanel } from "./AssistantPanel";
 import { resetImportProbeCacheForTests } from "@/lib/importProbeCache";
 import { useAssistantUi } from "@/stores/assistant";
@@ -3655,8 +3655,52 @@ describe("确认卡", () => {
         undefined,
       ),
     );
-    // 没拿到字幕时和导入对话框一样只导入、不自动开始转写：提示要照实说，不能说「已改用语音转写」。
-    expect(await screen.findByText(/没拿到自带字幕：视频已导入/)).toBeInTheDocument();
+    // 设置「导入后立刻处理」默认开：没字幕也马上转写，提示照实说正在语音识别。
+    expect(await screen.findByText(/没拿到自带字幕：视频已导入，正在用语音识别/)).toBeInTheDocument();
+    await waitFor(() => expect(mockIpc.pipeline.process).toHaveBeenCalled());
+  });
+
+
+  it("关掉「导入后立刻处理」时，没字幕只导入、提示去处理队列开始", async () => {
+    mockIpc.settings.get.mockImplementation(async (key: string) =>
+      key === "auto_process_imports" ? "false" : null,
+    );
+    onTestFinished(() => {
+      mockIpc.settings.get.mockReset();
+    });
+    mockIpc.tools.bilibiliLoginState.mockResolvedValueOnce(false);
+    mockIpc.tools.probeBilibili.mockResolvedValueOnce({
+      title: "双曲线",
+      qualities: [1080],
+      tracks: [],
+    });
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_import",
+            url: "https://www.bilibili.com/video/BV1",
+            title: "双曲线",
+            course_id: "c1",
+          },
+        ],
+      }),
+    );
+    renderPanel();
+    await ask("导入这个");
+    fireEvent.click(await screen.findByRole("button", { name: "确认导入" }));
+
+    // 和导入对话框一致：登录过期不拦导入，但没有字幕就要说清楚，不能静悄悄降级。
+    await waitFor(() =>
+      expect(mockIpc.tools.importBilibili).toHaveBeenCalledWith(
+        "c1",
+        "https://www.bilibili.com/video/BV1",
+        1080,
+        undefined,
+        undefined,
+      ),
+    );
+    expect(await screen.findByText(/没拿到自带字幕：视频已导入，可以在处理队列里开始/)).toBeInTheDocument();
     expect(mockIpc.pipeline.process).not.toHaveBeenCalled();
   });
 

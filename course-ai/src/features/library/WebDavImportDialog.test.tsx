@@ -78,7 +78,7 @@ describe("WebDavImportDialog", () => {
     expect(await screen.findByRole("button", { name: /申论 2027/ })).toBeInTheDocument();
   });
 
-  it("下载到本机：勾选的视频排进下载队列（只列视频，不自动处理）", async () => {
+  it("下载到本机：勾选的视频排进下载队列（只列视频，处理与否按设置）", async () => {
     mockIpc.webdavImport.sources.mockResolvedValue([nas]);
     mockIpc.downloads.enqueue.mockResolvedValue([]);
     const onClose = renderDialog();
@@ -89,8 +89,8 @@ describe("WebDavImportDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "导入 2 个视频" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mockIpc.downloads.enqueue).toHaveBeenCalledWith("c1", [
-      { url: "http://nas:5244/dav/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC1%E8%AE%B2.mp4", title: "第1讲", autoProcess: false },
-      { url: "http://nas:5244/dav/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC2%E8%AE%B2.mp4", title: "第2讲", autoProcess: false },
+      { url: "http://nas:5244/dav/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC1%E8%AE%B2.mp4", title: "第1讲" },
+      { url: "http://nas:5244/dav/%E7%94%B3%E8%AE%BA%202027/%E7%AC%AC2%E8%AE%B2.mp4", title: "第2讲" },
     ]);
     expect(mockIpc.webdavImport.importStream).not.toHaveBeenCalled();
   });

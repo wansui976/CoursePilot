@@ -433,7 +433,8 @@ export function WebDavImportDialog({
       } else {
         const jobs = await ipc.downloads.enqueue(
           courseId,
-          items.map((item) => ({ url: item.url, title: item.title, autoProcess: false })),
+          // 下完要不要立刻处理，按设置「导入后立刻处理」。
+          items.map((item) => ({ url: item.url, title: item.title })),
         );
         useDownloads.getState().addMany(jobs);
       }

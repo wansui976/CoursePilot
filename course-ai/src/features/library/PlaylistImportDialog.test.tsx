@@ -96,7 +96,7 @@ describe("PlaylistImportDialog", () => {
     expect(screen.getByText("第一讲")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "导入 3 个" }));
 
-    // 三集一次性入队；autoProcess 让后端在整批下完后统一开始处理。
+    // 三集一次性入队；要不要处理由后端按设置「导入后立刻处理」决定，处理的话整批下完再起。
     await waitFor(() =>
       expect(mockIpc.downloads.enqueue).toHaveBeenCalledWith("c1", [
         {
@@ -105,7 +105,6 @@ describe("PlaylistImportDialog", () => {
           maxHeight: undefined,
           subLang: "ai-zh",
           subtitleAutocorrect: true,
-          autoProcess: true,
         },
         {
           url: "u2",
@@ -113,7 +112,6 @@ describe("PlaylistImportDialog", () => {
           maxHeight: undefined,
           subLang: "ai-zh",
           subtitleAutocorrect: true,
-          autoProcess: true,
         },
         {
           url: "u3",
@@ -121,7 +119,6 @@ describe("PlaylistImportDialog", () => {
           maxHeight: undefined,
           subLang: "ai-zh",
           subtitleAutocorrect: true,
-          autoProcess: true,
         },
       ]),
     );
@@ -199,7 +196,6 @@ describe("PlaylistImportDialog", () => {
           maxHeight: undefined,
           subLang: "ai-zh",
           subtitleAutocorrect: true,
-          autoProcess: true,
         },
       ]),
     );

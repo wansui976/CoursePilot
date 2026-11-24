@@ -88,7 +88,7 @@ async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppRe
                 sub_lang,
                 subtitle_autocorrect: None,
                 // 处理由下面按订阅设置自己起，这里不让队列代劳。
-                auto_process: false,
+                auto_process: Some(false),
             },
             None,
         )

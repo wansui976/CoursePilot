@@ -152,8 +152,7 @@ export function BilibiliImportDialog({
           subtitleAutocorrect: request.useSub
             ? request.autocorrect
             : undefined,
-          // 选了字幕的导入按单集立即处理；不选字幕则等用户自己开始。
-          autoProcess: request.useSub,
+          // 下完要不要立刻处理，按设置「导入后立刻处理」。
         },
       ]);
       useDownloads.getState().addMany(jobs);
