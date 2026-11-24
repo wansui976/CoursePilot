@@ -658,9 +658,10 @@ export function AssistantPanel({
     const editedTurn = editingId ? turns.find((turn) => turn.id === editingId) : undefined;
     if (editingId) {
       if (editedTurn) {
-        const before = editedTurn.canceled
-          ? historyRef.current
-          : historyBeforeLastQuestion(historyRef.current);
+        const before =
+          editedTurn.canceled || editedTurn.failed
+            ? historyRef.current
+            : historyBeforeLastQuestion(historyRef.current);
         historyRef.current = before;
         setHistory(before);
       }
@@ -834,20 +835,28 @@ export function AssistantPanel({
       if (!canceled && !useAssistantUi.getState().open) setHasUnread(true);
     } catch (e) {
       if (!mountedRef.current) return;
-      // 把问题放回输入框：让用户能直接重发，而不是重新打一遍。
-      // 但输入框里已经有东西时不覆盖——那是他趁等待时打的，比这句重发的价值高。
-      setTurns((prev) => prev.filter((turn) => turn.id !== turnId));
-      setInput((current) => {
-        const next = current.trim() ? current : question;
-        recent.reset(next);
-        return next;
-      });
-      // 附图同理：失败时放回去，除非用户等待期间又贴了新的。
-      if (pendingImages.length > 0) {
-        setAttachments((current) => (current.length > 0 ? current : pendingImages));
-      }
-      setError(humanizeError(e));
-      setStatusAnnouncement("");
+      // 这一轮留在原处，标成失败，原地写明原因并给「重试」。
+      // 以前是整轮删掉、把问题塞回输入框：已经流出来的半截回答和查过的工具跟着消失，
+      // 错误只剩底部一行，用户会以为刚才什么都没发生过。
+      // 历史不动（historyRef 仍是发出前的样子），和取消一样不进下次上下文。
+      const message = humanizeError(e);
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === turnId
+            ? {
+                ...turn,
+                pending: false,
+                failed: message,
+                toolRuns: reconcileAssistantToolRuns(turn.tools, turn.toolRuns ?? [], true),
+                activeTool: undefined,
+                toolExecutionStatus: undefined,
+                toolExecutionName: undefined,
+                turnLimitNoticed: undefined,
+              }
+            : turn,
+        ),
+      );
+      setStatusAnnouncement(t("assistant.turnFailedAnnouncement", { error: message }));
       if (!useAssistantUi.getState().open) setHasUnread(true);
     } finally {
       locallyStoppedRequestsRef.current.delete(requestId);
@@ -910,9 +919,11 @@ export function AssistantPanel({
     const images =
       turn.images ?? (turn.imageCount ? ((await loadTurnImages(turn.id)) ?? undefined) : undefined);
     if (busy || activeRequestRef.current || actionExecutionCountRef.current > 0) return;
-    const before = turn.canceled
-      ? historyRef.current
-      : historyBeforeLastQuestion(historyRef.current);
+    // 失败的那一轮同理：它没进上下文。
+    const before =
+      turn.canceled || turn.failed
+        ? historyRef.current
+        : historyBeforeLastQuestion(historyRef.current);
     historyRef.current = before;
     setHistory(before);
     setTurns((previous) => previous.filter((item) => item.id !== turn.id));
@@ -1439,7 +1450,6 @@ export function AssistantPanel({
       >
         {turns.length === 0 && !busy && !error && (
           <AssistantEmptyState
-            scopeLabel={scopeLabel}
             context={resolvedContext}
             actionExecutionBusy={actionExecutionBusy}
             onSend={(prompt) => void send(prompt)}
@@ -1476,6 +1486,7 @@ export function AssistantPanel({
               // 点的是引导卡上的选项：这一轮必须继续走引导，哪怕用户刚把开关关掉。
               onPickReply={(reply) => void send(reply, true, undefined, "socratic")}
               onMakeCard={makeGuidedCard}
+              onAskFollowup={(question) => void send(question, true, undefined, null)}
             />
           </div>
         ))}

@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -8,10 +8,11 @@ import {
   Check,
   ChevronRight,
   Copy,
+  CornerDownRight,
   LoaderCircle,
   PenLine,
+  NotebookPen,
   RefreshCw,
-  Save,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
@@ -26,6 +27,7 @@ import { loadTurnImages } from "@/lib/assistantImageStore";
 import { ImageLightbox } from "./ImageLightbox";
 import { SocraticCard } from "./SocraticCard";
 import { splitSocratic, type SocraticBlock } from "./socratic";
+import { splitFollowups } from "./followups";
 import {
   type Turn,
   usageTokens,
@@ -34,6 +36,8 @@ import {
   suggestionsFor,
   bracketBareTimestamps,
   formatElapsed,
+  withoutInlineSeeks,
+  compactTokens,
 } from "./turnModel";
 import { formatPosition } from "./assistantPanelModel";
 
@@ -159,12 +163,10 @@ function useContextTitle(context: AssistantContext) {
 }
 
 export function AssistantEmptyState({
-  scopeLabel,
   context,
   actionExecutionBusy,
   onSend,
 }: {
-  scopeLabel: string;
   context: AssistantContext;
   actionExecutionBusy: boolean;
   onSend: (prompt: string) => void;
@@ -189,7 +191,7 @@ export function AssistantEmptyState({
       </div>
       <div className="flex flex-col gap-2.5">
         <p className="ca-t-sm leading-relaxed text-[var(--text-muted)]">
-          {t("assistant.greetingHint", { scope: scopeLabel })}
+          {t("assistant.greetingHint")}
         </p>
         <div className="flex flex-wrap gap-2">
           {suggestionsFor(context, t).map((suggestion) => (
@@ -232,6 +234,7 @@ export function AssistantTurn({
   onApplied,
   onPickReply,
   onMakeCard,
+  onAskFollowup,
 }: {
   turn: Turn;
   isLast: boolean;
@@ -260,18 +263,29 @@ export function AssistantTurn({
   onPickReply?: (reply: string) => void;
   /** 引导模式收尾：把推出的要点做成复习卡。 */
   onMakeCard?: (turn: Turn, block: SocraticBlock) => Promise<void>;
+  /** 点了回答末尾的追问建议：当作下一句发出去。 */
+  onAskFollowup?: (question: string) => void;
 }) {
   const { t } = useTranslation();
   // 引导模式：回答末尾的结构块不显示原文，画成下面那张卡。
   const socratic = turn.mode === "socratic" ? splitSocratic(turn.answer) : null;
   // 结构块坏了 / 还没闭合、正文又是空的：整轮不能变成空白，按普通回答显示原文。
+  // 普通问答：末尾的追问建议块同样不显示原文，画成下面那排胶囊。
+  const followupSplit = turn.mode === "socratic" ? null : splitFollowups(turn.answer);
   const shownAnswer = socratic
     ? socratic.text.trim() || socratic.block
       ? socratic.text
       : turn.answer
-    : turn.answer;
+    : followupSplit!.text;
+  const followups = followupSplit?.followups ?? [];
   // 正文和结构块都没有：这一轮确实什么都没显示出来，得给一句提示和重试入口。
   const nothingVisible = !shownAnswer.trim() && !socratic?.block;
+  // 正文里已经有同一时间点的可点时间戳时，下面不再重复挂「跳到」按钮。
+  const renderedAnswer = turn.context?.video_id ? bracketBareTimestamps(shownAnswer) : shownAnswer;
+  const inlineActions = useMemo(
+    () => (turn.pending ? turn.actions : withoutInlineSeeks(turn.actions, renderedAnswer)),
+    [turn.actions, turn.pending, renderedAnswer],
+  );
 
   return (
     <div className="space-y-2">
@@ -412,7 +426,7 @@ export function AssistantTurn({
                 {savedToNotes ? (
                   <Check className="h-3.5 w-3.5 text-[var(--status-ok)]" />
                 ) : (
-                  <Save className="h-3.5 w-3.5" />
+                  <NotebookPen className="h-3.5 w-3.5" />
                 )}
               </Button>
             )}
@@ -437,13 +451,21 @@ export function AssistantTurn({
             {!turn.pending && (turn.usage || turn.durationMs) && (
               <span
                 data-testid="turn-usage"
-                className="ml-1 whitespace-nowrap ca-t-2xs tabular-nums text-[var(--text-faint)]"
-              >
-                {[
-                  turn.durationMs ? formatElapsed(turn.durationMs, t) : null,
+                title={
                   turn.usage
                     ? t("assistant.usageTokens", {
                         tokens: usageTokens(turn.usage).toLocaleString(),
+                      })
+                    : undefined
+                }
+                className="ml-1 min-w-0 truncate ca-t-2xs tabular-nums text-[var(--text-faint)]"
+              >
+                {[
+                  turn.durationMs ? formatElapsed(turn.durationMs, t) : null,
+                  // 一排图标后面跟一句「本次消耗 5,380 tokens」太像日志；缩成 5.4k，完整数字悬停看。
+                  turn.usage
+                    ? t("assistant.usageTokensShort", {
+                        tokens: compactTokens(usageTokens(turn.usage)),
                       })
                     : null,
                 ]
@@ -462,7 +484,35 @@ export function AssistantTurn({
           一模一样，而它其实是查得太久被截断了，换个具体点的问法就能过去。
           正文空着的时候顺带把重新回答放在这儿：那排悬停按钮挂在回答上，
           恰恰是最需要重试的这种情况反而没有入口。 */}
-      {!turn.pending && (turn.hitTurnLimit || (nothingVisible && !turn.canceled)) && (
+      {/* 请求失败：原因写在这一轮自己下面，重试就在旁边。半截回答和查过的工具照常留着。 */}
+      {turn.failed && !turn.pending && (
+        <div
+          role="alert"
+          className="flex items-start gap-1.5 border-l-2 border-[var(--status-err)] pl-2 ca-t-2xs text-[var(--text-muted)]"
+        >
+          <span className="min-w-0 flex-1 break-words">
+            <span className="font-medium text-[var(--status-err)]">{t("assistant.turnFailed")}</span>
+            {" "}
+            {turn.failed}
+          </span>
+          {isLast && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || actionExecutionBusy}
+              onClick={() => onRegenerate(turn)}
+              className="ca-touch-44 -my-1 h-6 flex-none px-1.5 ca-t-2xs"
+            >
+              <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
+              {t("assistant.retry")}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {!turn.pending &&
+        !turn.failed &&
+        (turn.hitTurnLimit || (nothingVisible && !turn.canceled)) && (
         <div className="flex items-start gap-1.5 border-l-2 border-[var(--border-strong)] pl-2 ca-t-2xs text-[var(--text-muted)]">
           <span className="min-w-0 flex-1 break-words">
             {turn.hitTurnLimit
@@ -485,7 +535,7 @@ export function AssistantTurn({
       )}
 
       <AssistantActionList
-        actions={turn.actions}
+        actions={inlineActions}
         onNavigate={(action) => onNavigate(turn, action)}
         onOutcome={(outcome) => onOutcome(turn.id, outcome)}
         executionLocked={actionExecutionBusy}
@@ -547,6 +597,28 @@ export function AssistantTurn({
         <p className="border-l-2 border-[var(--border-faint)] pl-2 ca-t-2xs text-[var(--text-faint)]">
           {t("assistant.stopped")}
         </p>
+      )}
+
+      {/* 追问建议只挂在最新一轮：往回点旧回答的追问，接上的是最新那轮的上下文，答非所问。 */}
+      {isLast && !turn.pending && !turn.failed && !turn.canceled && followups.length > 0 && onAskFollowup && (
+        <div
+          role="group"
+          aria-label={t("assistant.followupsLabel")}
+          className="flex flex-wrap gap-1.5 pt-0.5"
+        >
+          {followups.map((question) => (
+            <button
+              key={question}
+              type="button"
+              disabled={busy || actionExecutionBusy || editing}
+              onClick={() => onAskFollowup(question)}
+              className="ca-touch-44 inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2.5 py-1 text-left ca-t-xs text-[var(--text-normal)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 motion-reduce:transition-none"
+            >
+              <CornerDownRight className="h-3 w-3 flex-none text-[var(--text-faint)]" aria-hidden="true" />
+              <span className="min-w-0 break-words">{question}</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

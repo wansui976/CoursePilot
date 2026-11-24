@@ -119,6 +119,12 @@ export interface AssistantTurnRecord {
   /** 每次工具调用各自的终态；旧会话只有 tools，渲染时按状态未知兼容。 */
   toolRuns?: AssistantToolRun[];
   canceled: boolean;
+  /**
+   * 这一轮请求失败了（断网、端点报错、没配模型……），值是给人看的错误说明。
+   * 和取消一样整轮不进下次上下文；保留这一轮是为了原地显示原因和「重试」，
+   * 而不是让问题凭空消失。旧记录没有。
+   */
+  failed?: string;
   /** 工具轮或上下文预算封顶且强制总结仍失败；这一轮回答不完整，重启后同样要说明。旧记录没有。 */
   hitTurnLimit?: boolean;
   /** 这一轮全部模型请求的 token 用量合计；端点不报则缺失，界面不应显示成零。旧记录没有。 */
@@ -401,6 +407,9 @@ function readTurn(value: unknown, now: number): AssistantTurnRecord | null {
     tools,
     ...(toolRuns ? { toolRuns } : {}),
     canceled: value.canceled === true,
+    ...(typeof value.failed === "string" && value.failed.trim()
+      ? { failed: capAssistantText(value.failed, MAX_ACTION_RESULT_CHARS) }
+      : {}),
     ...(value.hitTurnLimit === true ? { hitTurnLimit: true } : {}),
     ...(typeof value.durationMs === "number" &&
     Number.isFinite(value.durationMs) &&

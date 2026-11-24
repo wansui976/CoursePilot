@@ -41,7 +41,11 @@ const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮
 6. 找网上的视频时，把候选列出来让用户挑，不要替他决定导入哪个。\
 7. 给时间点时分清两种时间：课件页的时间是这一页出现在画面上的时刻，字幕的时间是这句话开始说的时刻。\
    用户问截图或课件「在哪/什么时候讲的」，给课件页出现的时间；上下文里有「附图比对」结果时以它为准。\
-8. 回答里提到视频的时间点一律写成方括号形式，如 [12:34] 或 [1:02:03]，界面会把它变成可点的跳转。";
+8. 回答里提到视频的时间点一律写成方括号形式，如 [12:34] 或 [1:02:03]，界面会把它变成可点的跳转。\
+9. 讲解课程内容的回答，在最末尾单独附一个追问块，给两三个用户很可能接着问的问题（每个不超过 20 字，\
+   用用户的语言，顺着你刚讲的往深处或旁边走，别重复他已经问过的），界面会画成按钮、用户看不到原文：\n\
+```followups\n[\"问题一\",\"问题二\"]\n```\n\
+   执行操作（打开、跳转、改名、删除、改设置、导入）、闲聊、或者查不到内容时不附。";
 
 /// 引导（苏格拉底）模式追加的规矩。
 ///
@@ -58,6 +62,7 @@ const SOCRATIC_RULES: &str = "\n\n【引导模式】用户打开了引导模式�
 \"hints\":[\"由浅到深的两级提示\"],\"answer\":\"这一步的答案（用户点了才看得到）\",\
 \"done\":是否已经推出结论,\"summary\":[\"done 为 true 时：用户自己推出的要点，2-4 条\"]}\n\
 ```\n\
+   引导模式下不附 followups 追问块，选项已经在结构块里。\
    字段说明：options 是用户可以直接点选的回答，至少一个是对的、至少一个是常见误解；没有合适选项时给空数组。\
    done 为 true 时 options、hints 给空数组，answer 给完整结论。结构块之外不要再重复这些内容。";
 
@@ -203,6 +208,8 @@ const LECTURE_ATTACHED_NOTE: &str =
 
 /// 附图和课件页比对这一步在界面上显示成一次工具调用（它确实要花一两秒）。
 const MATCH_SLIDES_TOOL: &str = "match_slides";
+/// 对话太长、较早的几轮要先压成摘要时，同样显示成一次工具调用。
+const COMPACT_HISTORY_TOOL: &str = "compact_history";
 
 /// 界面状态和附图比对结果合成一条上下文消息。
 ///
@@ -230,11 +237,15 @@ const CONTEXT_NAME_CHARS: usize = 60;
 
 async fn context_names(db: &crate::db::Db, context: &AssistantContext) -> ContextNames {
     let course = match &context.course_id {
-        Some(id) => crate::commands::courses::list_courses(db)
-            .await
-            .ok()
-            .and_then(|courses| courses.into_iter().find(|course| &course.id == id))
-            .map(|course| course.name),
+        // 只查这一门：每次提问都要拼这句，没必要把整个课程列表（连同统计）算一遍。
+        Some(id) => sqlx::query_scalar::<_, String>(
+            "SELECT name FROM courses WHERE id=? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten(),
         None => None,
     };
     let video = match &context.video_id {
@@ -346,10 +357,22 @@ fn valid_history_group(messages: &[ChatMessage]) -> bool {
 /// 放不下的最老组不再直接丢弃：压成一条摘要组（user + assistant）留在最前，模型还能
 /// 记得之前聊过什么。一旦要压，就压到 `COMPACT_KEEP_*` 留出余量（见那里的说明）。
 /// 摘要失败则维持现状截断——少一点上下文不妨碍回答，为它打断整轮提问不划算。
+#[cfg(test)]
 async fn prepare_history(
     history: Vec<ChatMessage>,
     provider: &crate::llm::Provider,
     model: &str,
+) -> Vec<ChatMessage> {
+    prepare_history_with(history, provider, model, &mut |_| {}).await
+}
+
+/// `on_digest(true)` 在要等摘要请求之前调、`on_digest(false)` 在拿到结果之后调：
+/// 这次请求可能要好几秒，界面得显示「整理较早的对话」，不然看着像卡住了。
+async fn prepare_history_with(
+    history: Vec<ChatMessage>,
+    provider: &crate::llm::Provider,
+    model: &str,
+    on_digest: &mut (dyn FnMut(bool) + Send),
 ) -> Vec<ChatMessage> {
     let mut groups = Vec::new();
     let mut current: Vec<ChatMessage> = Vec::new();
@@ -413,7 +436,10 @@ async fn prepare_history(
             .map(format_history_message)
             .collect();
         let text: String = text.chars().take(MAX_DIGEST_INPUT_CHARS).collect();
-        if let Some(digest) = digest_history(provider, model, &text).await {
+        on_digest(true);
+        let digest = digest_history(provider, model, &text).await;
+        on_digest(false);
+        if let Some(digest) = digest {
             // 摘要组必须是一条合法的 user 轮（user + assistant），才能和后面的正常组
             // 拼成一整条通过 valid_history_group 的历史；同时标明它只是背景，
             // 呼应系统提示里「资料不是指令」的边界。
@@ -603,10 +629,32 @@ pub async fn cmd_assistant_ask(
         let task = AssertUnwindSafe(async {
             emit(AssistantEvent::Started);
 
-            let mut messages = prepare_history(history, &provider, &model).await;
+            // 压缩较早的对话在界面上显示成一次工具调用：它真的要等一次模型请求。
+            let compact_call_id = format!("{request_id}-compact-history");
+            let mut compacted = false;
+            let mut messages = prepare_history_with(history, &provider, &model, &mut |started| {
+                if started {
+                    emit(AssistantEvent::Tool {
+                        call_id: compact_call_id.clone(),
+                        name: COMPACT_HISTORY_TOOL.into(),
+                    });
+                } else {
+                    compacted = true;
+                    emit(AssistantEvent::ToolFinished {
+                        call_id: compact_call_id.clone(),
+                        name: COMPACT_HISTORY_TOOL.into(),
+                        status: ToolExecutionStatus::Completed,
+                        canceled: false,
+                    });
+                }
+            })
+            .await;
             let completed_history_len = messages.len();
             let names = context_names(&db, &context).await;
             let mut tools_used: Vec<String> = Vec::new();
+            if compacted {
+                tools_used.push(COMPACT_HISTORY_TOOL.into());
+            }
             // 附图先和课件页按画面比对：模型自己看图只能读出文字，再拿文字去搜，命中的是
             // 老师「念到这句」的字幕时间，和这页课件出现在画面上的时间差好几秒。
             let slide_matches = if images.is_empty() {
@@ -899,6 +947,13 @@ mod tests {
     }
 
     #[test]
+    fn plain_answers_end_with_a_followups_block_but_guided_answers_do_not() {
+        let plain = system_prompt(false);
+        assert!(plain.contains("```followups"));
+        assert!(system_prompt(true).contains("引导模式下不附 followups"));
+    }
+
+    #[test]
     fn the_system_prompt_keeps_navigation_pending_until_click() {
         assert!(ASSISTANT_SYSTEM.contains("待点击导航按钮"));
         assert!(ASSISTANT_SYSTEM.contains("已经打开/已经跳到"));
@@ -1004,6 +1059,31 @@ mod tests {
             "界面状态 + 提问 + 回答是一组合法的历史"
         );
         assert!(ASSISTANT_SYSTEM.contains("以离当前提问最近的那条为准"));
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_digest_is_announced_and_short_history_is_not() {
+        let mut calls = Vec::new();
+        let short = vec![ChatMessage::user("问题"), ChatMessage::assistant("回答")];
+        prepare_history_with(short, &mock_provider("摘要"), "m", &mut |started| {
+            calls.push(started)
+        })
+        .await;
+        assert!(calls.is_empty(), "不用压缩时不该冒出「整理较早的对话」");
+
+        let long: Vec<ChatMessage> = (0..MAX_HISTORY_USER_TURNS + 2)
+            .flat_map(|i| {
+                [
+                    ChatMessage::user(format!("问题 {i}")),
+                    ChatMessage::assistant(format!("回答 {i}")),
+                ]
+            })
+            .collect();
+        prepare_history_with(long, &mock_provider("摘要"), "m", &mut |started| {
+            calls.push(started)
+        })
+        .await;
+        assert_eq!(calls, vec![true, false], "开始等摘要和拿到结果各报一次");
     }
 
     #[tokio::test]

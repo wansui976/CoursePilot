@@ -133,6 +133,9 @@ export function AssistantModelPicker({
     : t("assistant.modelDefault");
   const selected = value ? profiles.find((p) => p.id === value) : undefined;
   const label = selected ? selected.name : defaultLabel;
+  // 标签上只写模型名：「默认 · 」这几个字刚好把「引导」挤到第二行。跟随默认这件事
+  // 读屏名和菜单里都还在，看的人点开就知道。
+  const chipLabel = selected ? selected.name : (defaultName ?? defaultLabel);
 
   const rows: Array<{ id: string | null; label: string; detail?: string }> = [
     { id: null, label: defaultLabel },
@@ -161,7 +164,7 @@ export function AssistantModelPicker({
         className="inline-flex max-w-full items-center gap-1 rounded-full bg-[var(--surface-card)] px-1.5 py-0.5 ca-t-2xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Cpu className="h-2.5 w-2.5 flex-none" aria-hidden="true" />
-        <span className="truncate">{label}</span>
+        <span className="truncate">{chipLabel}</span>
         <ChevronDown className="h-2.5 w-2.5 flex-none opacity-70" aria-hidden="true" />
       </button>
       {open && (

@@ -6,6 +6,8 @@
  * JSON 坏了都不能卡住对话：正文照常显示，只是没有那些按钮。
  */
 
+import { splitFollowups } from "./followups";
+
 export interface SocraticBlock {
   step?: number;
   total?: number;
@@ -73,9 +75,13 @@ export function splitSocratic(answer: string): { text: string; block: SocraticBl
   return { text, block: parseSocraticBlock(body.slice(0, end).trim()) };
 }
 
-/** 给人看的回答正文：引导模式去掉结构块（复制、存笔记、导出对话都用它）。 */
+/** 给人看的回答正文：引导模式去掉结构块，普通问答去掉追问建议块（复制、存笔记、导出对话都用它）。 */
 export function visibleAnswer(turn: { answer: string; mode?: "socratic" }): string {
-  if (turn.mode !== "socratic") return turn.answer;
+  if (turn.mode !== "socratic") {
+    // 普通问答去掉末尾的追问建议块；只剩它时宁可给原文，也别复制出空字符串。
+    const { text } = splitFollowups(turn.answer);
+    return text.trim() ? text : turn.answer;
+  }
   const { text, block } = splitSocratic(turn.answer);
   if (text.trim()) return text;
   // 结构块没闭合 / JSON 坏了：正文被剥空，但整段回答还在——复制空字符串最糟。

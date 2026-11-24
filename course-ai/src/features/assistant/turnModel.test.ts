@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import i18n from "@/i18n";
-import { bracketBareTimestamps, formatElapsed } from "./turnModel";
+import { bracketBareTimestamps, formatElapsed, withoutInlineSeeks } from "./turnModel";
 import { matchSlashCommands, slashQuery, type SlashCommand } from "./slashCommands";
 
 describe("bracketBareTimestamps", () => {
@@ -53,5 +53,21 @@ describe("slash commands", () => {
     expect(matchSlashCommands(commands, "QU").map((c) => c.id)).toEqual(["出题"]);
     expect(matchSlashCommands(commands, "zj").map((c) => c.id)).toEqual(["总结"]);
     expect(matchSlashCommands(commands, "xyz")).toEqual([]);
+  });
+});
+
+describe("withoutInlineSeeks", () => {
+  const seek = (at_ms: number) => ({ kind: "seek_to" as const, at_ms });
+  const open = { kind: "open_video" as const, video_id: "v", at_ms: 430_000 };
+
+  it("正文里已有同一时间点（差一秒以内）就收掉跳转按钮", () => {
+    expect(withoutInlineSeeks([seek(430_600)], "越过谷底 [07:10]。")).toEqual([]);
+    expect(withoutInlineSeeks([seek(431_200)], "见 [07:10]")).toEqual([]);
+    expect(withoutInlineSeeks([seek(3_723_000)], "在 [1:02:03] 讲过")).toEqual([]);
+  });
+
+  it("正文没提到的时间点和打开视频照常保留", () => {
+    expect(withoutInlineSeeks([seek(90_000), open], "见 [07:10]")).toEqual([seek(90_000), open]);
+    expect(withoutInlineSeeks([seek(430_000)], "没有时间戳")).toEqual([seek(430_000)]);
   });
 });

@@ -280,6 +280,21 @@ describe("AssistantPanel", () => {
     expect(mockIpc.assistant.ask).not.toHaveBeenCalled();
   });
 
+  it("看到一半打开助手，第一条建议就是问刚才那段", async () => {
+    renderPanel(vi.fn(), { context: { course_id: "c1", video_id: "v1", position_ms: 664_000 } });
+    fireEvent.click(screen.getByRole("button", { name: "刚才 11:04 讲了什么" }));
+    await waitFor(() =>
+      expect(mockIpc.assistant.ask).toHaveBeenCalledWith(
+        "我刚看到 11:04，这一段讲了什么？",
+        expect.objectContaining({ video_id: "v1", position_ms: 664_000 }),
+        [],
+        expect.any(String),
+        expect.any(Function),
+        expect.anything(),
+      ),
+    );
+  });
+
   it("空白对话给出可直接执行的当前视频建议", async () => {
     renderPanel();
     fireEvent.click(screen.getByRole("button", { name: "查找例题" }));
@@ -542,7 +557,9 @@ describe("AssistantPanel", () => {
     });
     expect(await screen.findByText("查到了")).toBeInTheDocument();
     // 输入 + 正式输出 + 推理输出 = 1,550；缓存是输入的子集，不重复计。
-    expect(screen.getByTestId("turn-usage")).toHaveTextContent("本次消耗 1,550 tokens");
+    const usage = screen.getByTestId("turn-usage");
+    expect(usage).toHaveTextContent("1.6k tokens");
+    expect(usage).toHaveAttribute("title", "本次消耗 1,550 tokens");
   });
 
   it("端点没报用量时不显示消耗行", async () => {
@@ -1014,12 +1031,51 @@ describe("AssistantPanel", () => {
     );
   });
 
-  it("出错时把问题放回输入框，不用重打一遍", async () => {
+  it("出错时这一轮留在原处、写明原因，点重试原样再问一次", async () => {
     mockIpc.assistant.ask.mockRejectedValueOnce(new Error("端点挂了"));
     renderPanel();
     await ask("帮我查查");
-    await screen.findByRole("alert");
-    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("帮我查查");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("没答完");
+    expect(screen.getByTestId("user-bubble")).toHaveTextContent("帮我查查");
+    expect(screen.getByLabelText("对 AI 助手说")).toHaveValue("");
+
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "查到了" }));
+    fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
+    expect(await screen.findByText("查到了")).toBeInTheDocument();
+    expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+      "帮我查查",
+      expect.anything(),
+      [],
+      expect.any(String),
+      expect.any(Function),
+      expect.anything(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("user-bubble")).toHaveLength(1);
+  });
+
+  it("回答末尾的追问建议画成按钮，点了直接问；正文和复制里都没有原文", async () => {
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({ answer: '会震荡。\n\n```followups\n["学习率太小呢？","举个例子"]\n```' }),
+    );
+    renderPanel();
+    await ask("学习率太大会怎样");
+    const group = await screen.findByRole("group", { name: "接着问" });
+    expect(screen.queryByText(/followups/)).not.toBeInTheDocument();
+    mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "会很慢" }));
+    fireEvent.click(within(group).getByRole("button", { name: "学习率太小呢？" }));
+    expect(await screen.findByText("会很慢")).toBeInTheDocument();
+    expect(mockIpc.assistant.ask).toHaveBeenLastCalledWith(
+      "学习率太小呢？",
+      expect.anything(),
+      expect.anything(),
+      expect.any(String),
+      expect.any(Function),
+      expect.anything(),
+    );
+    // 追问建议只挂在最新一轮：上一轮的按钮收起来了。
+    expect(screen.queryByRole("group", { name: "接着问" })).not.toBeInTheDocument();
   });
 
   it("把后端错误翻成人能处理的提示", async () => {

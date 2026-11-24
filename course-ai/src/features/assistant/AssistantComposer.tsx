@@ -329,34 +329,36 @@ export function AssistantComposer({
           }
           className="ca-ask-input block max-h-24 w-full resize-none bg-transparent px-2.5 pb-0 pt-2 text-sm text-[var(--text-strong)] outline-none placeholder:text-[var(--text-faint)]"
         />
-        <div className="flex items-center gap-2 px-1.5 pb-1.5 pt-1">
-          <button
-            type="button"
-            aria-label={t("assistant.attachImage")}
-            title={t("assistant.attachImageHint")}
-            onClick={() => fileInputRef.current?.click()}
-            className="ca-touch-44 grid h-5 w-5 flex-none place-items-center rounded-full text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-          >
-            <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            hidden
-            data-testid="assistant-image-input"
-            onChange={(event) => {
-              const files = Array.from(event.target.files ?? []);
-              // 清掉值，否则同一张图删掉后再选一次不会触发 change。
-              event.target.value = "";
-              if (files.length) onAddImages(files);
-            }}
-          />
+        <div className="flex items-end gap-2 px-1.5 pb-1.5 pt-1">
           {/* 窄屏放不下三个标签时换到第二行，而不是把「当前视频 · 11:04」「默认模型」截成省略号。
               包标签的 div 用 flex：块级 div 里的 inline-flex 按钮会带上行高的下沿空隙，和旁边的
               「引导」对不齐。 */}
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          {/* 附图按钮排进标签这一组：标签折到第二行时它跟着第一行走，不再悬在两行中间；
+              发送钮贴底对齐，始终在右下角。 */}
+          <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-1">
+            <button
+              type="button"
+              aria-label={t("assistant.attachImage")}
+              title={t("assistant.attachImageHint")}
+              onClick={() => fileInputRef.current?.click()}
+              className="ca-hit-expand relative grid h-6 w-6 flex-none place-items-center rounded-full text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+            >
+              <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              hidden
+              data-testid="assistant-image-input"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                // 清掉值，否则同一张图删掉后再选一次不会触发 change。
+                event.target.value = "";
+                if (files.length) onAddImages(files);
+              }}
+            />
             <div ref={scopeMenuRef} className="relative flex min-w-0">
               <button
                 ref={scopeTriggerRef}
