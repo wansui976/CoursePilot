@@ -89,6 +89,65 @@ fn parse_cues(input: &str) -> Vec<Cue> {
     cues
 }
 
+/// 方括号里的音效标注（YouTube 自动字幕的 [music] / [Music] / [音乐] / [laughter] / [applause]，
+/// 手打字幕里的 [Applause] 之类）：不是说的话，读着碍眼，翻译、摘要也会把它当内容。
+/// 只认括号里是一两个纯字母的词；[ __ ]（YouTube 给脏话打的码）、[a, b] 这类留着。
+fn is_sound_tag(inner: &str) -> bool {
+    let inner = inner.trim();
+    let words = inner.split_whitespace().count();
+    (1..=3).contains(&words)
+        && inner.chars().count() >= 2
+        && inner.chars().count() <= 30
+        && inner
+            .chars()
+            .all(|c| c.is_alphabetic() || c.is_whitespace() || c == '-' || c == '\'')
+}
+
+/// 去掉一行字幕里的音效标注和 ♪，顺手把 VTT 的不断行空格转义（`\h`，YouTube 脏话码
+/// `[\h__\h]` 里那种）还原成空格。返回清理后的文字（可能为空）。
+fn strip_sound_tags(line: &str) -> String {
+    let line = line.replace("\\h__\\h", " __ ").replace('♪', " ");
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line.as_str();
+    while let Some(open) = rest.find(['[', '［']) {
+        let open_len = rest[open..].chars().next().map_or(1, char::len_utf8);
+        let after = &rest[open + open_len..];
+        let Some(close) = after.find([']', '］']) else {
+            break;
+        };
+        let inner = &after[..close];
+        let close_len = after[close..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&rest[..open]);
+        if is_sound_tag(inner) {
+            // 中文里去掉标注不留空格（「我们[音乐]开始」→「我们开始」）。
+            let next = after[close + close_len..].chars().next();
+            if !(out.chars().last().is_some_and(is_cjk) || next.is_some_and(is_cjk)) {
+                out.push(' ');
+            }
+        } else {
+            out.push_str(&rest[open..open + open_len + close + close_len]);
+        }
+        rest = &after[close + close_len..];
+    }
+    out.push_str(rest);
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// 每条字幕去掉音效标注；去完只剩空的行不要了。
+fn strip_cue_sound_tags(cues: Vec<Cue>) -> Vec<Cue> {
+    cues.into_iter()
+        .map(|mut cue| {
+            cue.lines = cue
+                .lines
+                .iter()
+                .map(|line| strip_sound_tags(line))
+                .filter(|line| !line.is_empty())
+                .collect();
+            cue
+        })
+        .collect()
+}
+
 /// 是不是 YouTube 那种「滚动」自动字幕：每条显示「上一行 + 正在滚出来的新一行」，
 /// 中间还夹着只有 10 毫秒、重复上一行的定格条。
 fn is_rolling(cues: &[Cue]) -> bool {
@@ -274,9 +333,9 @@ fn regroup_into_sentences(cues: Vec<Cue>) -> Vec<Cue> {
 }
 
 /// 解析 SRT 文本为段落。容错：忽略空条目、缺时间轴的文字；多行文本用空格拼接。
-/// YouTube 的滚动自动字幕会去掉重复的行，并按句子重新分段。
+/// 去掉 [music] 这类音效标注；YouTube 的滚动自动字幕会去掉重复的行，并按句子重新分段。
 pub fn parse_srt(input: &str) -> Vec<SubSegment> {
-    let cues = parse_cues(input);
+    let cues = strip_cue_sound_tags(parse_cues(input));
     let cues = if is_rolling(&cues) {
         regroup_into_sentences(collapse_rolling_captions(cues))
     } else {
@@ -501,6 +560,41 @@ mod tests {
                 "所以要沿着负梯度走",
             ]
         );
+    }
+
+    #[test]
+    fn sound_tags_are_dropped_but_other_brackets_stay() {
+        assert_eq!(strip_sound_tags("than you [music] think."), "than you think.");
+        assert_eq!(strip_sound_tags("[Music]"), "");
+        assert_eq!(strip_sound_tags("［music］ Next, we"), "Next, we");
+        assert_eq!(strip_sound_tags("pause either. [snorts] Anthropic"), "pause either. Anthropic");
+        assert_eq!(strip_sound_tags("我们[音乐]开始"), "我们开始");
+        assert_eq!(strip_sound_tags("♪ la la ♪"), "la la");
+        // YouTube 的脏话码、区间、数字这些不是音效，原样留着（\h 还原成空格）。
+        assert_eq!(strip_sound_tags("wanted to [\\h__\\h] an entire"), "wanted to [ __ ] an entire");
+        assert_eq!(strip_sound_tags("on [a, b] we have"), "on [a, b] we have");
+        assert_eq!(strip_sound_tags("see [1] and [x]"), "see [1] and [x]");
+    }
+
+    #[test]
+    fn rolling_captions_drop_music_tags_without_breaking_sentences() {
+        let srt = rolling_srt(
+            &[
+                (0, "It's right. [music]"),
+                (2000, "[music]"),
+                (4000, "Today's models are [music] better."),
+            ],
+            6000,
+        );
+        let texts: Vec<String> = parse_srt(&srt).into_iter().map(|s| s.text).collect();
+        assert_eq!(texts, vec!["It's right.", "Today's models are better."]);
+    }
+
+    #[test]
+    fn a_cue_that_is_only_a_sound_tag_disappears() {
+        let srt = "1\n00:00:01,000 --> 00:00:02,000\n[Applause]\n\n2\n00:00:02,000 --> 00:00:03,000\n谢谢大家";
+        let texts: Vec<String> = parse_srt(srt).into_iter().map(|s| s.text).collect();
+        assert_eq!(texts, vec!["谢谢大家"]);
     }
 
     #[test]
