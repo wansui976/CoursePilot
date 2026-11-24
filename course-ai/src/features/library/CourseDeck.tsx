@@ -4,8 +4,6 @@ import { Play } from "lucide-react";
 import type { Course, VideoListItem } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
 import { CourseBoardCover } from "./CourseBoardCover";
-import { Bookmark } from "./Bookmark";
-import { courseBookmark } from "@/lib/bookmark";
 import { Button } from "@/ui/button";
 import { Mark, Tag } from "@/ui/marks";
 import { useSwipeCard } from "@/features/study/useSwipeCard";
@@ -49,7 +47,6 @@ export function CourseDeck({
     onSwipe: (direction) => go(direction === "left" ? front + 1 : front - 1),
   });
   if (n === 0) return null;
-  const bookmarks = items.map((item) => courseBookmark(item.course.id, item.videos));
   const current = items[Math.min(front, n - 1)];
 
   function go(next: number) {
@@ -118,7 +115,6 @@ export function CourseDeck({
                 unit={t("library.lectureUnit")}
                 caption={course.name}
               >
-                {bookmarks[k] && <Bookmark bookmark={bookmarks[k]!} course={course} />}
                 <span className="ca-deck-count">
                   {Math.min(item.watched, item.videos.length)} / {item.videos.length}
                 </span>

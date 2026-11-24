@@ -2095,61 +2095,6 @@ button.ca-time:hover {
   border-radius: var(--r-sm);
 }
 
-/* ===================== 书签丝带 ===================== */
-
-/* 从封面上沿垂下来的一条丝带，燕尾，写着停在第几讲。 */
-.ca-bookmark {
-  position: absolute;
-  top: 0;
-  right: 13%;
-  z-index: 3;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  width: 16px;
-  height: 22%;
-  min-height: 34px;
-  padding-bottom: 9px;
-  background: linear-gradient(90deg, rgb(0 0 0 / 0.12), transparent 30%, transparent 70%, rgb(0 0 0 / 0.12)),
-    var(--ribbon);
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% calc(100% - 6px), 0 100%);
-  box-shadow: 0 2px 4px rgb(0 0 0 / 0.3);
-  pointer-events: auto;
-}
-
-.ca-bookmark .n {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1;
-  font-weight: 600;
-  color: var(--board);
-}
-
-/* 落灰：丝带褪色，封面上蒙一层粉笔灰。 */
-.ca-bookmark[data-dusty] {
-  background: linear-gradient(90deg, rgb(0 0 0 / 0.12), transparent 30%, transparent 70%, rgb(0 0 0 / 0.12)),
-    color-mix(in srgb, var(--ribbon) 40%, var(--chalk-dim));
-}
-
-.ca-dust {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  background-color: color-mix(in srgb, var(--chalk) 12%, transparent);
-  background-image: var(--grain-bg), var(--grain-bg);
-  background-size: 90px 90px, 140px 140px;
-  background-position: 0 0, 37px 61px;
-}
-
-/* 小缩略图里不夹书签。 */
-@container (max-width: 150px) {
-  .ca-bookmark,
-  .ca-dust {
-    display: none;
-  }
-}
-
 /* ===================== 笔记纸张 ===================== */
 
 /* 格距 = 正文行高（1.7em），从编辑器内边距（16px）往下开始，和第一行对齐。

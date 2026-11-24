@@ -23,8 +23,6 @@ import { DeskHome } from "./DeskHome";
 import { LectureCover } from "./LectureCover";
 import { CourseBoardCover } from "./CourseBoardCover";
 import { SolarTermBoard } from "./SolarTermBoard";
-import { Bookmark } from "./Bookmark";
-import { courseBookmark } from "@/lib/bookmark";
 import { useNow } from "@/lib/useNow";
 import { UpdateNotice } from "./UpdateNotice";
 /** 「继续学习」最多列几门课。 */
@@ -227,7 +225,6 @@ export function LibraryOverview({
             <div className="ca-course-grid">
               {summaries.map(({ course, videos, watched }) => {
                 const ratio = videos.length > 0 ? watched / videos.length : 0;
-                const bookmark = courseBookmark(course.id, videos);
                 return (
                   <button
                     key={course.id}
@@ -242,9 +239,7 @@ export function LibraryOverview({
                         number={course.video_count}
                         unit={t("library.lectureUnit")}
                         caption={course.name}
-                      >
-                        {bookmark && <Bookmark bookmark={bookmark} course={course} />}
-                      </CourseBoardCover>
+                      />
                     </span>
                     <span className="ca-course-body">
                       <span className="ca-course-name">{course.name}</span>

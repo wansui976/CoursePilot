@@ -2233,9 +2233,7 @@
     "statCourses": "courses",
     "statVideos": "lectures",
     "statWatched": "watched",
-    "statDue": "due",
-    "bookmark": "Bookmark: stopped at lecture {{lecture}}",
-    "bookmarkDusty": "Bookmark: stopped at lecture {{lecture}}, untouched for {{days}} days"
+    "statDue": "due"
   },
   "search": {
     "results": "Search results",

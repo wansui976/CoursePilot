@@ -195,21 +195,6 @@ export const scenes = [
     },
   },
   {
-    // 书签丝带：第一门课停在第 3 讲；三周没打开时丝带褪色、封面落灰。
-    name: "home-bookmark",
-    devices: ["desktop"],
-    run: async ({ page, shot }) => {
-      await shot();
-      await page.evaluate(() => {
-        localStorage.setItem("__shot-dusty", "1");
-        for (const key of Object.keys(localStorage)) if (key.startsWith("video-at:")) localStorage.removeItem(key);
-      });
-      await page.reload({ waitUntil: "networkidle" });
-      await page.locator(".ca-dust").first().waitFor();
-      await shot("dusty");
-    },
-  },
-  {
     // 课桌的时辰：立冬那天白天（窗外晴天、标题旁写着节气）和晚上（台灯亮、窗外夜色）。
     name: "home-desk-time",
     devices: ["desktop"],

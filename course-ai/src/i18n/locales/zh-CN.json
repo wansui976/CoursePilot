@@ -2217,9 +2217,7 @@
     "statCourses": "门课程",
     "statVideos": "讲",
     "statWatched": "已看完",
-    "statDue": "待复习",
-    "bookmark": "书签：停在第 {{lecture}} 讲",
-    "bookmarkDusty": "书签：停在第 {{lecture}} 讲，{{days}} 天没打开了"
+    "statDue": "待复习"
   },
   "search": {
     "results": "搜索结果",
