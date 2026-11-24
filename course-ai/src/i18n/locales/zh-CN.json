@@ -1243,7 +1243,8 @@
       "autoProcessHint": "导入视频（本地文件、网络视频、网盘）后马上开始生成文稿、摘要和笔记，不用再点「开始处理」。关掉后导入的视频先放着，等你自己开始。订阅的自动导入按各自的设置。",
       "concurrency": "同时处理的视频数",
       "concurrencyHint": "同时最多处理几个视频，其余按点「开始处理」的先后排队。数越大总体越快，但电脑越卡。本地语音识别另外一次只跑一个视频（显卡和 CPU 都让给它），其余视频的课件、AI 步骤照常并行。",
-      "videos": "{{count}} 个"
+      "videos": "{{count}} 个",
+      "asrNotReady": "语音识别未配好"
     }
   },
   "assistant": {
@@ -2120,7 +2121,8 @@
     "retryAll": "全部重试",
     "readingFocus": "专注阅读",
     "exitReadingFocus": "退出专注阅读（Esc）",
-    "queueSubtitleMissing": "没拿到字幕，正在用语音识别生成文稿"
+    "queueSubtitleMissing": "没拿到字幕，正在用语音识别生成文稿",
+    "queueAsrNotReady": "语音识别还没配好：导入的视频不会自动开始处理（带自带字幕的除外），配好后在课程里点「开始处理」。"
   },
   "time": {
     "justNow": "刚刚",

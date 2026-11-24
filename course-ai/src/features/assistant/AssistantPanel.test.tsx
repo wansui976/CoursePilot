@@ -45,7 +45,7 @@ const { confirmMock, mockIpc, platformMock } = vi.hoisted(() => ({
       bilibiliLoginState: vi.fn(),
       hasBilibiliCookies: vi.fn(),
     },
-    pipeline: { process: vi.fn() },
+    pipeline: { process: vi.fn(), asrReady: vi.fn(async () => true) },
     srs: { addCard: vi.fn() },
     ai: {
       getProfiles: vi.fn().mockResolvedValue([]),

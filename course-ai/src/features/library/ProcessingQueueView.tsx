@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { Info, Settings } from "lucide-react";
+import { useOptionalShell } from "@/app/shell";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc, type DownloadJob } from "@/lib/ipc";
@@ -132,6 +134,7 @@ export function ProcessingQueueView({
           .finally(() => queue.cancelAllProcessing());
       }}
       onRetryAll={queue.retryFailedAll}
+      notice={<AsrNotReadyNotice />}
       dismiss={{
         isError: queue.dismissProcessing.isError,
         isPending: queue.dismissProcessing.isPending,
@@ -142,4 +145,33 @@ export function ProcessingQueueView({
     />
   );
 
+}
+
+/** 设置「导入后立刻处理」开着、但语音识别没配好：导入的视频不会自动开始（带自带字幕的除外）。 */
+function AsrNotReadyNotice() {
+  const { t } = useTranslation();
+  const shell = useOptionalShell();
+  const { data } = useQuery({
+    queryKey: qk.autoProcessReadiness(),
+    queryFn: async () => {
+      const [auto, ready] = await Promise.all([
+        ipc.settings.get("auto_process_imports").catch(() => null),
+        ipc.pipeline.asrReady().catch(() => true),
+      ]);
+      return { auto: auto !== "false", ready };
+    },
+  });
+  if (!data || !data.auto || data.ready) return null;
+  return (
+    <div role="note" className="ca-callout info mb-4">
+      <Info className="ca-callout-icon" />
+      <span className="min-w-0 flex-1 text-[var(--text-normal)]">{t("home.queueAsrNotReady")}</span>
+      {shell && (
+        <button type="button" onClick={() => shell.openSettingsCategory("asr")} className="ca-callout-act">
+          <Settings className="h-3 w-3" />
+          {t("errors.fixAsr")}
+        </button>
+      )}
+    </div>
+  );
 }

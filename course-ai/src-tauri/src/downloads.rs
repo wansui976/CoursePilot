@@ -623,6 +623,12 @@ pub(crate) fn spawn_batch_processing(app: AppHandle, videos: Vec<String>) {
             if !awaiting_processing(&app, &video_id).await {
                 continue;
             }
+            // 要语音识别（没带字幕）而识别还没配好：不自动开始，免得报一条失败；
+            // 视频留在「未处理」，配好后用户自己点开始。界面上另有提示（cmd_asr_ready）。
+            if !has_subtitle(&app, &video_id).await && !asr_ready(&app).await {
+                tracing::info!("语音识别未配好，导入的视频 {video_id} 不自动处理");
+                continue;
+            }
             // 某个视频起流水线失败不该影响其他视频。
             match crate::pipeline::cmd_process_video(app.clone(), video_id.clone()).await {
                 Ok(()) => {
@@ -638,6 +644,24 @@ pub(crate) fn spawn_batch_processing(app: AppHandle, videos: Vec<String>) {
             }
         }
     });
+}
+
+/// 这个视频带着自带字幕（导入时下到了或旁边有 .srt），处理时不用语音识别。
+async fn has_subtitle(app: &AppHandle, video_id: &str) -> bool {
+    let db = app.state::<AppState>().db.clone();
+    sqlx::query_scalar::<_, Option<String>>("SELECT subtitle_path FROM videos WHERE id=?")
+        .bind(video_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .is_some_and(|path| !path.trim().is_empty())
+}
+
+async fn asr_ready(app: &AppHandle) -> bool {
+    let db = app.state::<AppState>().db.clone();
+    crate::pipeline::asr_ready(app, &db).await
 }
 
 /// 排着的视频轮到时是否还需要起流水线：等待期间用户可能已经手动点了「开始处理」

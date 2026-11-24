@@ -165,8 +165,11 @@ async function importWithSubtitles(
     probe.tracks[0];
   // 有字幕就立刻跑流水线：ASR 阶段会走字幕分支跳过语音识别，用户不必再手动点一次
   // 「开始处理」。没字幕时按设置「导入后立刻处理」（默认开）。
+  // 没字幕要靠语音识别，识别没配好也不自动开始（免得多一条失败）。
   const autoProcess =
-    !!track || (await ipc.settings.get("auto_process_imports").catch(() => null)) !== "false";
+    !!track ||
+    ((await ipc.settings.get("auto_process_imports").catch(() => null)) !== "false" &&
+      (await ipc.pipeline.asrReady().catch(() => true)));
   // 登录态失效时多半拿不到字幕。不拦导入（和导入对话框一致），但要把真实原因说出来，
   // 不能让用户以为这个视频没有 AI 字幕。说法照实际结果来：公开的 CC 字幕没登录也拿得到，
   // 那就用的是字幕、不必提醒；没拿到字幕时，按会不会自动处理说「正在转写」或「可以去开始」。

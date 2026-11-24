@@ -97,7 +97,14 @@ async fn check_one(app: &tauri::AppHandle, subscription: &Subscription) -> AppRe
             Ok(video) => {
                 subscriptions::mark_seen(&state.db, &subscription.id, &episode.url).await?;
                 imported += 1;
-                if subscription.auto_process {
+                // 要语音识别而识别还没配好时不自动开始（同「导入后立刻处理」）。
+                let needs_asr = video
+                    .subtitle_path
+                    .as_deref()
+                    .is_none_or(|path| path.trim().is_empty());
+                let can_process =
+                    !needs_asr || crate::pipeline::asr_ready(app, &state.db).await;
+                if subscription.auto_process && can_process {
                     if let Err(error) =
                         crate::pipeline::cmd_process_video(app.clone(), video.id.clone()).await
                     {

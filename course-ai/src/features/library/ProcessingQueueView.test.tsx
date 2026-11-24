@@ -24,10 +24,12 @@ const { mockIpc, calls, pickBilibiliCookies } = vi.hoisted(() => {
         retry: vi.fn(async () => {}),
       },
       pipeline: {
+        asrReady: vi.fn(async () => true),
         cancel: vi.fn(async () => {}),
         recent: vi.fn(async (): Promise<unknown[]> => []),
       },
       courses: { list: vi.fn(async () => [{ id: "c1", name: "机器学习导论" }]) },
+      settings: { get: vi.fn(async (): Promise<string | null> => null) },
     },
   };
 });
@@ -99,6 +101,19 @@ describe("ProcessingQueueView", () => {
     vi.clearAllMocks();
     const job = downloadJob();
     useDownloads.setState({ byId: { [job.id]: job }, order: [job.id] });
+  });
+
+  it("语音识别没配好时提示导入的视频不会自动处理，关掉「导入后立刻处理」就不提示", async () => {
+    mockIpc.pipeline.asrReady.mockResolvedValueOnce(false);
+    const first = render(<ProcessingQueueView queue={fakeQueue()} onBack={vi.fn()} onOpenVideo={vi.fn()} />);
+    expect(await screen.findByRole("note")).toHaveTextContent("语音识别还没配好");
+    first.unmount();
+
+    mockIpc.pipeline.asrReady.mockResolvedValueOnce(false);
+    mockIpc.settings.get.mockResolvedValueOnce("false");
+    render(<ProcessingQueueView queue={fakeQueue()} onBack={vi.fn()} onOpenVideo={vi.fn()} />);
+    await waitFor(() => expect(mockIpc.settings.get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
   });
 
   it("stops the download queue in the backend before canceling running processing", async () => {

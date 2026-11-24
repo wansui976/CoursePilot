@@ -1245,7 +1245,8 @@
       "autoProcessHint": "Start making the transcript, summary and notes as soon as a video is imported (local files, web videos, cloud drives), without clicking \"Start processing\". When off, imported videos wait until you start them. Subscription auto-imports follow their own setting.",
       "concurrency": "Videos processed at once",
       "concurrencyHint": "How many videos are processed at the same time; the rest wait in the order you started them. Higher is faster overall but makes the computer busier. Local speech recognition always runs one video at a time (it gets the GPU and CPU to itself); slides and AI steps of other videos keep going in parallel.",
-      "videos": "{{count}}"
+      "videos": "{{count}}",
+      "asrNotReady": "Speech recognition not set up"
     }
   },
   "assistant": {
@@ -2132,7 +2133,8 @@
     "retryAll": "Retry all",
     "readingFocus": "Focus reading",
     "exitReadingFocus": "Exit focus reading (Esc)",
-    "queueSubtitleMissing": "No subtitles; making the transcript with speech recognition"
+    "queueSubtitleMissing": "No subtitles; making the transcript with speech recognition",
+    "queueAsrNotReady": "Speech recognition isn't set up yet, so imported videos won't start processing on their own (except ones with built-in subtitles). Once it's set up, click “Start processing” in the course."
   },
   "time": {
     "justNow": "Just now",

@@ -18,6 +18,7 @@ export function ProcessingConcurrency() {
   const { t } = useTranslation();
   const [value, setValue] = useState(DEFAULT);
   const [autoProcess, setAutoProcess] = useState(true);
+  const [asrReady, setAsrReady] = useState(true);
 
   useEffect(() => {
     let alive = true;
@@ -34,6 +35,12 @@ export function ProcessingConcurrency() {
         if (alive) setAutoProcess(saved !== "false");
       })
       .catch(() => {});
+    void ipc.pipeline
+      .asrReady()
+      .then((ready) => {
+        if (alive) setAsrReady(ready);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -44,6 +51,7 @@ export function ProcessingConcurrency() {
       <Row
         label={t("settings.processing.autoProcess")}
         hint={t("settings.processing.autoProcessHint")}
+        tag={autoProcess && !asrReady ? { text: t("settings.processing.asrNotReady") } : undefined}
         htmlFor="auto-process-imports"
         layout="inline"
       >

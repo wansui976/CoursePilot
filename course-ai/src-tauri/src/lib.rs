@@ -144,8 +144,9 @@ use crate::downloads::{
 };
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
-    cmd_cancel_processing, cmd_dismiss_processing_video, cmd_list_processing_videos,
-    cmd_list_recent_processed_videos, cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
+    cmd_asr_ready, cmd_cancel_processing, cmd_dismiss_processing_video,
+    cmd_list_processing_videos, cmd_list_recent_processed_videos, cmd_process_video,
+    cmd_recorrect_transcript, ProcessingTasks,
 };
 use crate::usage_log::{
     cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_deepseek_balance, cmd_llm_usage,
@@ -391,6 +392,7 @@ pub fn run() {
             cmd_delete_paddle_ocr,
             cmd_list_jobs,
             cmd_process_video,
+            cmd_asr_ready,
             cmd_cancel_processing,
             cmd_dismiss_processing_video,
             cmd_list_processing_videos,

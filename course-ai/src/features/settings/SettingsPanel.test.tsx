@@ -29,6 +29,9 @@ const { mockIpc } = vi.hoisted(() => ({
       download: vi.fn(),
       remove: vi.fn(),
     },
+    pipeline: {
+      asrReady: vi.fn(async () => true),
+    },
   },
 }));
 const { pickDirectoryPathMock } = vi.hoisted(() => ({

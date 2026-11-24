@@ -286,6 +286,56 @@ async fn setting(db: &crate::db::Db, key: &str) -> AppResult<Option<String>> {
     )
 }
 
+/// 语音识别现在能不能用：本地识别有装好、认得这门语言的模型；云端识别填了密钥。
+/// 「导入后立刻处理」前先看一眼——没配好就别自动开始，免得每导入一个视频就多一条失败。
+/// 和真正识别时的判断一致（同一个 select_local_model、同一组设置）。
+pub async fn asr_ready(app: &AppHandle, db: &crate::db::Db) -> bool {
+    let Ok(app_data) = app.path().app_data_dir() else {
+        return true;
+    };
+    let root = model_store::models_root(db, &app_data)
+        .await
+        .unwrap_or(app_data);
+    asr_ready_with_models(db, &root).await
+}
+
+/// [`asr_ready`] 的本体，模型目录由调用方给。只看密钥存没存，不把密钥读出来
+/// （自动检查不该去碰系统钥匙串）。
+async fn asr_ready_with_models(db: &crate::db::Db, models_root: &Path) -> bool {
+    let Ok(backend) = setting(db, "asr_backend").await.map(asr_backend_or_default) else {
+        return true;
+    };
+    let has_secret = |name: &'static str| async move {
+        crate::llm::keychain::has_secret_or_legacy(db, name)
+            .await
+            .unwrap_or(false)
+    };
+    match backend {
+        AsrBackend::Whisper => {
+            let model_id = setting(db, "whisper_model")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| DEFAULT_LOCAL_MODEL.into());
+            let lang = whisper_language_or_default(setting(db, "asr_language").await.ok().flatten());
+            select_local_model(models_root, &model_id, &lang).is_some()
+        }
+        AsrBackend::Volcengine => {
+            let app_id = setting(db, "volcengine_asr_app_id").await.ok().flatten();
+            app_id.is_some_and(|id| !id.trim().is_empty())
+                && has_secret("volcengine_asr_access_token").await
+        }
+        AsrBackend::Aliyun => has_secret("dashscope_api_key").await,
+    }
+}
+
+/// 给界面用：语音识别没配好时，处理队列和设置里提示「导入的视频不会自动处理」。
+#[tauri::command]
+pub async fn cmd_asr_ready(app: AppHandle) -> AppResult<bool> {
+    let db = app.state::<AppState>().db.clone();
+    Ok(asr_ready(&app, &db).await)
+}
+
 /// 识别一小段录音（费曼复述：用户对着麦克风讲的一两分钟），返回整段文字。
 ///
 /// 走用户在设置里选的同一个识别引擎，但不经过视频处理流水线：没有任务、没有进度、
@@ -2864,6 +2914,38 @@ mod tests {
         assert_eq!(whisper_language_or_default(None), "zh");
         assert_eq!(whisper_language_or_default(Some("".into())), "zh");
         assert_eq!(whisper_language_or_default(Some("en".into())), "en");
+    }
+
+    #[tokio::test]
+    async fn asr_is_ready_only_with_a_model_or_a_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let models = dir.path().join("models");
+        // 本地识别、一个模型都没装：没配好。
+        assert!(!asr_ready_with_models(&db, &models).await);
+        // 阿里云：没填密钥不行，填了（旧版明文设置也算）就行。
+        crate::commands::settings::set_setting(&db, "asr_backend", "aliyun")
+            .await
+            .unwrap();
+        assert!(!asr_ready_with_models(&db, &models).await);
+        crate::commands::settings::set_setting(&db, "dashscope_api_key", "sk-test")
+            .await
+            .unwrap();
+        assert!(asr_ready_with_models(&db, &models).await);
+        // 火山：App ID 和 Token 缺一不可。
+        crate::commands::settings::set_setting(&db, "asr_backend", "volcengine")
+            .await
+            .unwrap();
+        crate::commands::settings::set_setting(&db, "volcengine_asr_access_token", "t")
+            .await
+            .unwrap();
+        assert!(!asr_ready_with_models(&db, &models).await);
+        crate::commands::settings::set_setting(&db, "volcengine_asr_app_id", "123")
+            .await
+            .unwrap();
+        assert!(asr_ready_with_models(&db, &models).await);
     }
 
     #[test]

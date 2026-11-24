@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCircle2, ChevronRight, Download, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
@@ -71,6 +72,7 @@ export function ProcessingQueuePanel({
   onCancelAll,
   onRetryAll,
   dismiss,
+  notice,
 }: {
   items: QueueItem[];
   downloads: DownloadQueueItem[];
@@ -92,6 +94,8 @@ export function ProcessingQueuePanel({
   onCancelAll: () => void;
   onRetryAll: () => void;
   dismiss: DismissState;
+  /** 列表上方的说明（比如语音识别没配好、导入的视频不会自动处理）。 */
+  notice?: ReactNode;
 }) {
   const { t } = useTranslation();
   const hasCancellable =
@@ -139,6 +143,7 @@ export function ProcessingQueuePanel({
         {error && (
           <ErrorNote className="mb-4" error={errorObj} onRetry={onRetryLoad} />
         )}
+        {notice}
         {loading && items.length === 0 ? (
           <div
             role="status"

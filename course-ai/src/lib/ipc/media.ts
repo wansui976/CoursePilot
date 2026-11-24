@@ -42,6 +42,8 @@ export interface NoteAnnotation {
 export const pipeline = {
   process: (videoId: string): Promise<void> =>
     invoke("cmd_process_video", { videoId }),
+  /** 语音识别能不能用（本地有模型 / 云端填了密钥）；没配好时导入的视频不自动处理。 */
+  asrReady: (): Promise<boolean> => invoke("cmd_asr_ready"),
   cancel: (videoId: string): Promise<void> =>
     invoke("cmd_cancel_processing", { videoId }),
   dismiss: (videoId: string): Promise<void> =>

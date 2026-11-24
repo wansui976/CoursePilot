@@ -27,6 +27,8 @@ export const qk = {
     list: (courseId: string | null) => ["videos", courseId] as const,
   },
   processingVideos: () => ["processing-videos"] as const,
+  /** 语音识别是否配好 + 设置「导入后立刻处理」（处理队列、设置里的提示用）。 */
+  autoProcessReadiness: () => ["auto-process-readiness"] as const,
   recentProcessed: () => ["recent-processed"] as const,
   aiUsage: {
     all: () => ["ai-usage"] as const,
