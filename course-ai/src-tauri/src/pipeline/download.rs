@@ -49,16 +49,21 @@ pub fn build_ytdlp_args(
     // 不会为了 H.264 把 4K（只有 VP9 / AV1）降成 1080p，也不会挑到更低清的 AVC。
     args.push("-S".to_string());
     args.push("res,+vcodec:avc".to_string());
+    // 顺手把解析结果存下来：下字幕时直接读它，不再请求一遍页面（YouTube 解析一次要
+    // 十几二十秒，也少一次被限流的机会）。
+    args.push("--write-info-json".to_string());
     push_site_args(&mut args, url, cookies);
     args
 }
 
 /// 构造只下字幕的 yt-dlp 参数（视频下完后单独跑一次，失败不影响视频）。
+/// 给了 `info_json`（下视频时存下的解析结果）就从它读，不再按链接重新解析页面。
 pub fn build_subtitle_args(
     url: &str,
     out_template: &str,
     cookies: Option<&str>,
     sub_lang: &str,
+    info_json: Option<&Path>,
 ) -> Vec<String> {
     let mut args = vec![
         "-o".to_string(),
@@ -74,13 +79,29 @@ pub fn build_subtitle_args(
         sub_lang.to_string(),
         "--convert-subs".to_string(),
         "srt".to_string(),
+        // 转出 SRT 的同时留着原文件：YouTube 的 VTT 带逐词时间，按句重新分段时
+        // 句子的起止就是准的（SRT 里已经没了，只能按字数估）。
+        "-k".to_string(),
     ];
-    push_site_args(&mut args, url, cookies);
+    match info_json {
+        Some(info) => {
+            push_site_headers(&mut args, url, cookies);
+            args.push("--load-info-json".to_string());
+            args.push(info.to_string_lossy().into_owned());
+        }
+        None => push_site_args(&mut args, url, cookies),
+    }
     args
 }
 
 /// 站点相关的请求头与 cookies，最后放上链接本身。
 fn push_site_args(args: &mut Vec<String>, url: &str, cookies: Option<&str>) {
+    push_site_headers(args, url, cookies);
+    args.push(url.to_string());
+}
+
+/// 站点相关的请求头与 cookies（不带链接）。
+fn push_site_headers(args: &mut Vec<String>, url: &str, cookies: Option<&str>) {
     if is_bilibili_url(url) {
         args.push("--user-agent".to_string());
         args.push(BROWSER_USER_AGENT.to_string());
@@ -93,7 +114,6 @@ fn push_site_args(args: &mut Vec<String>, url: &str, cookies: Option<&str>) {
             args.push(c.to_string());
         }
     }
-    args.push(url.to_string());
 }
 
 /// 字幕被限流（HTTP 429）时，重试前各等几秒。YouTube 的限流通常几十秒内就松开。
@@ -127,15 +147,35 @@ async fn fetch_subtitles(
     out_template: &str,
     cookies: Option<&str>,
     sub_lang: &str,
+    info_json: Option<&Path>,
     on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
 ) -> SubtitleOutcome {
-    let args = build_subtitle_args(url, out_template, cookies, sub_lang);
     on_event(DownloadEvent::Subtitles);
+    // 先读下视频时存下的解析结果；读它失败（不是被限流）再按链接试一次。
+    if let Some(info) = info_json {
+        let args = build_subtitle_args(url, out_template, cookies, sub_lang, Some(info));
+        match fetch_subtitles_with(ytdlp, &args, on_event).await {
+            SubtitleOutcome::Failed => {
+                tracing::info!("从解析结果读字幕失败，改按链接重新解析");
+            }
+            outcome => return outcome,
+        }
+    }
+    let args = build_subtitle_args(url, out_template, cookies, sub_lang, None);
+    fetch_subtitles_with(ytdlp, &args, on_event).await
+}
+
+/// 跑一次只下字幕的 yt-dlp；被限流就等一会儿重试。
+async fn fetch_subtitles_with(
+    ytdlp: &Path,
+    args: &[String],
+    on_event: &(dyn Fn(DownloadEvent) + Send + Sync),
+) -> SubtitleOutcome {
     let mut attempt = 0;
     loop {
         let run = crate::sidecar::command(ytdlp)
             .args(ffmpeg_location_args())
-            .args(&args)
+            .args(args)
             .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output();
@@ -273,16 +313,18 @@ pub async fn download(
     // 视频已经下好，再单独拿字幕。拿不到就不要了：导入后照常用语音识别生成文稿。
     let mut subtitle_missing = None;
     if let Some(lang) = sub_lang.filter(|lang| !lang.trim().is_empty()) {
+        let info_json = newest_info_json(staging);
         let outcome = fetch_subtitles(
             &ytdlp,
             url,
             &template.to_string_lossy(),
             cookies,
             lang,
+            info_json.as_deref(),
             on_event,
         )
         .await;
-        let landed = newest_with_ext(staging, "srt").ok().flatten().is_some();
+        let landed = newest_subtitle(staging).ok().flatten().is_some();
         if !landed {
             subtitle_missing = Some(match outcome {
                 SubtitleOutcome::RateLimited => "rateLimited",
@@ -628,6 +670,31 @@ fn missing_drive(dir: &Path) -> Option<String> {
     (!Path::new(&format!("{drive}\\")).exists()).then_some(drive)
 }
 
+/// 下视频时存下的解析结果（`<标题>.info.json`）。
+fn newest_info_json(staging: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(staging)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".info.json"))
+        })
+        .max_by_key(|path| {
+            path.metadata()
+                .and_then(|meta| meta.modified())
+                .unwrap_or(std::time::UNIX_EPOCH)
+        })
+}
+
+/// 下到的字幕：有原始 VTT 就用它（YouTube 的带逐词时间），否则用转好的 SRT（B 站等）。
+fn newest_subtitle(staging: &Path) -> AppResult<Option<PathBuf>> {
+    Ok(match newest_with_ext(staging, "vtt")? {
+        Some(vtt) => Some(vtt),
+        None => newest_with_ext(staging, "srt")?,
+    })
+}
+
 /// 把这一次下到的东西从暂存目录挪进课程目录。
 fn claim_downloaded(
     staging: &Path,
@@ -642,7 +709,7 @@ fn claim_downloaded(
     };
     // 请求了字幕却没下到（这一集没有该语言的轨）就是没有，不去别处找。
     let subtitle = if sub_lang.map(|l| !l.trim().is_empty()).unwrap_or(false) {
-        newest_with_ext(staging, "srt")?
+        newest_subtitle(staging)?
     } else {
         None
     };
@@ -1186,6 +1253,22 @@ mod tests {
     }
 
     #[test]
+    fn the_original_vtt_wins_over_the_converted_srt() {
+        // YouTube 的 VTT 带逐词时间，转出来的 SRT 没有：两份都在时用 VTT。
+        let dir = tempdir().unwrap();
+        let course = dir.path();
+        let staging = course.join("staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("第三讲.mp4"), b"mp4").unwrap();
+        std::fs::write(staging.join("第三讲.en.srt"), "字幕").unwrap();
+        std::fs::write(staging.join("第三讲.en.vtt"), "WEBVTT").unwrap();
+
+        let result = claim_downloaded(&staging, course, Some("en")).unwrap();
+
+        assert_eq!(result.subtitle, Some(course.join("第三讲.en.vtt")));
+    }
+
+    #[test]
     fn importing_the_same_title_twice_does_not_overwrite_the_first_one() {
         // 课程目录里同名的那个文件很可能是上一次导入的视频，库里还有一行指着它。
         // 覆盖掉之后那一行就指向了另一个视频的内容，而列表上看不出任何区别。
@@ -1368,6 +1451,7 @@ mod tests {
             "t",
             Some("/c.txt"),
             "ai-zh",
+            None,
         );
         assert!(args.contains(&"--skip-download".to_string()));
         assert!(args.contains(&"--write-subs".to_string()));
@@ -1376,10 +1460,43 @@ mod tests {
         assert_eq!(args[sl + 1], "ai-zh");
         let conv = args.iter().position(|a| a == "--convert-subs").unwrap();
         assert_eq!(args[conv + 1], "srt");
+        assert!(args.contains(&"-k".to_string()), "留着原始 VTT（逐词时间）");
         assert!(args.contains(&"--referer".to_string()));
         assert!(args.contains(&"--cookies".to_string()));
         assert_eq!(args.last().unwrap(), "https://www.bilibili.com/video/BV1x");
         assert!(!args.contains(&"-f".to_string()), "只下字幕不选格式");
+    }
+
+    #[test]
+    fn subtitles_reuse_the_saved_info_json_instead_of_the_link() {
+        let video = build_ytdlp_args("https://www.youtube.com/watch?v=x", "t", None, None);
+        assert!(video.contains(&"--write-info-json".to_string()));
+
+        let args = build_subtitle_args(
+            "https://www.bilibili.com/video/BV1x",
+            "t",
+            Some("/c.txt"),
+            "ai-zh",
+            Some(Path::new("/s/第三讲.info.json")),
+        );
+        let load = args.iter().position(|a| a == "--load-info-json").unwrap();
+        assert_eq!(args[load + 1], "/s/第三讲.info.json");
+        // 不再带链接，但 B 站的请求头和 cookies 照样要（下字幕本身也要登录态）。
+        assert!(!args.contains(&"https://www.bilibili.com/video/BV1x".to_string()));
+        assert!(args.contains(&"--referer".to_string()));
+        assert!(args.contains(&"--cookies".to_string()));
+    }
+
+    #[test]
+    fn finds_the_info_json_written_next_to_the_video() {
+        let dir = tempdir().unwrap();
+        assert_eq!(newest_info_json(dir.path()), None);
+        std::fs::write(dir.path().join("第三讲.mp4"), b"mp4").unwrap();
+        std::fs::write(dir.path().join("第三讲.info.json"), "{}").unwrap();
+        assert_eq!(
+            newest_info_json(dir.path()),
+            Some(dir.path().join("第三讲.info.json"))
+        );
     }
 
     #[test]

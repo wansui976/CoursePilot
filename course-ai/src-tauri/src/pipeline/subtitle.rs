@@ -17,18 +17,21 @@ pub struct SubSegment {
     pub text: String,
 }
 
-/// 把 `HH:MM:SS,mmm`（或 `.mmm`）解析为毫秒；不合法返回 None。
+/// 把 `HH:MM:SS,mmm`（或 `.mmm`；VTT 还允许省掉小时 `MM:SS.mmm`）解析为毫秒；
+/// 不合法返回 None。
 fn parse_srt_time(token: &str) -> Option<i64> {
     let token = token.trim().replace('.', ",");
     let (hms, millis) = token.split_once(',')?;
     let ms: i64 = millis.parse().ok()?;
-    let mut parts = hms.split(':');
-    let h: i64 = parts.next()?.parse().ok()?;
-    let m: i64 = parts.next()?.parse().ok()?;
-    let s: i64 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
+    let parts: Vec<i64> = hms
+        .split(':')
+        .map(|part| part.parse().ok())
+        .collect::<Option<_>>()?;
+    let (h, m, s) = match parts[..] {
+        [h, m, s] => (h, m, s),
+        [m, s] => (0, m, s),
+        _ => return None,
+    };
     Some(((h * 60 + m) * 60 + s) * 1000 + ms)
 }
 
@@ -44,6 +47,18 @@ struct Cue {
     start_ms: i64,
     end_ms: i64,
     lines: Vec<String>,
+    /// YouTube 自动字幕的 VTT 里，正在滚出来的那一行带逐词时间
+    /// （`hi<00:00:08.940><c> this</c>…`）：第几行、每个词什么时候说。
+    timed: Option<(usize, Vec<TimedWord>)>,
+}
+
+/// VTT 逐词时间里的一个词。
+#[derive(Clone)]
+struct TimedWord {
+    at_ms: i64,
+    text: String,
+    /// 原文里这个词前面有没有空格（英文有，中文没有）。
+    spaced: bool,
 }
 
 /// 逐行读出每条字幕。不按空行切块：YouTube 自动字幕转出来的 SRT 在时间轴和文字之间
@@ -71,6 +86,7 @@ fn parse_cues(input: &str) -> Vec<Cue> {
                 start_ms,
                 end_ms,
                 lines: Vec::new(),
+                timed: None,
             });
             after_blank = false;
             index_candidate = false;
@@ -87,6 +103,100 @@ fn parse_cues(input: &str) -> Vec<Cue> {
         after_blank = false;
     }
     cues
+}
+
+/// 尖括号里的是不是字幕标记：VTT 的逐词时间 `<00:00:08.940>`、`<c>` / `<c.colorE5E5E5>`、
+/// `<v 讲者>`，SRT / VTT 里的 `<i>` `<b>` `<u>` `<font …>`。讲课里的「a < b」不算。
+fn is_markup_tag(inner: &str) -> bool {
+    let tag = inner.strip_prefix('/').unwrap_or(inner);
+    let name: String = tag
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect();
+    tag.starts_with(|c: char| c.is_ascii_digit()) && tag.contains(':')
+        || matches!(name.as_str(), "c" | "i" | "b" | "u" | "v" | "font" | "ruby" | "rt" | "lang")
+            && tag[name.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| c == '.' || c == ' ')
+}
+
+fn decode_entities(text: &str) -> String {
+    text.replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
+/// 去掉一行里的字幕标记；行里带逐词时间时一并拆出每个词和它的时间（第一个词从这一条的
+/// 开头算）。返回（干净的文字，逐词时间）。
+fn strip_markup(line: &str, cue_start: i64) -> (String, Option<Vec<TimedWord>>) {
+    let mut text = String::new();
+    let mut words: Vec<TimedWord> = Vec::new();
+    let mut timed = false;
+    let mut at_ms = cue_start;
+    let mut pending = String::new();
+    let flush = |pending: &mut String, at_ms: i64, words: &mut Vec<TimedWord>| {
+        let chunk = decode_entities(pending);
+        let mut spaced = chunk.starts_with(char::is_whitespace);
+        for word in chunk.split_whitespace() {
+            words.push(TimedWord {
+                at_ms,
+                text: word.to_string(),
+                spaced,
+            });
+            spaced = true;
+        }
+        pending.clear();
+    };
+    let mut rest = line;
+    while let Some(open) = rest.find('<') {
+        let Some(close) = rest[open..].find('>').map(|i| open + i) else {
+            break;
+        };
+        let inner = &rest[open + 1..close];
+        text.push_str(&rest[..open]);
+        pending.push_str(&rest[..open]);
+        if is_markup_tag(inner) {
+            if let Some(ms) = inner
+                .starts_with(|c: char| c.is_ascii_digit())
+                .then(|| parse_srt_time(inner))
+                .flatten()
+            {
+                timed = true;
+                flush(&mut pending, at_ms, &mut words);
+                at_ms = ms;
+            }
+        } else {
+            text.push_str(&rest[open..=close]);
+            pending.push_str(&rest[open..=close]);
+        }
+        rest = &rest[close + 1..];
+    }
+    text.push_str(rest);
+    pending.push_str(rest);
+    flush(&mut pending, at_ms, &mut words);
+    (decode_entities(&text), timed.then_some(words))
+}
+
+/// 每条字幕去掉标记，拆出逐词时间。
+fn strip_cue_markup(cues: Vec<Cue>) -> Vec<Cue> {
+    cues.into_iter()
+        .map(|mut cue| {
+            let mut timed = None;
+            for (i, line) in cue.lines.iter_mut().enumerate() {
+                let (text, words) = strip_markup(line, cue.start_ms);
+                *line = text;
+                if let Some(words) = words {
+                    timed = Some((i, words));
+                }
+            }
+            cue.timed = timed;
+            cue
+        })
+        .collect()
 }
 
 /// 方括号里的音效标注（YouTube 自动字幕的 [music] / [Music] / [音乐] / [laughter] / [applause]，
@@ -134,17 +244,34 @@ fn strip_sound_tags(line: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// 每条字幕去掉音效标注；去完只剩空的行不要了。
+/// 每条字幕去掉音效标注；去完只剩空的行不要了（逐词时间跟着对齐）。
 fn strip_cue_sound_tags(cues: Vec<Cue>) -> Vec<Cue> {
     cues.into_iter()
-        .map(|mut cue| {
-            cue.lines = cue
-                .lines
-                .iter()
-                .map(|line| strip_sound_tags(line))
-                .filter(|line| !line.is_empty())
-                .collect();
-            cue
+        .map(|cue| {
+            let mut lines = Vec::with_capacity(cue.lines.len());
+            let mut timed = None;
+            for (i, line) in cue.lines.iter().enumerate() {
+                let text = strip_sound_tags(line);
+                if text.is_empty() {
+                    continue;
+                }
+                if let Some((_, words)) = cue.timed.as_ref().filter(|(at, _)| *at == i) {
+                    let words: Vec<TimedWord> = words
+                        .iter()
+                        .filter_map(|word| {
+                            let text = strip_sound_tags(&word.text);
+                            (!text.is_empty()).then(|| TimedWord { text, ..word.clone() })
+                        })
+                        .collect();
+                    timed = (!words.is_empty()).then_some((lines.len(), words));
+                }
+                lines.push(text);
+            }
+            Cue {
+                lines,
+                timed,
+                ..cue
+            }
         })
         .collect()
 }
@@ -180,11 +307,16 @@ fn collapse_rolling_captions(cues: Vec<Cue>) -> Vec<Cue> {
             }
             continue;
         }
+        let timed = cue
+            .timed
+            .filter(|(at, _)| *at >= overlap)
+            .map(|(at, words)| (at - overlap, words));
         shown = cue.lines.into_iter().chain(fresh.iter().cloned()).collect();
         out.push(Cue {
             start_ms: cue.start_ms,
             end_ms: cue.end_ms,
             lines: fresh,
+            timed,
         });
     }
     out
@@ -217,9 +349,33 @@ fn is_cjk(c: char) -> bool {
     )
 }
 
-/// 把一条字幕拆成词，按字数在这条的时间里摊开估出每个词的时间（转成 SRT 后逐词时间已经没了，
-/// 一行只有两三秒，估出来差不到一秒）。中文没有空格，在句末标点后面断开。
+/// 把一条字幕拆成词。VTT 带逐词时间就用它；没有（SRT 里已经丢了）就按字数在这条的
+/// 时间里摊开估（一行只有两三秒，估出来差不到一秒）。中文没有空格，在句末标点后面断开。
 fn tokenize_cue(cue: &Cue, prev_last: Option<char>, out: &mut Vec<Token>) {
+    if let Some((0, words)) = cue.timed.as_ref().filter(|_| cue.lines.len() == 1) {
+        let first = out.len();
+        for (i, word) in words.iter().enumerate() {
+            let spaced = if i == 0 {
+                prev_last.is_some_and(|last| {
+                    !(is_cjk(last) && word.text.chars().next().is_some_and(is_cjk))
+                })
+            } else {
+                word.spaced
+            };
+            out.push(Token {
+                text: word.text.clone(),
+                at_ms: word.at_ms.clamp(cue.start_ms, cue.end_ms.max(cue.start_ms)),
+                spaced,
+                line_end: false,
+            });
+        }
+        if out.len() > first {
+            if let Some(last) = out.last_mut() {
+                last.line_end = true;
+            }
+        }
+        return;
+    }
     let text = cue.lines.join(" ");
     let total = text.chars().count().max(1) as i64;
     let span = (cue.end_ms - cue.start_ms).max(0);
@@ -327,16 +483,18 @@ fn regroup_into_sentences(cues: Vec<Cue>) -> Vec<Cue> {
                 start_ms,
                 end_ms: next_at.max(start_ms),
                 lines: vec![std::mem::take(&mut text)],
+                timed: None,
             });
         }
     }
     out
 }
 
-/// 解析 SRT 文本为段落。容错：忽略空条目、缺时间轴的文字；多行文本用空格拼接。
-/// 去掉 [music] 这类音效标注；YouTube 的滚动自动字幕会去掉重复的行，并按句子重新分段。
+/// 解析 SRT / VTT 字幕为段落。容错：忽略空条目、缺时间轴的文字；多行文本用空格拼接；
+/// 去掉 `<i>`、VTT 逐词时间这类标记和 [music] 这类音效标注。YouTube 的滚动自动字幕
+/// 会去掉重复的行，并按句子重新分段（VTT 带逐词时间时句子的起止是准的）。
 pub fn parse_srt(input: &str) -> Vec<SubSegment> {
-    let cues = strip_cue_sound_tags(parse_cues(input));
+    let cues = strip_cue_sound_tags(strip_cue_markup(parse_cues(input)));
     let cues = if is_rolling(&cues) {
         regroup_into_sentences(collapse_rolling_captions(cues))
     } else {
@@ -605,6 +763,58 @@ mod tests {
         let srt = "1\n00:00:01,000 --> 00:00:02,000\n[Applause]\n\n2\n00:00:02,000 --> 00:00:03,000\n谢谢大家";
         let texts: Vec<String> = parse_srt(srt).into_iter().map(|s| s.text).collect();
         assert_eq!(texts, vec!["谢谢大家"]);
+    }
+
+    /// yt-dlp 下到的 YouTube 自动字幕原文（「Yes, you should panic about AI」开头）。
+    const YOUTUBE_ROLLING_VTT: &str = "WEBVTT\nKind: captions\nLanguage: en\n\n\
+00:00:00.000 --> 00:00:01.990 align:start position:0%\n \n\
+Imagine<00:00:00.800><c> you've</c><00:00:01.120><c> got</c><00:00:01.280><c> two</c><00:00:01.520><c> groups</c><00:00:01.760><c> of</c>\n\n\
+00:00:01.990 --> 00:00:02.000 align:start position:0%\nImagine you've got two groups of\n \n\n\
+00:00:02.000 --> 00:00:04.309 align:start position:0%\nImagine you've got two groups of\n\
+experts.<00:00:02.800><c> Group</c><00:00:03.040><c> one</c><00:00:03.439><c> says</c><00:00:03.679><c> all</c><00:00:03.919><c> kinds</c><00:00:04.080><c> of</c>\n\n\
+00:00:04.309 --> 00:00:04.319 align:start position:0%\nexperts. Group one says all kinds of\n \n\n\
+00:00:04.319 --> 00:00:06.309 align:start position:0%\nexperts. Group one says all kinds of\n\
+reasonable<00:00:04.880><c> things</c><00:00:05.120><c> you</c><00:00:05.359><c> intuitively</c><00:00:06.000><c> agree.</c>\n\n\
+00:00:06.309 --> 00:00:06.319 align:start position:0%\nreasonable things you intuitively agree.\n \n\n\
+00:00:06.319 --> 00:00:08.470 align:start position:0%\nreasonable things you intuitively agree.\n\
+[&nbsp;__&nbsp;]<00:00:06.900><c> right.</c>\n";
+
+    #[test]
+    fn youtube_vtt_sentences_start_on_the_spoken_word() {
+        let segs = parse_srt(YOUTUBE_ROLLING_VTT);
+        let texts: Vec<&str> = segs.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "Imagine you've got two groups of experts.",
+                "Group one says all kinds of reasonable things you intuitively agree.",
+                "[ __ ] right.",
+            ]
+        );
+        // 逐词时间：「Group」在 2.800 秒说出来，不是按字数估的 2.6 秒左右。
+        assert_eq!((segs[0].start_ms, segs[0].end_ms), (0, 2800));
+        assert_eq!((segs[1].start_ms, segs[1].end_ms), (2800, 6319));
+        assert_eq!((segs[2].start_ms, segs[2].end_ms), (6319, 8470));
+    }
+
+    #[test]
+    fn markup_is_stripped_but_comparisons_stay() {
+        assert_eq!(strip_markup("<i>斜体</i> 和 <font color=\"red\">红字</font>", 0).0, "斜体 和 红字");
+        assert_eq!(strip_markup("if a < b and c > d", 0).0, "if a < b and c > d");
+        assert_eq!(strip_markup("Q&amp;A &lt;3", 0).0, "Q&A <3");
+        let (text, words) = strip_markup("hi<00:00:08.940><c> this</c>", 7940);
+        assert_eq!(text, "hi this");
+        let words = words.unwrap();
+        assert_eq!(
+            words.iter().map(|w| (w.at_ms, w.text.as_str())).collect::<Vec<_>>(),
+            vec![(7940, "hi"), (8940, "this")]
+        );
+    }
+
+    #[test]
+    fn vtt_times_may_leave_out_the_hours() {
+        let segs = parse_srt("WEBVTT\n\n01:02.500 --> 01:04.000\n短的时间轴");
+        assert_eq!((segs[0].start_ms, segs[0].end_ms), (62_500, 64_000));
     }
 
     #[test]
