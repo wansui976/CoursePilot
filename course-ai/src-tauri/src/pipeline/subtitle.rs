@@ -91,22 +91,23 @@ fn parse_cues(input: &str) -> Vec<Cue> {
 
 /// 方括号里的音效标注（YouTube 自动字幕的 [music] / [Music] / [音乐] / [laughter] / [applause]，
 /// 手打字幕里的 [Applause] 之类）：不是说的话，读着碍眼，翻译、摘要也会把它当内容。
-/// 只认括号里是一两个纯字母的词；[ __ ]（YouTube 给脏话打的码）、[a, b] 这类留着。
+/// 只认这张表里的词：B 站 CC 字幕里的「[第三章附录]」、讲课里的 [a b]、[sic] 都是正文，
+/// 按「括号里是不是纯字母」去猜会把它们一起删掉。
 fn is_sound_tag(inner: &str) -> bool {
-    let inner = inner.trim();
-    let words = inner.split_whitespace().count();
-    (1..=3).contains(&words)
-        && inner.chars().count() >= 2
-        && inner.chars().count() <= 30
-        && inner
-            .chars()
-            .all(|c| c.is_alphabetic() || c.is_whitespace() || c == '-' || c == '\'')
+    const TAGS: [&str; 26] = [
+        "music", "music playing", "applause", "laughter", "laughing", "laughs", "laugh",
+        "cheering", "cheers", "snorts", "chuckles", "chuckling", "sighs", "silence",
+        "inaudible", "noise", "background noise", "foreign", "sound", "musik", "música",
+        "musique", "音乐", "音樂", "掌声", "笑声",
+    ];
+    let inner = inner.trim().to_lowercase();
+    TAGS.contains(&inner.as_str())
 }
 
-/// 去掉一行字幕里的音效标注和 ♪，顺手把 VTT 的不断行空格转义（`\h`，YouTube 脏话码
-/// `[\h__\h]` 里那种）还原成空格。返回清理后的文字（可能为空）。
+/// 去掉一行字幕里的音效标注和 ♪，顺手把 VTT 的不断行空格（ffmpeg 转出来写成 `\h`，
+/// YouTube 脏话码 `[\h__\h]` 里就有）还原成空格。返回清理后的文字（可能为空）。
 fn strip_sound_tags(line: &str) -> String {
-    let line = line.replace("\\h__\\h", " __ ").replace('♪', " ");
+    let line = line.replace("\\h", " ").replace('♪', " ");
     let mut out = String::with_capacity(line.len());
     let mut rest = line.as_str();
     while let Some(open) = rest.find(['[', '［']) {
@@ -574,6 +575,10 @@ mod tests {
         assert_eq!(strip_sound_tags("wanted to [\\h__\\h] an entire"), "wanted to [ __ ] an entire");
         assert_eq!(strip_sound_tags("on [a, b] we have"), "on [a, b] we have");
         assert_eq!(strip_sound_tags("see [1] and [x]"), "see [1] and [x]");
+        assert_eq!(strip_sound_tags("请看[第三章附录]的推导"), "请看[第三章附录]的推导");
+        assert_eq!(strip_sound_tags("the interval [a b], [sic]"), "the interval [a b], [sic]");
+        assert_eq!(strip_sound_tags("[Applause] thanks"), "thanks");
+        assert_eq!(strip_sound_tags("word\\hword"), "word word");
     }
 
     #[test]
