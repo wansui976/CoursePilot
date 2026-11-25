@@ -2,7 +2,7 @@ import { qk } from "@/lib/queryKeys";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cable, Copy, RefreshCw } from "lucide-react";
+import { AlertCircle, Copy, Info, RefreshCw } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { humanizeError } from "@/lib/errors";
@@ -16,8 +16,17 @@ import {
   type CableScan,
 } from "@/lib/mobileFiles";
 import { Modal } from "@/ui/dialog";
+import { Skeleton } from "@/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 const MB = 1024 * 1024;
+// 按「人看的顺序」排：第 2 讲在第 10 讲前面。导入也按这个顺序，课程里的集数才对。
+const byLectureOrder = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });
+// 勾选框用墨色：选中是中性状态，绿色只留给「导入」这一个主操作。
+const CHECKBOX = "h-[18px] w-[18px] flex-none cursor-pointer accent-[var(--text-strong)] disabled:cursor-not-allowed";
+// 文字按钮（刷新、全选）：中性色，不和主操作抢绿色。
+const TEXT_ACTION =
+  "ca-touch-44 inline-flex items-center gap-1 rounded-md px-1.5 text-[13px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] disabled:opacity-50";
 const formatSize = (bytes: number) =>
   bytes >= 1024 * MB
     ? `${(bytes / 1024 / MB).toFixed(1)} GB`
@@ -62,16 +71,19 @@ export function CableImportDialog({
   const [loadError, setLoadError] = useState<unknown>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [failures, setFailures] = useState<ImportFailure[]>([]);
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
   // 看到过的文件：重新列的时候，用户取消勾选的不再被勾回来，只有新拷进来的才默认勾上。
   const seenRef = useRef<Set<string>>(new Set());
   const importingRef = useRef(false);
-  const files: CableFile[] | null = scan?.files ?? null;
+  const files: CableFile[] | null = scan
+    ? [...scan.files].sort((a, b) => byLectureOrder.compare(a.name, b.name))
+    : null;
 
   const refresh = useCallback(async () => {
     // 导入进行中不重新列：文件正被一个个挪走，列表跟着跳会让进度和勾选对不上。
-    if (importingRef.current) return;
+    // App 切到后台时也不列（回到前台由 focus 立刻补一次）：别在后台每 3 秒读一遍文件夹。
+    if (importingRef.current || (typeof document !== "undefined" && document.hidden)) return;
     try {
       const next = await listCableFiles();
       setLoadError(null);
@@ -99,9 +111,11 @@ export function CableImportDialog({
     // iOS 用 Finder 拷文件时 App 可能在后台：回到前台立刻看一次，不等下一轮。
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
   }, [refresh]);
 
@@ -137,10 +151,10 @@ export function CableImportDialog({
       const failed: ImportFailure[] = [];
       let done = 0;
       setFailures([]);
-      setProgress({ done, total: paths.length });
       try {
         for (const path of paths) {
           const name = files?.find((file) => file.path === path)?.name ?? path;
+          setProgress({ done, total: paths.length, name });
           let taken: Awaited<ReturnType<typeof takeCableFile>> = null;
           try {
             taken = await takeCableFile(path, "videos");
@@ -158,7 +172,6 @@ export function CableImportDialog({
             failed.push({ name, error: humanizeError(error, i18n.language), returned });
           }
           done += 1;
-          setProgress({ done, total: paths.length });
         }
       } finally {
         importingRef.current = false;
@@ -177,7 +190,9 @@ export function CableImportDialog({
     },
   });
 
-  const ordered = ready.filter((file) => selected.has(file.path)).map((file) => file.path);
+  const chosen = ready.filter((file) => selected.has(file.path));
+  const ordered = chosen.map((file) => file.path);
+  const chosenBytes = chosen.reduce((sum, file) => sum + file.size, 0);
   const folder = scan?.folder ?? null;
 
   return (
@@ -188,172 +203,189 @@ export function CableImportDialog({
       }}
       locked={importSelected.isPending}
       title={t("cableImport.title")}
-      icon={<Cable className="h-4 w-4" />}
-      titleClassName="mb-1"
       description={t(android ? "cableImport.introAndroid" : "cableImport.intro")}
-      descriptionClassName="mt-0 mb-3 leading-normal"
       size="lg"
-      className="flex flex-col"
+      className="flex max-h-[85vh] flex-col"
       overlayTestId="cable-import-overlay"
       returnFocusTo={() => returnFocusRef?.current ?? restoreFocusRef.current}
     >
-      {android && folder && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2">
-          <code className="min-w-0 flex-1 break-words font-mono text-xs text-[var(--text-strong)]">
-            {t("cableImport.androidFolder", { path: folder.split("/").join(" › ") })}
-          </code>
-          <button
-            type="button"
-            onClick={() => void copyFolderPath(folder)}
-            className="ca-touch-44 inline-flex flex-none items-center gap-1 rounded-md px-2 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]"
-          >
-            <Copy aria-hidden="true" className="h-3.5 w-3.5" />
-            {copied ? t("cableImport.pathCopied") : t("cableImport.copyPath")}
-          </button>
-        </div>
-      )}
-
-      <div className="mb-3 space-y-1 rounded-lg bg-[var(--surface-card-hover)] px-3 py-2 text-xs leading-relaxed text-[var(--text-muted)]">
-        {android ? (
-          <>
-            <p>{t("cableImport.stepAndroidWindows")}</p>
-            <p>{t("cableImport.stepAndroidMac")}</p>
-          </>
-        ) : (
-          <>
-            <p>{t("cableImport.stepMac")}</p>
-            <p>{t("cableImport.stepWindows")}</p>
-          </>
+      <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3">
+        {android && folder && (
+          <div className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] py-1.5 pl-3 pr-1.5">
+            <code className="min-w-0 flex-1 break-words font-mono text-xs text-[var(--text-strong)]">
+              {t("cableImport.androidFolder", { path: folder.split("/").join(" › ") })}
+            </code>
+            <button type="button" onClick={() => void copyFolderPath(folder)} className={TEXT_ACTION}>
+              <Copy aria-hidden="true" className="h-3.5 w-3.5" />
+              {copied ? t("cableImport.pathCopied") : t("cableImport.copyPath")}
+            </button>
+          </div>
         )}
-        <p>{t("cableImport.cleanupHint")}</p>
-      </div>
 
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={importSelected.isPending}
-            className="ca-touch-44 inline-flex items-center gap-1 text-xs text-[var(--accent-text)] hover:underline disabled:opacity-50"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            {t("cableImport.refresh")}
-          </button>
-          {ready.length > 0 && (
+        <div className="ca-callout info">
+          <Info className="ca-callout-icon" aria-hidden="true" />
+          <div className="min-w-0 space-y-1">
+            {android ? (
+              <>
+                <p>{t("cableImport.stepAndroidWindows")}</p>
+                <p>{t("cableImport.stepAndroidMac")}</p>
+              </>
+            ) : (
+              <>
+                <p>{t("cableImport.stepMac")}</p>
+                <p>{t("cableImport.stepWindows")}</p>
+              </>
+            )}
+            <p className="text-[var(--text-muted)]">{t("cableImport.cleanupHint")}</p>
+          </div>
+        </div>
+
+        {loadError != null && (
+          <div className="space-y-1">
+            <ErrorNote error={loadError} onRetry={() => void refresh()} />
+            <p className="ca-t-xs px-1 leading-relaxed text-[var(--text-muted)]">{t("cableImport.loadFailed")}</p>
+          </div>
+        )}
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)]">
+          <div className="flex h-10 flex-none items-center gap-1 border-b border-[var(--border-faint)] px-2">
+            {ready.length > 0 && (
+              <button type="button" onClick={toggleAll} disabled={importSelected.isPending} className={TEXT_ACTION}>
+                {allSelected ? t("cableImport.deselectAll") : t("cableImport.selectAll")}
+              </button>
+            )}
+            <span className="ca-t-xs min-w-0 flex-1 truncate px-1 text-[var(--text-faint)]">
+              {ready.length > 0 && t("cableImport.selected", { selected: ordered.length, total: ready.length })}
+            </span>
             <button
               type="button"
-              onClick={toggleAll}
+              onClick={() => void refresh()}
               disabled={importSelected.isPending}
-              className="ca-touch-44 text-xs text-[var(--accent-text)] hover:underline disabled:opacity-50"
+              className={TEXT_ACTION}
             >
-              {allSelected ? t("cableImport.deselectAll") : t("cableImport.selectAll")}
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("cableImport.refresh")}
             </button>
-          )}
-        </div>
-        {ready.length > 0 && (
-          <span className="text-xs text-[var(--text-muted)]">
-            {t("cableImport.selected", { selected: ordered.length, total: ready.length })}
-          </span>
-        )}
-      </div>
+          </div>
 
-      {loadError != null && (
-        <>
-          <ErrorNote error={loadError} />
-          <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-            {t("cableImport.loadFailed")}
-          </p>
-        </>
-      )}
+          <div className="min-h-[9rem] flex-1 overflow-y-auto">
+            {files == null && loadError == null && (
+              <div role="status" aria-label={t("common.loading")} className="space-y-1 px-3 py-2">
+                {[64, 48, 72].map((width) => (
+                  <div key={width} className="flex h-11 items-center gap-3">
+                    <Skeleton className="h-4 w-4 flex-none rounded-[var(--r-xs)]" />
+                    <div className="min-w-0" style={{ width: `${width}%` }}>
+                      <Skeleton className="h-3 w-full rounded-[var(--r-xs)]" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
-      {files == null && loadError == null && (
-        <p className="py-6 text-center text-sm text-[var(--text-muted)]">{t("common.loading")}</p>
-      )}
+            {files != null && files.length === 0 && (
+              <p className="flex h-full min-h-[9rem] items-center justify-center px-6 text-center text-[13px] leading-relaxed text-[var(--text-muted)]">
+                {scan && scan.scanned > 0
+                  ? t("cableImport.emptyUnsupported", {
+                      count: scan.scanned,
+                      formats: t(android ? "cableImport.formatsAndroid" : "cableImport.formatsIos"),
+                    })
+                  : t(android ? "cableImport.emptyNoneAndroid" : "cableImport.emptyNone")}
+              </p>
+            )}
 
-      {files != null && files.length === 0 && (
-        <p className="py-6 text-center text-sm leading-relaxed text-[var(--text-muted)]">
-          {scan && scan.scanned > 0
-            ? t("cableImport.emptyUnsupported", {
-                count: scan.scanned,
-                formats: t(android ? "cableImport.formatsAndroid" : "cableImport.formatsIos"),
-              })
-            : t(android ? "cableImport.emptyNoneAndroid" : "cableImport.emptyNone")}
-        </p>
-      )}
-
-      {files != null && files.length > 0 && (
-        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-          {files.map((file) => (
-            <li key={file.path}>
-              <label
-                className={`flex min-h-11 items-center gap-2.5 rounded-lg px-2 py-1.5 ${
-                  file.settling ? "cursor-default opacity-60" : "cursor-pointer hover:bg-[var(--surface-card-hover)]"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  aria-label={t("cableImport.selectItem", { name: file.name })}
-                  checked={!file.settling && selected.has(file.path)}
-                  disabled={file.settling || importSelected.isPending}
-                  onChange={() => toggle(file.path)}
-                  className="h-[18px] w-[18px] flex-none accent-[var(--accent)]"
-                />
-                <span className="min-w-0 flex-1 truncate text-sm text-[var(--text-normal)]">
-                  {file.name}
-                </span>
-                <span className="flex-none font-mono text-xs tabular-nums text-[var(--text-muted)]">
-                  {file.settling ? t("cableImport.settling") : formatSize(file.size)}
-                </span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {failures.length > 0 && (
-        <div
-          role="alert"
-          className="mt-2 rounded-lg bg-[var(--status-err-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--status-err)]"
-        >
-          <p className="font-medium">{t("cableImport.failed", { count: failures.length })}</p>
-          <ul className="mt-1 space-y-0.5">
-            {failures.map((failure) => (
-              <li key={failure.name} className="break-words">
-                {t("cableImport.failedItem", {
-                  name: failure.name,
-                  reason: failure.error,
+            {files != null && files.length > 0 && (
+              <ul className="p-1">
+                {files.map((file) => {
+                  const checked = !file.settling && selected.has(file.path);
+                  return (
+                    <li key={file.path}>
+                      <label
+                        className={cn(
+                          "flex min-h-11 items-center gap-3 rounded-md px-2 py-1.5 transition-colors",
+                          file.settling
+                            ? "cursor-default"
+                            : checked
+                              ? "cursor-pointer bg-[var(--surface-card-active)]"
+                              : "cursor-pointer hover:bg-[var(--surface-card-hover)]",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={t("cableImport.selectItem", { name: file.name })}
+                          checked={checked}
+                          disabled={file.settling || importSelected.isPending}
+                          onChange={() => toggle(file.path)}
+                          className={CHECKBOX}
+                        />
+                        <span
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-sm",
+                            file.settling ? "text-[var(--text-muted)]" : "text-[var(--text-strong)]",
+                          )}
+                        >
+                          {file.name}
+                        </span>
+                        {file.settling ? (
+                          <span className="flex-none rounded-[var(--r-xs)] border border-[var(--border-faint)] px-1.5 py-px text-[12px] leading-[18px] text-[var(--text-muted)]">
+                            {t("cableImport.settling")}
+                          </span>
+                        ) : (
+                          <span className="flex-none font-mono text-[12px] text-[var(--text-faint)]">
+                            {formatSize(file.size)}
+                          </span>
+                        )}
+                      </label>
+                    </li>
+                  );
                 })}
-                {failure.returned && t("cableImport.returned")}
-              </li>
-            ))}
-          </ul>
+              </ul>
+            )}
+          </div>
         </div>
-      )}
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        {progress && (
-          <span className="mr-auto text-xs text-[var(--text-muted)]">
-            {t("cableImport.progress", progress)}
-          </span>
+        {failures.length > 0 && (
+          <div role="alert" className="ca-callout err">
+            <AlertCircle className="ca-callout-icon" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="font-medium text-[var(--text-strong)]">
+                {t("cableImport.failed", { count: failures.length })}
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {failures.map((failure) => (
+                  <li key={failure.name} className="break-words">
+                    {t("cableImport.failedItem", {
+                      name: failure.name,
+                      reason: failure.error,
+                    })}
+                    {failure.returned && t("cableImport.returned")}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         )}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={importSelected.isPending}
-          onClick={onClose}
-        >
-          {t("common.cancel")}
-        </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={ordered.length === 0 || importSelected.isPending}
-          onClick={() => importSelected.mutate(ordered)}
-        >
-          {importSelected.isPending
-            ? t("cableImport.importing")
-            : t("cableImport.importCount", { count: ordered.length })}
-        </Button>
+
+        <div className="flex items-center gap-2 border-t border-[var(--border-faint)] pt-3">
+          <p className="ca-t-xs min-w-0 flex-1 truncate text-[var(--text-muted)]" aria-live="polite">
+            {progress
+              ? t("cableImport.progressItem", { done: progress.done + 1, total: progress.total, name: progress.name })
+              : ordered.length > 0
+                ? t("cableImport.summary", { count: ordered.length, size: formatSize(chosenBytes) })
+                : null}
+          </p>
+          <Button variant="ghost" disabled={importSelected.isPending} onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={ordered.length === 0 || importSelected.isPending}
+            onClick={() => importSelected.mutate(ordered)}
+          >
+            {importSelected.isPending
+              ? t("cableImport.importing")
+              : t("cableImport.importCount", { count: ordered.length })}
+          </Button>
+        </div>
       </div>
     </Modal>
   );

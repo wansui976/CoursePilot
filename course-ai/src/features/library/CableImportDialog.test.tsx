@@ -62,7 +62,7 @@ describe("CableImportDialog", () => {
     expect(copying).not.toBeChecked();
     expect(copying).toBeDisabled();
     expect(screen.getByText("正在拷贝…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导入 (1)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "导入 1 个视频" })).toBeEnabled();
   });
 
   it("定时重新列文件夹：取消勾选的不会被勾回来，新拷进来的默认勾上", async () => {
@@ -90,7 +90,7 @@ describe("CableImportDialog", () => {
     mockFiles.returnCableFile.mockResolvedValue("/cable/01 导论.mp4");
     mockIpc.videos.addLocal.mockRejectedValue(new Error("database is locked"));
     const { onClose } = renderDialog();
-    fireEvent.click(await screen.findByRole("button", { name: "导入 (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "导入 1 个视频" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("有 1 个视频没导入");
     expect(alert).toHaveTextContent("文件已放回原来的文件夹");
@@ -98,11 +98,35 @@ describe("CableImportDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("按讲次顺序列出、按这个顺序导入（第 2 讲在第 10 讲前面），底部写着选了多大", async () => {
+    mockFiles.listCableFiles.mockResolvedValue({
+      files: [file("第10讲.mp4"), file("第2讲.mp4"), file("第1讲.mp4")],
+      scanned: 3,
+    });
+    mockFiles.takeCableFile.mockImplementation(async (path: string) => ({
+      path: path.replace("/cable/", "/library/"),
+      durationMs: 1000,
+    }));
+    const { onClose } = renderDialog();
+    await screen.findByRole("checkbox", { name: "选择 第1讲.mp4" });
+    expect(
+      screen.getAllByRole("checkbox").map((box) => box.getAttribute("aria-label")),
+    ).toEqual(["选择 第1讲.mp4", "选择 第2讲.mp4", "选择 第10讲.mp4"]);
+    expect(screen.getByText("已选 3 个 · 900 MB")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导入 3 个视频" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(mockIpc.videos.addLocal.mock.calls.map((call) => call[1])).toEqual([
+      "/library/第1讲.mp4",
+      "/library/第2讲.mp4",
+      "/library/第10讲.mp4",
+    ]);
+  });
+
   it("全部导入成功就关掉对话框", async () => {
     mockFiles.listCableFiles.mockResolvedValue({ files: [file("01 导论.mp4")], scanned: 1 });
     mockFiles.takeCableFile.mockResolvedValue({ path: "/library/01 导论.mp4", durationMs: 1000 });
     const { onClose } = renderDialog();
-    fireEvent.click(await screen.findByRole("button", { name: "导入 (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "导入 1 个视频" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(mockIpc.videos.addLocal).toHaveBeenCalledWith("c1", "/library/01 导论.mp4", 1000);
     expect(mockFiles.returnCableFile).not.toHaveBeenCalled();

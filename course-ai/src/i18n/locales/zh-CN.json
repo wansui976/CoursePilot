@@ -1770,12 +1770,13 @@
     "deselectAll": "全不选",
     "selected": "已选 {{selected}} / {{total}}",
     "selectItem": "选择 {{name}}",
-    "importCount": "导入 ({{count}})",
+    "importCount": "导入 {{count}} 个视频",
     "importing": "导入中…",
-    "progress": "正在导入 {{done}} / {{total}}",
     "failed": "有 {{count}} 个视频没导入：",
     "failedItem": "{{name}}：{{reason}}",
-    "returned": "（文件已放回原来的文件夹）"
+    "returned": "（文件已放回原来的文件夹）",
+    "progressItem": "正在导入 {{done}} / {{total}}：{{name}}",
+    "summary": "已选 {{count}} 个 · {{size}}"
   },
   "urlImport": {
     "percent": "下载中 {{percent}}%",

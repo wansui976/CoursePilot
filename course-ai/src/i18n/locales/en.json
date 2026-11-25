@@ -1774,13 +1774,14 @@
     "deselectAll": "Deselect all",
     "selected": "Selected {{selected}} / {{total}}",
     "selectItem": "Select {{name}}",
-    "importCount": "Import ({{count}})",
+    "importCount": "Import {{count}} videos",
     "importing": "Importing…",
-    "progress": "Importing {{done}} / {{total}}",
     "failed_one": "{{count}} video wasn't imported:",
     "failed_other": "{{count}} videos weren't imported:",
     "failedItem": "{{name}}: {{reason}}",
-    "returned": " (the file was put back in its folder)"
+    "returned": " (the file was put back in its folder)",
+    "progressItem": "Importing {{done}} of {{total}}: {{name}}",
+    "summary": "{{count}} selected · {{size}}"
   },
   "urlImport": {
     "percent": "Downloading {{percent}}%",
