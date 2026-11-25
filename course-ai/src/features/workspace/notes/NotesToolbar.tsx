@@ -301,7 +301,7 @@ export function NotesToolbar({
           multiple
           hidden
           onChange={(event) => {
-            const files = imageFiles(event.target.files);
+            const files = imageFiles(event.target.files, { fromImagePicker: true });
             event.target.value = "";
             if (files.length) onInsertImages(files);
           }}

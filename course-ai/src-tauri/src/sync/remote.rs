@@ -1615,6 +1615,12 @@ mod tests {
                 .bind(&video.id).bind(i).bind(i * 1000).bind(i * 1000 + 900).bind(format!("第{i}句")).bind(Some("[]"))
                 .execute(&pc.db.pool).await.unwrap();
         }
+        // 电脑上把字幕翻成了中文（以前译文不同步，手机上只看得到原文）。
+        for i in 0..3 {
+            sqlx::query("INSERT INTO transcript_translations(video_id,segment_idx,lang,source_text,text) VALUES (?,?,'zh',?,?)")
+                .bind(&video.id).bind(i).bind(format!("第{i}句")).bind(format!("译文{i}"))
+                .execute(&pc.db.pool).await.unwrap();
+        }
         exec("INSERT INTO summaries(video_id,content_md,generated_at) VALUES (?,'摘要 v1',1)")
             .await;
         exec("INSERT INTO chapters(video_id,title,summary,start_ms,end_ms,order_index) VALUES (?,'开头','引入',0,900,0)").await;
@@ -1643,6 +1649,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(segments, ["第0句", "第1句", "第2句"]);
+        let translated = crate::pipeline::translate::current_translations(&phone.db, &video.id, "zh")
+            .await
+            .unwrap();
+        assert_eq!(
+            translated.into_iter().map(|row| row.text).collect::<Vec<_>>(),
+            ["译文0", "译文1", "译文2"],
+            "电脑上翻好的译文到了手机上，原文对得上就显示"
+        );
         let summary: String =
             sqlx::query_scalar("SELECT content_md FROM summaries WHERE video_id=?")
                 .bind(&video.id)

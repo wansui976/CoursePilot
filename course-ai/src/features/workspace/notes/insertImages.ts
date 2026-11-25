@@ -22,8 +22,21 @@ export async function storeNoteImage(videoId: string, input: Blob): Promise<Stor
   return { src: saved.src, width: prepared.width, height: prepared.height };
 }
 
-export function imageFiles(list: ArrayLike<File> | null | undefined): File[] {
-  return Array.from(list ?? []).filter((file) => file.type.startsWith("image/"));
+const IMAGE_NAME = /\.(png|jpe?g|gif|webp|bmp|avif|heic|heif)$/i;
+
+/**
+ * 挑出图片文件。Android 的系统选图器给回来的文件常常 type 是空的（content:// 地址认不出类型），
+ * 名字也可能只是一串数字：只看 type 的话一张都挑不出来，点了「插入图片」毫无反应。
+ * `fromImagePicker`：文件来自 accept="image/*" 的选图器，type 空着也收下，读不出来时再报错。
+ */
+export function imageFiles(
+  list: ArrayLike<File> | null | undefined,
+  { fromImagePicker = false }: { fromImagePicker?: boolean } = {},
+): File[] {
+  return Array.from(list ?? []).filter(
+    (file) =>
+      file.type.startsWith("image/") || (file.type === "" && (fromImagePicker || IMAGE_NAME.test(file.name))),
+  );
 }
 
 /** 剪贴板 / 拖放数据的结构：粘贴事件给 ClipboardEvent.clipboardData，拖放给 DragEvent.dataTransfer。 */

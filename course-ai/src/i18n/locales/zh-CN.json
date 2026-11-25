@@ -718,7 +718,8 @@
       "lost": "笔记改过了，找不到这条批注对应的原文",
       "erase": "擦掉这条批注"
     },
-    "tabs": "笔记分节索引"
+    "tabs": "笔记分节索引",
+    "imageUnreadable": "这张图片读不出来（可能是 HEIC 等格式），换成 JPG 或 PNG 再插入。"
   },
   "quiz": {
     "correct": "正确",

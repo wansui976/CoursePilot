@@ -19,8 +19,10 @@ export interface PreparedImage {
 }
 
 export class ImageTooLargeError extends Error {}
+/** 浏览器内核解不开这张图（比如部分安卓手机拍的 HEIC）。 */
+export class ImageUnreadableError extends Error {}
 
-async function decode(blob: Blob): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
+async function decodeWith(blob: Blob): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
   if (typeof createImageBitmap === "function") {
     const bitmap = await createImageBitmap(blob);
     return { source: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
@@ -33,6 +35,14 @@ async function decode(blob: Blob): Promise<{ source: CanvasImageSource; width: n
     return { source: img, width: img.naturalWidth, height: img.naturalHeight, close: () => {} };
   } finally {
     URL.revokeObjectURL(url);
+  }
+}
+
+async function decode(blob: Blob) {
+  try {
+    return await decodeWith(blob);
+  } catch {
+    throw new ImageUnreadableError("unreadable image");
   }
 }
 

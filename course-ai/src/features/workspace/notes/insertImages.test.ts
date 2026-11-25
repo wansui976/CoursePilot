@@ -45,3 +45,20 @@ describe("imageFilesFromTransfer", () => {
     expect(imageFiles([png()])).toHaveLength(1);
   });
 });
+
+describe("imageFiles 在安卓选图器上", () => {
+  const untyped = (name: string) => new File(["x"], name, { type: "" });
+
+  it("选图器给回来的文件没有类型、名字只是数字时也收下", () => {
+    expect(imageFiles([untyped("1000012345")], { fromImagePicker: true })).toHaveLength(1);
+  });
+
+  it("不是选图器来的：没类型就按扩展名认", () => {
+    expect(imageFiles([untyped("IMG_0001.HEIC"), untyped("photo.jpg")])).toHaveLength(2);
+    expect(imageFiles([untyped("notes.txt"), untyped("1000012345")])).toHaveLength(0);
+  });
+
+  it("明确不是图片的照样不收", () => {
+    expect(imageFiles([new File(["x"], "a.pdf", { type: "application/pdf" })], { fromImagePicker: true })).toHaveLength(0);
+  });
+});

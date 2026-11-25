@@ -720,7 +720,8 @@
       "lost": "The notes changed; the text this refers to is gone",
       "erase": "Erase this note"
     },
-    "tabs": "Section tabs"
+    "tabs": "Section tabs",
+    "imageUnreadable": "This image can't be read (it may be HEIC or a similar format). Convert it to JPG or PNG and insert it again."
   },
   "quiz": {
     "correct": "Correct",

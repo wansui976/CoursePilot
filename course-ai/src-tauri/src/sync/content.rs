@@ -1,4 +1,4 @@
-//! 字幕和 AI 生成内容的同步记录：每个视频一条字幕 / 章节 / 摘要 / 练习题 / 脑图 / 精华，
+//! 字幕和 AI 生成内容的同步记录：每个视频一条字幕 / 字幕译文 / 章节 / 摘要 / 练习题 / 脑图 / 精华，
 //! 每门课一条知识点（含讲解、出处和课程概览）。
 //!
 //! 合并律：这些都是**生成出来的整块内容**，没有「两边各改一半」这回事——用户要么重新识别、
@@ -20,6 +20,7 @@ use sqlx::{Sqlite, Transaction};
 /// 按视频的内容记录：（记录类型, 生成指纹里的产物名）。
 const VIDEO_TYPES: &[(&str, Option<&str>)] = &[
     ("Transcript", None),
+    (TRANSLATION, None),
     ("Chapters", Some("chapters")),
     ("Summary", Some("summary")),
     ("Quiz", Some("quiz")),
@@ -29,6 +30,8 @@ const VIDEO_TYPES: &[(&str, Option<&str>)] = &[
 ];
 
 pub const COVER: &str = "Cover";
+/// 字幕译文：一个视频所有目标语言的译文合成一条。
+pub const TRANSLATION: &str = "Translation";
 /// 封面比这还大就不同步（正常的封面几十 KB，这么大多半是出了什么问题）。
 const COVER_MAX_BYTES: u64 = 1024 * 1024;
 
@@ -50,6 +53,7 @@ pub fn is_content(record_type: &str) -> bool {
 /// 首次开启同步时要排进出件箱的内容记录：（记录类型, 表, 键列）。
 const SNAPSHOT_SOURCES: &[(&str, &str, &str)] = &[
     ("Transcript", "transcripts", "video_id"),
+    (TRANSLATION, "transcript_translations", "video_id"),
     ("Chapters", "chapters", "video_id"),
     ("Summary", "summaries", "video_id"),
     ("Quiz", "quizzes", "video_id"),
@@ -261,6 +265,23 @@ pub async fn payload(
                 .map(|(idx, start, end, text, words)| json!([idx, start, end, text, words]))
                 .collect();
             json!({"videoID": id, "segments": segments})
+        }
+        TRANSLATION => {
+            let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+                "SELECT segment_idx,lang,source_text,text FROM transcript_translations WHERE video_id=? ORDER BY lang, segment_idx",
+            )
+            .bind(id)
+            .fetch_all(&mut **tx)
+            .await?;
+            if rows.is_empty() {
+                return Ok(None);
+            }
+            // 带上翻译时的原文：对端据此和自己的字幕比对，原文对不上的译文不显示（和本机一样）。
+            let rows: Vec<Value> = rows
+                .into_iter()
+                .map(|(idx, lang, source, text)| json!([idx, lang, source, text]))
+                .collect();
+            json!({"videoID": id, "rows": rows})
         }
         "Chapters" => {
             let rows: Vec<(String, Option<String>, i64, i64, i64)> = sqlx::query_as(
@@ -520,6 +541,36 @@ pub async fn save(
                 .execute(&mut **tx)
                 .await?;
         }
+        TRANSLATION => {
+            sqlx::query("DELETE FROM transcript_translations WHERE video_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
+            for row in payload
+                .get("rows")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let (Some(idx), Some(lang)) = (
+                    row.get(0).and_then(Value::as_i64),
+                    row.get(1).and_then(Value::as_str),
+                ) else {
+                    continue;
+                };
+                sqlx::query(
+                    "INSERT INTO transcript_translations(video_id,segment_idx,lang,source_text,text) VALUES (?,?,?,?,?)
+                     ON CONFLICT(video_id,segment_idx,lang) DO UPDATE SET source_text=excluded.source_text, text=excluded.text",
+                )
+                .bind(id)
+                .bind(idx)
+                .bind(lang)
+                .bind(row.get(2).and_then(Value::as_str).unwrap_or_default())
+                .bind(row.get(3).and_then(Value::as_str).unwrap_or_default())
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
         "Chapters" => {
             sqlx::query("DELETE FROM chapters WHERE video_id=?")
                 .bind(id)
@@ -664,6 +715,12 @@ pub async fn delete(
     match envelope.record_type.as_str() {
         "Transcript" => {
             sqlx::query("DELETE FROM transcripts WHERE video_id=?")
+                .bind(id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        TRANSLATION => {
+            sqlx::query("DELETE FROM transcript_translations WHERE video_id=?")
                 .bind(id)
                 .execute(&mut **tx)
                 .await?;

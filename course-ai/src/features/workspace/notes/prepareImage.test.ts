@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { blobToBase64, ImageTooLargeError, prepareImage, TARGET_BYTES } from "./prepareImage";
+import { blobToBase64, ImageTooLargeError, ImageUnreadableError, prepareImage, TARGET_BYTES } from "./prepareImage";
 
 // jsdom 没有图像解码与画布编码：解码给一个固定尺寸，编码按「像素数 × 每像素字节」估大小。
 let size = { width: 800, height: 600 };
@@ -63,6 +63,18 @@ describe("插图前压缩", () => {
     size = { width: 2000, height: 1000 };
     bytesPerPixel = { "image/jpeg": 100 };
     await expect(prepareImage(blob(3_000_000, "image/jpeg"))).rejects.toBeInstanceOf(ImageTooLargeError);
+  });
+
+  it("解不开的图（安卓拍的 HEIC 之类）报 ImageUnreadableError，好给出能看懂的提示", async () => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => Promise.reject(new DOMException("The source image could not be decoded."))));
+    await expect(prepareImage(blob(200_000, ""))).rejects.toBeInstanceOf(ImageUnreadableError);
+  });
+
+  it("没有类型的小图（安卓选图器给的）重新编码，存进去的类型是对的", async () => {
+    size = { width: 400, height: 300 };
+    bytesPerPixel = {};
+    const prepared = await prepareImage(blob(20_000, ""));
+    expect(prepared.mime).toBe("image/jpeg");
   });
 
   it("base64 编码与 btoa 一致", async () => {

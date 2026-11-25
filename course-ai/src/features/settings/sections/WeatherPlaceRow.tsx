@@ -16,7 +16,16 @@ function currentPosition(): Promise<GeolocationPosition> {
       reject(new Error("unavailable"));
       return;
     }
-    navigator.geolocation.getCurrentPosition(resolve, reject, { maximumAge: 3_600_000, timeout: 10_000 });
+    try {
+      // 只要大致位置（坐标取两位小数）：不开高精度，手机上不用等 GPS。
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        maximumAge: 3_600_000,
+        timeout: 15_000,
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 

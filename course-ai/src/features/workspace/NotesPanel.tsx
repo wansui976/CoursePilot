@@ -38,7 +38,7 @@ import {
   storeNoteImage,
   type StoredImage,
 } from "./notes/insertImages";
-import { ImageTooLargeError } from "./notes/prepareImage";
+import { ImageTooLargeError, ImageUnreadableError } from "./notes/prepareImage";
 import { looksLikeMarkdown, markdownPasteContent } from "./notes/pasteMarkdown";
 import { loadDocument } from "./notes/loadDocument";
 import { insertNoteStamp } from "./notes/insertNoteStamp";
@@ -172,7 +172,13 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     try {
       await work(target);
     } catch (error) {
-      setImageError(error instanceof ImageTooLargeError ? new Error(t("notes.imageTooLarge")) : error);
+      setImageError(
+        error instanceof ImageTooLargeError
+          ? new Error(t("notes.imageTooLarge"))
+          : error instanceof ImageUnreadableError
+            ? new Error(t("notes.imageUnreadable"))
+            : error,
+      );
     } finally {
       setImageBusy(false);
     }
