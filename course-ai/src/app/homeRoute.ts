@@ -10,8 +10,7 @@ export type MainView =
   | "queue"
   | "concepts"
   | "settings"
-  | "recycle"
-  | "dev";
+  | "recycle";
 
 export const VIEW_PATHS = {
   library: "/",
@@ -20,7 +19,6 @@ export const VIEW_PATHS = {
   concepts: "/concepts",
   settings: "/settings",
   recycle: "/trash",
-  dev: "/dev",
 } as const satisfies Record<MainView, string>;
 
 /** 课程 / 文件夹 / 视频选择跨视图保留，放在 search 里。 */

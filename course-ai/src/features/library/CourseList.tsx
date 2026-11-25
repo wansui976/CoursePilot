@@ -593,14 +593,16 @@ export function CourseList({
                       if (menuFor === course.id) closeMenu();
                       else openMenuFor(course.id, e.currentTarget);
                     }}
-                    className={`ca-touch-44 mr-1 grid h-9 w-9 flex-none place-items-center rounded text-[var(--text-muted)] transition hover:bg-[var(--surface-card)] hover:text-[var(--text-strong)] ${
+                    // 看上去是 28px 的小钮（中性底，不发白、不带阴影）；触屏上点按区靠 ::after 向外扩，
+                    // 不再用 ca-touch-44 把整块撑成 44px——那样按下时是一块比这一行还高的白方块。
+                    className={`ca-hit-expand relative mr-1 grid h-7 w-7 flex-none place-items-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[color-mix(in_srgb,var(--text-strong)_8%,transparent)] hover:text-[var(--text-strong)] aria-expanded:bg-[color-mix(in_srgb,var(--text-strong)_10%,transparent)] aria-expanded:text-[var(--text-strong)] ${
                       isIOS() || menuFor === course.id || swipedCourseId === course.id
                         ? "opacity-100"
                         : // 键盘聚焦本行时也显现（group-focus-within），否则 Tab 到的是不可见控件。
                           "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
                     }`}
                   >
-                    <MoreHorizontal className="h-5 w-5" />
+                    <MoreHorizontal className="h-4 w-4" />
                   </button>
                 </SortableCourseItem>
                 {selected && selectedCourseExtra}

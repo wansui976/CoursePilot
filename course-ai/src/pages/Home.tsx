@@ -93,7 +93,6 @@ export function Home() {
   } = useHomeRoute();
   const showSettings = mainView === "settings";
   const showRecycleBin = mainView === "recycle";
-  const showDevConsole = mainView === "dev";
   const showDashboard = mainView === "dashboard";
   const showConcepts = mainView === "concepts";
   const queueOpen = mainView === "queue";
@@ -391,11 +390,6 @@ export function Home() {
       else runAfterSettingsExit(() => go({ view: "library" }));
       return true;
     }
-    if (showDevConsole) {
-      // 控制台从设置的「开发者」分类进入，返回也回到那里。
-      go({ view: "settings", settingsCategory: "dev" });
-      return true;
-    }
     if (showRecycleBin || showDashboard) {
       go({ view: "library" });
       return true;
@@ -419,7 +413,6 @@ export function Home() {
     queueOpen,
     selectedCourseId,
     selectedVideoId,
-    showDevConsole,
     showRecycleBin,
     showSettings,
     showDashboard,
@@ -490,7 +483,7 @@ export function Home() {
     runAfterWorkspaceTransient(() => go({ view: "settings", settingsCategory: category }));
   }
 
-  function openMainView(view: "settings" | "recycle" | "dev" | "dashboard") {
+  function openMainView(view: "settings" | "recycle" | "dashboard") {
     runAfterWorkspaceTransient(() => go({ view }));
   }
 
@@ -555,7 +548,7 @@ export function Home() {
 
 
 
-  const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard && !queueOpen;
+  const isWorkbenchView = !!selectedVideo && !showSettings && !showRecycleBin && !showDashboard && !queueOpen;
   // 桌面：进入某个视频的工作台会话后，即便在主区叠开设置/回收站/控制台/队列整页，
   // 左侧仍保持窄工具栏（rail），不回退成首页的宽侧栏——设置只是覆盖主区，会话仍在。
   const inVideoSession = !!selectedVideo;
@@ -571,7 +564,7 @@ export function Home() {
   // 窄屏底部 Tab 仅在「非工作台」时显示(工作台全屏沉浸)。
   const showBottomTab = isPhoneDevice && !isWorkbenchView;
   // 底栏选中项由当前顶层视图派生，返回或由其它入口切页后不会保留旧高亮。
-  const activeCompactTab: CompactTab = showSettings || showDevConsole
+  const activeCompactTab: CompactTab = showSettings
     ? "settings"
     : showDashboard
       ? "study"
@@ -585,8 +578,7 @@ export function Home() {
     !selectedCourseId &&
     !queueOpen &&
     !showSettings &&
-    !showRecycleBin &&
-    !showDevConsole;
+    !showRecycleBin;
 
   // 主区当前视图的「类型」标识，作为入场动画的重挂 key（顺序须与下方主区条件渲染一致）。
   // 注意：工作台统一为 "workbench"，不含视频 id —— 切换视频不重挂、播放器状态保留。
@@ -596,9 +588,7 @@ export function Home() {
       ? "recycle"
       : showDashboard
         ? "dashboard"
-        : showDevConsole
-          ? "dev"
-          : queueOpen
+        : queueOpen
           ? "queue"
           : selectedVideo
             ? "workbench"
@@ -784,7 +774,7 @@ export function Home() {
         // 桌面布局左侧工具栏里有助手按钮（⌘J 也能呼出），不再另外浮一个圆球；
         // 只有窄屏（没有工具栏）才需要这个入口。
         launcherVisible={
-          isPhoneDevice && !showSettings && !showRecycleBin && !showDevConsole && !showDashboard
+          isPhoneDevice && !showSettings && !showRecycleBin && !showDashboard
         }
       />
       {/* 新手引导：课程库空着、课程里还没视频、课程页有了视频、第一次进工作台，各出现一次。 */}

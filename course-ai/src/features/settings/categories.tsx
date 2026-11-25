@@ -10,8 +10,7 @@ export type SettingsCategory =
   | "llm"
   | "semantic"
   | "courseware"
-  | "about"
-  | "dev";
+  | "about";
 
 export const CATEGORY_META: Record<
   SettingsCategory,
@@ -27,10 +26,9 @@ export const CATEGORY_META: Record<
   semantic: { i18nKey: "settings.categories.semantic" },
   courseware: { i18nKey: "settings.categories.courseware" },
   about: { i18nKey: "settings.categories.about" },
-  dev: { i18nKey: "settings.categories.dev" },
 };
 
-/** 分类的展示顺序。开发者分类只在宿主提供控制台入口时出现。 */
+/** 分类的展示顺序。 */
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   "appearance",
   "study",
@@ -42,7 +40,6 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   "semantic",
   "courseware",
   "about",
-  "dev",
 ];
 
 export function isSettingsCategory(value: unknown): value is SettingsCategory {

@@ -971,47 +971,6 @@ describe("Home selected-video integration", () => {
     expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
   });
 
-  it("returns from the developer console to settings and keeps its bottom tab selected", async () => {
-    mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
-    vi.stubGlobal("navigator", { userAgent: "Android" });
-    await renderHome();
-
-    const nav = await screen.findByRole("navigation", { name: "主导航" });
-    fireEvent.click(within(nav).getByRole("button", { name: "设置" }));
-    fireEvent.click(await screen.findByRole("button", { name: "开发者" }));
-    fireEvent.click(await screen.findByRole("button", { name: "打开开发控制台" }));
-
-    expect(await screen.findByRole("heading", { name: "开发控制台" })).toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await waitFor(() => expect(mockBackButtonPress.onBackButtonPress).toHaveBeenCalled());
-    const handler = mockBackButtonPress.onBackButtonPress.mock.calls[
-      mockBackButtonPress.onBackButtonPress.mock.calls.length - 1
-    ]?.[0] as ((payload: { canGoBack: boolean }) => void) | undefined;
-    act(() => handler?.({ canGoBack: false }));
-
-    // 返回逐级退：控制台 → 它的入口「开发者」分类 → 设置分类列表。
-    expect(await screen.findByRole("heading", { name: "开发者", level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "开发控制台" })).not.toBeInTheDocument();
-    expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    // 返回键有 250ms 去抖（系统会连发重复事件），第二次按下要隔开。
-    await act(() => new Promise((resolve) => setTimeout(resolve, 260)));
-    const calls = mockBackButtonPress.onBackButtonPress.mock.calls;
-    const latestHandler = calls[calls.length - 1]?.[0] as
-      | ((payload: { canGoBack: boolean }) => void)
-      | undefined;
-    act(() => latestHandler?.({ canGoBack: false }));
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(mockIpc.app.moveToBackground).not.toHaveBeenCalled();
-  });
-
   it("guards compact bottom-tab navigation while LLM settings is dirty", async () => {
     mockUseContainerWidth.useContainerWidth.mockReturnValue("compact");
 

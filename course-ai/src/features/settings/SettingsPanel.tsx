@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Terminal } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { ViewHeader } from "@/ui/view-header";
 import { Button } from "@/ui/button";
 import { Modal } from "@/ui/dialog";
@@ -24,7 +24,6 @@ import { StudySection } from "./sections/StudySection";
 type PendingSettingsExit =
   | { kind: "category"; category: SettingsCategory | null }
   | { kind: "close" }
-  | { kind: "dev-console" }
   | { kind: "external"; continuation: () => void };
 
 /**
@@ -41,14 +40,12 @@ export function SettingsPanel({
   category: controlledCategory,
   onCategoryChange,
   onClose,
-  onOpenDevConsole,
   onRegisterExitRequest,
   onRegisterBackRequest,
 }: {
   category?: SettingsCategory | null;
   onCategoryChange?: (category: SettingsCategory | null) => void;
   onClose: () => void;
-  onOpenDevConsole?: () => void;
   onRegisterExitRequest?: (
     request: ((continuation: () => void) => void) | null,
   ) => void;
@@ -74,9 +71,7 @@ export function SettingsPanel({
   const settingsRef = useRef<HTMLDivElement>(null);
   const compact = useContainerWidth(settingsRef) !== "wide";
 
-  const categories = SETTINGS_CATEGORIES.filter(
-    (key) => key !== "dev" || onOpenDevConsole,
-  );
+  const categories = SETTINGS_CATEGORIES;
   const activeCategory =
     routeCategory && categories.includes(routeCategory) ? routeCategory : categories[0];
   // 窄屏下「进入了某分类」才显示详情；宽屏始终显示当前分类。
@@ -86,10 +81,6 @@ export function SettingsPanel({
   function applySettingsExit(intent: PendingSettingsExit) {
     if (intent.kind === "category") {
       setRouteCategory(intent.category);
-      return;
-    }
-    if (intent.kind === "dev-console") {
-      onOpenDevConsole?.();
       return;
     }
     if (intent.kind === "external") {
@@ -268,20 +259,6 @@ export function SettingsPanel({
               {activeCategory === "semantic" && <SemanticSection />}
               {activeCategory === "courseware" && <CoursewareSection form={form} />}
               {activeCategory === "about" && <AboutSection />}
-              {activeCategory === "dev" && (
-                <Group header={t("settings.dev.title")} hint={t("settings.dev.footnote")}>
-                  <StackRow>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => requestSettingsExit({ kind: "dev-console" })}
-                    >
-                      <Terminal className="h-3.5 w-3.5" />
-                      {t("settings.dev.openConsole")}
-                    </Button>
-                  </StackRow>
-                </Group>
-              )}
             </div>
           </div>
         )}

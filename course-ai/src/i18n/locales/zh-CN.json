@@ -867,7 +867,6 @@
       "llm": "大模型",
       "semantic": "语义检索",
       "courseware": "课件 / OCR",
-      "dev": "开发者",
       "about": "关于"
     },
     "theme": {
@@ -1201,11 +1200,6 @@
       "sensitivityLabel": "课件提取灵敏度",
       "low": "低",
       "high": "高"
-    },
-    "dev": {
-      "title": "开发者",
-      "footnote": "查看 AI 文稿纠错的请求与回复",
-      "openConsole": "打开开发控制台"
     },
     "about": {
       "title": "版本",
@@ -2016,36 +2010,6 @@
     "localOllamaFound": "检测到本机正在运行的 Ollama，已装 {{count}} 个模型，可以直接用，不用重新下载、也不用填 Key。",
     "localOllamaNoModels": "检测到本机的 Ollama，但还没有下载模型。在终端运行 ollama pull qwen2.5:7b 之类的命令拉一个模型后，再回来添加。",
     "localOllamaAdd": "添加本机 Ollama"
-  },
-  "devConsole": {
-    "back": "返回",
-    "title": "开发控制台",
-    "subtitle": "AI 文稿纠错的请求与回复（每 3 秒刷新，仅保留最近 200 条，重启清空）",
-    "actions": "操作",
-    "total": " · 共 ",
-    "separator": " 条 · ",
-    "applied": "已应用 {{count}}",
-    "failed": "失败 {{count}}",
-    "copied": "已复制",
-    "copyAll": "复制全部",
-    "refresh": "刷新",
-    "clear": "清空",
-    "tokenUsage": "token 用量",
-    "tokenNote": "按档累计，进程内统计、重启清空。只覆盖非流式调用（生成、纠错、提要、AI 助手），流式的问答不在内。",
-    "noUsage": "还没有用量记录。跑一次 AI 生成或字幕纠错后，这里会按档显示 token 消耗。端点不返回用量时也会是空的。",
-    "colTier": "档",
-    "colModel": "模型",
-    "colCount": "次数",
-    "colInput": "输入",
-    "colCacheHit": "命中缓存",
-    "colOutput": "输出",
-    "colThinking": "其中思考",
-    "correctionTitle": "纠错请求与回复",
-    "noCorrections": "还没有 AI 纠错记录。处理一个视频后（且已配置大模型），这里会显示每批发送的原文和模型返回的纠正结果。",
-    "expand": "展开",
-    "collapse": "收起",
-    "request": "发送给模型（原始分段）",
-    "response": "模型回复（纠正结果）"
   },
   "home": {
     "queueTitle": "处理队列页面",

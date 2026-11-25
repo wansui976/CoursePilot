@@ -47,7 +47,7 @@ export interface Shell {
   clearCourseSelection: () => void;
   openVideo: (videoId: string) => void;
   openQueuedVideo: (video: Video) => void;
-  openMainView: (view: "settings" | "recycle" | "dev" | "dashboard") => void;
+  openMainView: (view: "settings" | "recycle" | "dashboard") => void;
   /** 打开某个视频并跳到某一刻（当前视频直接 seek）。 */
   openVideoAt: (
     videoId: string,

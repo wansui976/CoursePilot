@@ -869,7 +869,6 @@
       "llm": "LLM",
       "semantic": "Semantic search",
       "courseware": "Slides / OCR",
-      "dev": "Developer",
       "about": "About"
     },
     "theme": {
@@ -1203,11 +1202,6 @@
       "sensitivityLabel": "Slide extraction sensitivity",
       "low": "Low",
       "high": "High"
-    },
-    "dev": {
-      "title": "Developer",
-      "footnote": "View AI transcript correction requests and responses",
-      "openConsole": "Open developer console"
     },
     "about": {
       "title": "Version",
@@ -2028,36 +2022,6 @@
     "localOllamaFound_other": "Ollama is running on this computer with {{count}} models installed. Use them directly — no re-download, no API key.",
     "localOllamaNoModels": "Ollama is running on this computer but has no models yet. Run something like `ollama pull qwen2.5:7b` in a terminal, then come back to add it.",
     "localOllamaAdd": "Add local Ollama"
-  },
-  "devConsole": {
-    "back": "Back",
-    "title": "Developer Console",
-    "subtitle": "AI transcript correction requests & responses (refreshes every 3s, keeps last 200, cleared on restart)",
-    "actions": "Actions",
-    "total": " · Total ",
-    "separator": " entries · ",
-    "applied": "Applied {{count}}",
-    "failed": "Failed {{count}}",
-    "copied": "Copied",
-    "copyAll": "Copy all",
-    "refresh": "Refresh",
-    "clear": "Clear",
-    "tokenUsage": "Token Usage",
-    "tokenNote": "Cumulative per tier, in-process stats cleared on restart. Covers non-streaming calls (generation, correction, digest, assistant) only.",
-    "noUsage": "No usage records yet. Run AI generation or subtitle correction, and token consumption will appear here by tier. Empty if the endpoint doesn't return usage.",
-    "colTier": "Tier",
-    "colModel": "Model",
-    "colCount": "Calls",
-    "colInput": "Input",
-    "colCacheHit": "Cache hit",
-    "colOutput": "Output",
-    "colThinking": "Thinking",
-    "correctionTitle": "Correction Requests & Responses",
-    "noCorrections": "No AI correction records yet. After processing a video (with an LLM configured), each batch of original text and model corrections will appear here.",
-    "expand": "Expand",
-    "collapse": "Collapse",
-    "request": "Sent to model (original segments)",
-    "response": "Model response (corrected result)"
   },
   "home": {
     "queueTitle": "Processing queue",

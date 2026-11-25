@@ -17,9 +17,6 @@ const ProcessingQueueView = lazy(() =>
 const RecycleBin = lazy(() =>
   import("@/features/library/RecycleBin").then((m) => ({ default: m.RecycleBin })),
 );
-const DevConsole = lazy(() =>
-  import("@/features/settings/DevConsole").then((m) => ({ default: m.DevConsole })),
-);
 const SettingsPanel = lazy(() =>
   import("@/features/settings/SettingsPanel").then((m) => ({ default: m.SettingsPanel })),
 );
@@ -158,7 +155,6 @@ export function SettingsRouteView() {
         category={isSettingsCategory(settingsCategory) ? settingsCategory : null}
         onCategoryChange={(category) => go({ settingsCategory: category })}
         onClose={shell.closeToLibrary}
-        onOpenDevConsole={() => shell.openMainView("dev")}
         onRegisterExitRequest={shell.registerSettingsExitRequest}
         onRegisterBackRequest={shell.registerSettingsBackRequest}
       />
@@ -171,15 +167,6 @@ export function RecycleRouteView() {
   return (
     <Lazy>
       <RecycleBin onClose={shell.closeToLibrary} />
-    </Lazy>
-  );
-}
-
-export function DevRouteView() {
-  const { go } = useHomeRoute();
-  return (
-    <Lazy>
-      <DevConsole onClose={() => go({ view: "settings", settingsCategory: "dev" })} />
     </Lazy>
   );
 }

@@ -3,7 +3,6 @@ import type { MainView } from "@/app/homeRoute";
 import {
   ConceptsRouteView,
   DashboardRouteView,
-  DevRouteView,
   LibraryRouteView,
   QueueRouteView,
   RecycleRouteView,
@@ -25,5 +24,4 @@ export const MAIN_VIEW_COMPONENTS: Record<MainView, FunctionComponent> = {
   concepts: ConceptsRouteView,
   settings: SettingsRouteView,
   recycle: RecycleRouteView,
-  dev: DevRouteView,
 };
