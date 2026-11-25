@@ -11,6 +11,7 @@ import { useAutoClassifyCovers } from "@/lib/useCourseCover";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
 import { useDownloadsSync } from "@/features/library/useDownloads";
 import { useRecorrection } from "@/features/library/useRecorrection";
+import { ReturnToVideoBar } from "@/features/shell/ReturnToVideoBar";
 import { BottomTabBar, type CompactTab } from "@/features/shell/BottomTabBar";
 import {
   coarsePointer,
@@ -400,7 +401,7 @@ export function Home() {
       return true;
     }
     if (queueOpen) {
-      go({ view: "library", videoId: null });
+      go({ view: "library" });
       return true;
     }
     if (selectedVideoId) {
@@ -520,11 +521,18 @@ export function Home() {
 
   function toggleQueue() {
     // 用当前渲染的 queueOpen 求反，保留「再点收起」的切换语义。
+    // 和设置一样保留当前视频：从视频里看一眼队列，收起来应当回到那个视频，而不是被清掉。
     const willOpen = !queueOpen;
     runAfterWorkspaceTransient(() => {
       if (willOpen) setKnowledgeReturn(null);
-      go({ view: willOpen ? "queue" : "library", videoId: null });
+      go({ view: willOpen ? "queue" : "library" });
     });
+  }
+
+  // 整页（设置、回收站、学习、控制台、队列）叠在视频会话上时，回到那个视频。
+  // 设置里有没存的改动时照样先问（runAfterSettingsExit）。
+  function returnToVideo() {
+    runAfterWorkspaceTransient(() => go({ view: "library" }));
   }
 
   // 窄屏底部 Tab 切换：课程回到当前课程层级；学习/队列/设置打开对应整页。
@@ -696,6 +704,13 @@ export function Home() {
             />
       )}
       <main className="ca-main">
+        {selectedVideo && !isWorkbenchView && !showConcepts && (
+          <ReturnToVideoBar
+            title={selectedVideo.title}
+            courseName={selectedCourse?.name}
+            onReturn={returnToVideo}
+          />
+        )}
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内
             切换视频时 key 不变,播放器与面板状态保留、不被打断。 */}
         <div key={mainViewKey} className="ca-view">

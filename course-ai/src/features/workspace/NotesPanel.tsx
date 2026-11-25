@@ -76,6 +76,9 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   // 是否已经真正按历史位置恢复过（而不是只在骨架上试了一下）。
   // StrictMode（dev）挂载后会立刻跑一次 cleanup，那时还没恢复，不能把 0 写回本地。
   const restoreReadyRef = useRef<string | null>(null);
+  // 用户在哪篇笔记里放过光标（点进正文、打过字）。「记一笔」据此决定插在光标处还是接在末尾：
+  // 刚打开时 ProseMirror 的选区默认停在文档开头，那不是用户选的位置。按视频 id 记，换视频即失效。
+  const cursorPlacedRef = useRef<string | null>(null);
   const [writeState, setWriteState] = useState(() =>
     notesCoordinator.getState(videoId),
   );
@@ -239,6 +242,9 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         return true;
       },
     },
+    onFocus: () => {
+      cursorPlacedRef.current = activeVideoIdRef.current;
+    },
     onUpdate: ({ editor }) => {
       setHasLocalEdits(true);
       const length = docTextLength(editor);
@@ -332,13 +338,15 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     if (rootRef.current) return installTimestampClick(rootRef.current);
   }, []);
 
-  // 「记一笔」：笔记装载完成后，在末尾插入当前时间戳并把光标停在后面接着写。
+  // 「记一笔」：笔记装载完成后插入当前时间戳。用户在这篇笔记里放过光标就插在光标处，
+  // 否则接在末尾（见 insertNoteStamp）；插完把落点滚进视野——以前固定滚到底，
+  // 改成插在光标处后，光标在中间时反而把刚插的时间戳滚出了屏幕。
   const captureRequest = useNoteCapture((s) => s.request);
   useEffect(() => {
     if (!captureRequest || captureRequest.videoId !== videoId) return;
     if (!editor || editor.isDestroyed || notesQuery.isPending) return;
-    insertNoteStamp(editor, captureRequest.ms);
-    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
+    insertNoteStamp(editor, captureRequest.ms, cursorPlacedRef.current === videoId);
+    cursorPlacedRef.current = videoId;
     useNoteCapture.getState().done(captureRequest.nonce);
   }, [captureRequest, editor, notesQuery.isPending, videoId]);
 

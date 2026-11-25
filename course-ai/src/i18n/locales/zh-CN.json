@@ -3,6 +3,8 @@
     "title": "CoursePilot · 学习工作台"
   },
   "nav": {
+    "returnToVideo": "回到视频",
+    "returnToVideoLabel": "回到视频《{{title}}》",
     "courseLibrary": "课程库",
     "myCourses": "我的课程",
     "dashboard": "学习面板",

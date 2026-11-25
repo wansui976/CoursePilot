@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
+import { formatMs as formatClockMs } from "@/lib/time";
 import { Button } from "@/ui/button";
 import { humanizeError } from "@/lib/errors";
 import { bilibiliLoginStateOnce, probeImport } from "@/lib/importProbeCache";
@@ -432,10 +433,8 @@ const META: Record<
 };
 
 function formatMs(ms: number | null | undefined) {
-  const total = Math.max(0, Math.floor((ms ?? 0) / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  // 和进度条同一套写法：超过一小时写 hh:mm:ss。
+  return formatClockMs(ms ?? 0);
 }
 
 /**

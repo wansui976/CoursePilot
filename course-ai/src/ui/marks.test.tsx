@@ -10,7 +10,7 @@ describe("formatClock", () => {
   });
 
   it("adds hours for long lectures and never goes negative", () => {
-    expect(formatClock(3_862_000)).toBe("1:04:22");
+    expect(formatClock(3_862_000)).toBe("01:04:22"); // 和进度条一致
     expect(formatClock(-5)).toBe("00:00");
   });
 });

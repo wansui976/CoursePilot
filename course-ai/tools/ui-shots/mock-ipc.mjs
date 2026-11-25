@@ -341,6 +341,10 @@ export function installMockIpc({ theme, safeArea }) {
     ],
     // 助手：回放一条完整回答。__shot-guided 时回一段引导模式的回答（带结构块）。
     cmd_assistant_ask: ({ requestId, query }) => {
+      // __shot-no-llm：没配大模型，提问直接被命令拒掉（失败的一轮给「去设置」）。
+      if (localStorage.getItem("__shot-no-llm") === "1") {
+        throw new Error("尚未配置可用的大模型（设置 → 大模型）");
+      }
       const guided = localStorage.getItem("__shot-guided") === "1";
       const wantsCard = query.includes("复习卡");
       const answer = guided

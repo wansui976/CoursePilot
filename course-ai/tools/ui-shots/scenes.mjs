@@ -717,6 +717,34 @@ export const scenes = [
     },
   },
   {
+    // 从视频工作台进设置，再回到视频：设置页上要有明确的回去的路。
+    name: "settings-from-video",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      // 桌面从左侧工具栏进设置；窄屏工作台没有入口，走「去设置」这类深链（这里直接改路由）。
+      const settings = page.getByRole("button", { name: "设置", exact: true });
+      if (await settings.first().isVisible().catch(() => false)) {
+        await settings.first().click();
+      } else {
+        // 窄屏工作台没有设置入口，常见的路是从报错里的「去设置」：没配模型时问助手一句。
+        await page.evaluate(() => localStorage.setItem("__shot-no-llm", "1"));
+        await page.getByRole("button", { name: "打开 AI 助手" }).click();
+        await page.getByLabel("对 AI 助手说").fill("这节讲了什么");
+        await page.getByLabel("发送").click();
+        const fix = page.getByRole("alert").getByRole("button", { name: /配置大模型/ });
+        await fix.waitFor({ timeout: 4000 });
+        await shot("failed");
+        await fix.click();
+      }
+      const back = page.getByRole("button", { name: /^回到视频/ });
+      await back.waitFor({ timeout: 4000 });
+      await shot();
+      await back.click();
+      await page.locator("[data-video-player]").first().waitFor({ timeout: 5000 });
+    },
+  },
+  {
     name: "concepts",
     devices: ALL,
     run: async ({ page, shot }) => {

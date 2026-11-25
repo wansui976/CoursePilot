@@ -1,20 +1,16 @@
 import type { HTMLAttributes, ReactNode } from "react";
 import type { CourseColor } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { formatMs } from "@/lib/time";
 
 /**
  * 「板书与荧光笔」里的小记号：时间戳芯片、荧光笔高亮、键帽、标签。
  * 样式在 styles/design.css。黄色只表示「课上的某个时刻」，别拿时间戳芯片当普通徽章用。
  */
 
-/** 毫秒 → m:ss / h:mm:ss（等宽数字）。 */
+/** 毫秒 → mm:ss / hh:mm:ss（等宽数字）。和播放器进度条同一套写法（lib/time 的 formatMs）。 */
 export function formatClock(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${String(m).padStart(2, "0")}:${ss}`;
+  return formatMs(ms);
 }
 
 const PLAY_GLYPH = (

@@ -607,3 +607,41 @@ button.ca-nav-disclosure:hover {
   background: var(--accent);
   box-shadow: 0 0 0 2px var(--bg-sidebar);
 }
+
+/* 整页叠在视频会话上时页顶的「回到视频」：一条发丝线隔开的窄条，不抢页面自己的标题。 */
+.ca-return-video {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--surface-sidebar);
+}
+.ca-return-video-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border-radius: var(--r-sm, 6px);
+  font-family: var(--font-app);
+  font-size: 13px;
+  color: var(--accent-text);
+  transition: background-color 0.12s var(--ease);
+}
+.ca-return-video-btn:hover {
+  background: var(--surface-card-hover);
+}
+.ca-return-video-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* any-pointer：iPad 接着触控板时 pointer 是 fine，手指照样要点得到。 */
+@media (any-pointer: coarse) {
+  .ca-return-video { min-height: 44px; }
+  .ca-return-video-btn { min-height: 40px; }
+}

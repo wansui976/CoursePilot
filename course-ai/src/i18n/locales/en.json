@@ -3,6 +3,8 @@
     "title": "CoursePilot · Learning workspace"
   },
   "nav": {
+    "returnToVideo": "Back to video",
+    "returnToVideoLabel": "Back to video \"{{title}}\"",
     "courseLibrary": "Courses",
     "myCourses": "My Courses",
     "dashboard": "Dashboard",

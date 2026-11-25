@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { formatMs } from "@/lib/time";
 import type { AssistantSession } from "@/lib/assistantSession";
 import {
   createAssistantConversation,
@@ -40,10 +41,9 @@ export function normalizedStopReason(reply: AssistantReply): AgentStopReason {
   return "completed";
 }
 
+/** 播放位置的写法和进度条一致：超过一小时写 hh:mm:ss，不写「92:50」。 */
 export function formatPosition(ms: number) {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  return formatMs(ms);
 }
 
 export function isNearScrollEnd(box: HTMLElement) {

@@ -227,11 +227,12 @@ export function Row({
     <div
       className={
         inline
-          ? "flex min-h-[44px] items-center justify-between gap-4 px-4 py-3"
+          ? // 窄屏（320 宽）放不下时控件换到下一行，而不是把标签挤成一字一行。
+            "flex min-h-[44px] flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3"
           : "flex min-h-[44px] flex-col gap-1.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
       }
     >
-      <div className="min-w-0">
+      <div className={inline ? "min-w-[7em] flex-1" : "min-w-0"}>
         <RowLabel label={label} hint={hint} status={status} tag={tag} htmlFor={htmlFor} />
       </div>
       <div className={inline ? "flex-none" : "w-full sm:w-auto sm:flex-none"}>{children}</div>

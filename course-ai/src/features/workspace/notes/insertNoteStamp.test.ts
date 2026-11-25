@@ -85,4 +85,39 @@ describe("记一笔：insertNoteStamp", () => {
     target.commands.undo();
     expect(target.getJSON()).toEqual({ type: "doc", content: [paragraph("已有内容")] });
   });
+
+  it("有选区时插在选区后面，不把选中的文字换成时间戳", () => {
+    const target = make({ type: "doc", content: [paragraph("梯度下降")] });
+    target.commands.setTextSelection({ from: 1, to: 3 }); // 选中「梯度」
+    insertNoteStamp(target, 4_000);
+    const parts = target.getJSON().content?.[0].content ?? [];
+    expect(parts[0]).toMatchObject({ type: "text", text: "梯度" });
+    expect(parts[1]).toMatchObject({ type: "timestamp", attrs: { ms: 4_000 } });
+    expect((parts[2] as { text?: string }).text).toBe(" 下降");
+  });
+
+  it("还没在这篇笔记里放过光标：接在末尾，不插到第一个标题前面", () => {
+    const target = make({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "一、引言" }] },
+        paragraph("已有内容"),
+      ],
+    });
+    // 刚装载时选区停在文档开头——那不是用户选的位置。
+    insertNoteStamp(target, 5_000, false);
+    const doc = target.getJSON();
+    expect(doc.content?.[0].type).toBe("heading");
+    expect(doc.content?.[0].content).toEqual([{ type: "text", text: "一、引言" }]);
+    expect(doc.content).toHaveLength(3);
+    expect(doc.content?.[2].content?.[0]).toMatchObject({ type: "timestamp", attrs: { ms: 5_000 } });
+  });
+
+  it("没放过光标且末尾是空段：写进那个空段，不再多一段", () => {
+    const target = make({ type: "doc", content: [paragraph("已有内容"), paragraph()] });
+    insertNoteStamp(target, 6_000, false);
+    const doc = target.getJSON();
+    expect(doc.content).toHaveLength(2);
+    expect(doc.content?.[1].content?.[0]).toMatchObject({ type: "timestamp", attrs: { ms: 6_000 } });
+  });
 });

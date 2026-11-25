@@ -13,6 +13,7 @@ import {
   PenLine,
   NotebookPen,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/ui/button";
@@ -21,6 +22,8 @@ import { AssistantToolChips } from "./AssistantToolChips";
 import { getAssistantInteractionState } from "@/lib/assistantSession";
 import type { AssistantAction, AssistantContext } from "@/lib/types";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { errorFixFor } from "@/lib/errors";
+import { useOptionalShell } from "@/app/shell";
 import { queries } from "@/lib/queries";
 import { displayTitle } from "@/lib/videoTitle";
 import { loadTurnImages } from "@/lib/assistantImageStore";
@@ -280,6 +283,8 @@ export function AssistantTurn({
   const followups = followupSplit?.followups ?? [];
   // 正文和结构块都没有：这一轮确实什么都没显示出来，得给一句提示和重试入口。
   const nothingVisible = !shownAnswer.trim() && !socratic?.block;
+  const shell = useOptionalShell();
+  const failedFix = turn.failed && shell ? errorFixFor(turn.failed) : null;
   // 正文里已经有同一时间点的可点时间戳时，下面不再重复挂「跳到」按钮。
   const renderedAnswer = turn.context?.video_id ? bracketBareTimestamps(shownAnswer) : shownAnswer;
   const inlineActions = useMemo(
@@ -488,13 +493,25 @@ export function AssistantTurn({
       {turn.failed && !turn.pending && (
         <div
           role="alert"
-          className="flex items-start gap-1.5 border-l-2 border-[var(--status-err)] pl-2 ca-t-2xs text-[var(--text-muted)]"
+          className="flex flex-wrap items-start gap-1.5 border-l-2 border-[var(--status-err)] pl-2 ca-t-2xs text-[var(--text-muted)]"
         >
           <span className="min-w-0 flex-1 break-words">
             <span className="font-medium text-[var(--status-err)]">{t("assistant.turnFailed")}</span>
             {" "}
             {turn.failed}
           </span>
+          {/* 没配模型、Key 失效这类，重试没用：和其它错误提示一样给「去设置」直达对应分类。 */}
+          {failedFix && shell && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => shell.openSettingsCategory(failedFix)}
+              className="ca-touch-44 -my-1 h-6 flex-none px-1.5 ca-t-2xs"
+            >
+              <Settings className="mr-1 h-3 w-3" aria-hidden="true" />
+              {t(failedFix === "llm" ? "errors.fixLlm" : "errors.fixAsr")}
+            </Button>
+          )}
           {isLast && (
             <Button
               size="sm"
