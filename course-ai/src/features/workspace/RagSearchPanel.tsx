@@ -12,7 +12,7 @@ import { renderMarkdown } from "@/lib/renderMarkdown";
 import { isMobile } from "@/lib/platform";
 import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
-import type { AskEvent, ChatMessage, Citation, RagAnswer } from "@/lib/types";
+import type { AskEvent, ChatMessage, Citation, RagAnswer, TranscriptSearch } from "@/lib/types";
 import { MathText } from "@/ui/MathText";
 
 /**
@@ -113,7 +113,14 @@ function useThrottledValue<T>(value: T, ms: number): T {
 type RagMode = "ask" | "search";
 type SearchHistoryEntry =
   | { id: string; mode: "ask"; query: string; answer: string }
-  | { id: string; mode: "search"; query: string; citations: Citation[] };
+  | {
+      id: string;
+      mode: "search";
+      query: string;
+      citations: Citation[];
+      /** 没找到整个查询，结果是部分相符 / 意思相近的（旧记录没有这一项）。 */
+      related?: boolean;
+    };
 type AskTurn = {
   id: string;
   query: string;
@@ -790,12 +797,12 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
     else requestOpenAt(c.video_id, c.start_ms);
   };
 
-  const search = useMutation<Citation[], unknown, string>({
+  const search = useMutation<TranscriptSearch, unknown, string>({
     mutationFn: (q: string) => ipc.ai.searchTranscript(videoId, scope, q),
-    onSuccess: (citations, q) => {
+    onSuccess: ({ citations, related }, q) => {
       setHistory((prev) => {
         const next: SearchHistoryEntry[] = [
-          { id: crypto.randomUUID(), mode: "search", query: q, citations },
+          { id: crypto.randomUUID(), mode: "search", query: q, citations, related },
           ...prev,
         ];
         writeSearchHistory(videoId, "search", next);
@@ -878,6 +885,12 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
               <p className="text-sm text-[var(--text-muted)]">{t("ragSearch.noSearchResults")}</p>
             ) : (
               <div className="space-y-1">
+                {entry.related && (
+                  // 字面上没找到：说清楚下面不是命中，免得把意思沾边的段落当成「搜到了」。
+                  <p className="px-1.5 pb-1 text-xs text-[var(--text-muted)]">
+                    {t("ragSearch.relatedNote", { query: entry.query })}
+                  </p>
+                )}
                 {entry.citations.map((c) => (
                   <button
                     key={`${entry.id}-${c.video_id ?? ""}-${c.start_ms}-${c.index}`}

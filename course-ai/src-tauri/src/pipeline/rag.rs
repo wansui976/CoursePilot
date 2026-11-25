@@ -1078,6 +1078,111 @@ fn retrieved_citations(retrieved: &Retrieved) -> Vec<Citation> {
 
 /// 重排引用编号。讲稿与课件是两条独立的召回路径，各自从 1 开始编号，
 /// 合起来会出现两条 index=1——前端拿 index 拼 key，重号就意味着列表项互相覆盖。
+/// 文稿搜索框的结果。
+#[derive(Debug, Clone, Serialize)]
+pub struct TranscriptSearch {
+    pub citations: Vec<Citation>,
+    /// 字面上一处都没找到「整个查询」，下面给的是部分相符 / 意思相近的内容——界面要说清楚，
+    /// 不能当成命中摆出来。
+    pub related: bool,
+}
+
+/// 意思相近的段落最多给几条、要多接近最像的那条（各个向量模型分数的尺度不一样，只能比相对值）。
+const RELATED_LIMIT: usize = 5;
+const RELATED_RELATIVE: f32 = 0.9;
+
+/// 文本里有没有整个查询（按空格分开的每个词都在）。
+fn contains_whole_query(text: &str, words: &[String]) -> bool {
+    let text = text.to_lowercase();
+    !words.is_empty() && words.iter().all(|word| text.contains(word.as_str()))
+}
+
+/// 搜索框：用户输入一个词，想找的是**写着这个词**的地方。
+///
+/// 以前和助手共用「关键词 + 语义」融合：查「消沉」，真正写着「消沉」的只有一句，后面却跟着
+/// 二十多段意思沾点边的长段落，看上去全是不相干的结果。现在：
+/// 1. 有写着整个查询的句子（字幕 / 课件文字）：只给这些，按视频顺序和时间排，像在文稿里查找；
+/// 2. 一处都没有：才给部分相符的（中文按二字组切开后只沾到一部分），标成「相关」；
+/// 3. 还没有：给意思最接近的几段（只留和最像那段差不多接近的），也标成「相关」。
+pub async fn transcript_search(
+    db: &Db,
+    videos: &[(String, String)],
+    query: &str,
+    limit: usize,
+) -> AppResult<TranscriptSearch> {
+    let words: Vec<String> = query
+        .split_whitespace()
+        .map(|word| word.to_lowercase())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let keyword = keyword_search_scope_scored(db, videos, query, limit.max(200)).await?;
+    let order: std::collections::HashMap<&str, usize> = videos
+        .iter()
+        .enumerate()
+        .map(|(index, (id, _))| (id.as_str(), index))
+        .collect();
+    let (mut exact, partial): (Vec<Citation>, Vec<Citation>) = keyword
+        .into_iter()
+        .map(|(_, citation)| citation)
+        .partition(|citation| contains_whole_query(&citation.text, &words));
+    if !exact.is_empty() {
+        exact.sort_by_key(|citation| {
+            (
+                citation
+                    .video_id
+                    .as_deref()
+                    .and_then(|id| order.get(id).copied())
+                    .unwrap_or(usize::MAX),
+                citation.start_ms,
+                citation.slide_page.is_some(),
+            )
+        });
+        exact.truncate(limit);
+        return Ok(TranscriptSearch {
+            citations: renumber(exact),
+            related: false,
+        });
+    }
+    if !partial.is_empty() {
+        return Ok(TranscriptSearch {
+            citations: renumber(partial.into_iter().take(limit).collect()),
+            related: true,
+        });
+    }
+    let ids: Vec<String> = videos.iter().map(|(id, _)| id.clone()).collect();
+    let hits = semantic::search_or_skip(db, &ids, query, RELATED_LIMIT * 2).await;
+    let best = hits.iter().map(|hit| hit.score).fold(f32::MIN, f32::max);
+    let titles: std::collections::HashMap<&str, &str> = videos
+        .iter()
+        .map(|(id, title)| (id.as_str(), title.as_str()))
+        .collect();
+    let citations: Vec<Citation> = hits
+        .into_iter()
+        .filter(|hit| hit.score >= best * RELATED_RELATIVE)
+        .take(RELATED_LIMIT)
+        .map(|hit| {
+            let mut text: String = hit.chunk.text.chars().take(SEMANTIC_SNIPPET_CHARS).collect();
+            if hit.chunk.text.chars().count() > SEMANTIC_SNIPPET_CHARS {
+                text.push('…');
+            }
+            Citation {
+                index: 0,
+                text,
+                start_ms: hit.chunk.start_ms,
+                end_ms: hit.chunk.end_ms,
+                video_title: titles.get(hit.video_id.as_str()).map(|title| title.to_string()),
+                video_id: Some(hit.video_id),
+                slide_image: None,
+                slide_page: None,
+            }
+        })
+        .collect();
+    Ok(TranscriptSearch {
+        related: !citations.is_empty(),
+        citations: renumber(citations),
+    })
+}
+
 fn renumber(mut citations: Vec<Citation>) -> Vec<Citation> {
     for (i, citation) in citations.iter_mut().enumerate() {
         citation.index = i + 1;
@@ -3052,6 +3157,69 @@ mod tests {
         assert!(mixed[0].text.contains("学习率"));
         assert!(mixed[1].text.contains("死记硬背"));
         assert_eq!(mixed.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2]);
+    }
+
+    /// 搜索框查一个词：只给写着这个词的句子，不再跟一串意思沾边的段落。
+    #[tokio::test]
+    async fn the_search_box_shows_only_sentences_with_the_word_and_labels_fallbacks() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        semantic::test_support::use_fake_cloud(&db).await;
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let path = dir.path().join("a.mp4");
+        std::fs::write(&path, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None)
+            .await
+            .unwrap();
+        let pad = "。".repeat(semantic::CHUNK_MIN_CHARS);
+        for (i, line) in [
+            "可不能就他的新篇章，再加一个反向的词消解民生火气",
+            "最后鸡汤的环节你可以消沉",
+            "以什么开篇谱写新华章",
+            "后面还会消沉一会儿",
+        ]
+        .iter()
+        .enumerate()
+        {
+            sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text) VALUES (?,?,?,?,?)")
+                .bind(&video.id)
+                .bind(i as i64)
+                .bind(i as i64 * 60_000)
+                .bind(i as i64 * 60_000 + 50_000)
+                .bind(format!("{line}{pad}"))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+        semantic::index_video_now(&db, &video.id).await.unwrap();
+        let videos = vec![(video.id.clone(), "第1讲".to_string())];
+
+        let found = transcript_search(&db, &videos, "消沉", 30).await.unwrap();
+        assert!(!found.related);
+        assert_eq!(
+            found.citations.iter().map(|c| c.start_ms).collect::<Vec<_>>(),
+            [60_000, 180_000],
+            "只有写着「消沉」的两句，按时间排"
+        );
+        assert_eq!(found.citations.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2]);
+
+        // 字面上一处都没有：给部分相符的，标成「相关」。
+        let partial = transcript_search(&db, &videos, "消沉民生", 30).await.unwrap();
+        assert!(partial.related);
+        assert!(!partial.citations.is_empty());
+
+        // 连部分相符都没有：给意思最近的几段，也标成「相关」，而且不会把整篇都列出来。
+        let meaning = transcript_search(&db, &videos, "泛化能力", 30).await.unwrap();
+        assert!(meaning.related || meaning.citations.is_empty());
+        assert!(meaning.citations.len() <= RELATED_LIMIT);
     }
 
     #[tokio::test]

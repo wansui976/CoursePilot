@@ -13,6 +13,7 @@ import type {
   Job,
   LlmProfile,
   ModelList,
+  TranscriptSearch,
   RagAnswer,
   Screenshot,
   Slide,
@@ -219,7 +220,7 @@ export const ai = {
     videoId: string,
     scope: "video" | "course" | "all",
     query: string,
-  ): Promise<Citation[]> =>
+  ): Promise<TranscriptSearch> =>
     invoke("cmd_search_transcript", { videoId, scope, query }),
 };
 

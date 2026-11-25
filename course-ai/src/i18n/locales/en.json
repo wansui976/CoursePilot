@@ -634,7 +634,8 @@
     "noSearchHistory": "No search history yet.",
     "noSearchResults": "No matching subtitles or slide text.",
     "slidePageAlt": "Slide page {{page}}",
-    "selectionContext": "[Selected transcript{{time}}]{{text}}\n\n{{query}}"
+    "selectionContext": "[Selected transcript{{time}}]{{text}}\n\n{{query}}",
+    "relatedNote": "No exact match for “{{query}}”. These are partial or related matches:"
   },
   "transcript": {
     "loading": "Loading transcript",

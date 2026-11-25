@@ -633,7 +633,7 @@ describe("RagSearchPanel", () => {
   it("search mode: labels the results region and offers retry on failure", async () => {
     mockIpc.ai.searchTranscript
       .mockRejectedValueOnce(new Error("索引未就绪"))
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce({ citations: [], related: false });
 
     render(
       <QueryClientProvider client={createTestQueryClient()}>
@@ -667,16 +667,19 @@ describe("RagSearchPanel", () => {
 
   it("search mode: a slide hit shows its page thumbnail and jumps to that page", async () => {
     mockIpc.slides.image.mockResolvedValue(new ArrayBuffer(1));
-    mockIpc.ai.searchTranscript.mockResolvedValue([
-      {
-        index: 1,
-        text: "贝叶斯定理",
-        start_ms: 30_000,
-        end_ms: 45_000,
-        slide_image: "/pages/p2.jpg",
-        slide_page: 2,
-      },
-    ]);
+    mockIpc.ai.searchTranscript.mockResolvedValue({
+      related: false,
+      citations: [
+        {
+          index: 1,
+          text: "贝叶斯定理",
+          start_ms: 30_000,
+          end_ms: 45_000,
+          slide_image: "/pages/p2.jpg",
+          slide_page: 2,
+        },
+      ],
+    });
     const requestSeek = vi.fn();
     usePlayer.setState({ requestSeek });
 
@@ -704,17 +707,38 @@ describe("RagSearchPanel", () => {
     expect(requestSeek).toHaveBeenCalledWith(30_000);
   });
 
+  it("search mode: 字面上没找到时说清楚下面是相关内容，不当成命中", async () => {
+    mockIpc.ai.searchTranscript.mockResolvedValue({
+      related: true,
+      citations: [{ index: 1, text: "意思相近的一段", start_ms: 1000, end_ms: 2000 }],
+    });
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <div data-theme="light">
+          <RagSearchPanel videoId="video-1" mode="search" />
+        </div>
+      </QueryClientProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("搜索文稿内容"), { target: { value: "消沉" } });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+    expect(await screen.findByText("没有找到「消沉」，下面是部分相符或意思相近的内容：")).toBeInTheDocument();
+    expect(screen.getByText(/意思相近的一段/)).toBeInTheDocument();
+  });
+
   it("search mode: course scope searches across videos and jumps to the source video", async () => {
-    mockIpc.ai.searchTranscript.mockResolvedValue([
-      {
-        index: 1,
-        text: "另一节课讲到的内容",
-        start_ms: 7000,
-        end_ms: 8000,
-        video_id: "video-2",
-        video_title: "第二讲",
-      },
-    ]);
+    mockIpc.ai.searchTranscript.mockResolvedValue({
+      related: false,
+      citations: [
+        {
+          index: 1,
+          text: "另一节课讲到的内容",
+          start_ms: 7000,
+          end_ms: 8000,
+          video_id: "video-2",
+          video_title: "第二讲",
+        },
+      ],
+    });
     const requestOpenAt = vi.fn();
     usePlayer.setState({ requestOpenAt });
 

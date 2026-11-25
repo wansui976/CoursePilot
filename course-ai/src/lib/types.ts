@@ -388,6 +388,12 @@ export interface Citation {
   slide_page?: number;
 }
 
+/** 文稿搜索框的结果。related：字面上没找到整个查询，给的是部分相符 / 意思相近的内容。 */
+export interface TranscriptSearch {
+  citations: Citation[];
+  related: boolean;
+}
+
 export interface RagAnswer {
   answer: string;
   citations: Citation[];
