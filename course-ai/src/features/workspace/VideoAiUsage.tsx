@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
-import { formatTokens, formatUsd } from "@/lib/aiUsageFormat";
+import { formatCost, formatTokens } from "@/lib/aiUsageFormat";
 
 /**
  * 概览页底下一行小字：这节课的 AI 处理（纠错、章节、摘要、笔记、出题…）一共用了多少 token、
@@ -20,7 +20,7 @@ export function VideoAiUsage({ videoId }: { videoId: string }) {
   return (
     <p className="ca-video-ai-usage shrink-0 border-t border-[var(--border-faint)] px-3 pt-1.5 text-[11px] tabular-nums text-[var(--text-faint)]">
       {priced
-        ? t("aiUsage.videoLine", { cost: formatUsd(data.costUsd), tokens })
+        ? t("aiUsage.videoLine", { cost: formatCost(data.costUsd, i18n.language), tokens })
         : t("aiUsage.videoLineUnpriced", { tokens })}
     </p>
   );

@@ -203,7 +203,7 @@ describe("LlmSettingsPanel", () => {
       ),
     );
     expect(await screen.findByText("上下文 128K")).toBeInTheDocument();
-    expect(screen.getByText(/输入 \$0.15 \/ 输出 \$0.60/)).toBeInTheDocument();
+    expect(screen.getByText(/输入 ¥1\.00 \/ 输出 ¥4\.00/)).toBeInTheDocument();
     expect(screen.getByText("工具")).toBeInTheDocument();
     expect(screen.getByText("视觉")).toBeInTheDocument();
     expect(screen.getByText("元数据来自内置目录")).toBeInTheDocument();

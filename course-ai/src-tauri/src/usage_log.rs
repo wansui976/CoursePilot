@@ -263,6 +263,9 @@ pub async fn cmd_clear_llm_usage() -> crate::error::AppResult<()> {
 
 /// 每月预算（USD），设置项；空或 0 = 不设。
 pub const BUDGET_SETTING: &str = "ai_monthly_budget_usd";
+/// 参考汇率：1 美元合多少人民币（2026-11-24 市场价约 6.66）。花费和预算都按美元存，中文的说明里
+/// 折成人民币。和前端 `src/lib/aiUsageFormat.ts` 的 `USD_TO_CNY` 一起改。
+pub const USD_TO_CNY: f64 = 6.66;
 
 #[derive(Debug, Clone, Default, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -331,9 +334,12 @@ pub async fn budget_usd(db: &Db) -> Option<f64> {
 pub async fn over_budget_message(db: &Db) -> Option<String> {
     let budget = budget_usd(db).await?;
     let spent = month_cost_usd(db).await.ok()?;
+    // 说明是中文的，金额和设置里一样折成人民币。
     (spent >= budget).then(|| {
         format!(
-            "已跳过：本月 AI 花费约 ${spent:.2}，已到预算 ${budget:.2}。可在 设置 → 大模型 调高预算，或在各面板里手动生成。"
+            "已跳过：本月 AI 花费约 ¥{:.2}，已到预算 ¥{:.2}。可在 设置 → 大模型 调高预算，或在各面板里手动生成。",
+            spent * USD_TO_CNY,
+            budget * USD_TO_CNY
         )
     })
 }
@@ -834,7 +840,7 @@ mod tests {
         crate::commands::settings::set_setting(&db, BUDGET_SETTING, "0.5")
             .await
             .unwrap();
-        assert!(over_budget_message(&db).await.unwrap().contains("$0.50"));
+        assert!(over_budget_message(&db).await.unwrap().contains("¥3.33"));
 
         prune(&db).await.unwrap();
         assert_eq!(

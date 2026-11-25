@@ -45,7 +45,7 @@ describe("AiUsageSection", () => {
 
   it("shows this month against the budget, broken down by task, course and model", async () => {
     render(<AiUsageSection />);
-    expect(await screen.findByText("$0.42 / 预算 $5.00")).toBeInTheDocument();
+    expect(await screen.findByText("¥2.80 / 预算 ¥33.30")).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "本月花费" })).toHaveAttribute("aria-valuenow", "8");
     // 用途显示成中文名，不是内部的 label。
     expect(screen.getByText("笔记")).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe("AiUsageSection", () => {
 
   it("hides the DeepSeek balance row when no official DeepSeek profile is set up", async () => {
     render(<AiUsageSection />);
-    await screen.findByText("$0.42 / 预算 $5.00");
+    await screen.findByText("¥2.80 / 预算 ¥33.30");
     expect(mockIpc.aiUsage.deepseekBalance).toHaveBeenCalled();
     expect(screen.queryByText("DeepSeek 余额")).not.toBeInTheDocument();
   });
@@ -87,19 +87,35 @@ describe("AiUsageSection", () => {
     mockIpc.aiUsage.deepseekBalance.mockRejectedValue("查询 DeepSeek 余额失败（HTTP 401）");
     render(<AiUsageSection />);
     expect(await screen.findByText("查询 DeepSeek 余额失败（HTTP 401）")).toBeInTheDocument();
-    expect(screen.getByText("$0.42 / 预算 $5.00")).toBeInTheDocument();
+    expect(screen.getByText("¥2.80 / 预算 ¥33.30")).toBeInTheDocument();
   });
 
   it("saves the budget, and clearing it means no limit", async () => {
     render(<AiUsageSection />);
-    const input = await screen.findByLabelText("每月预算（美元）");
-    await waitFor(() => expect(input).toHaveValue(5));
-    fireEvent.change(input, { target: { value: "12.5" } });
+    // 中文界面按人民币填：存进去的还是美元（后端拿它和按美元记的花费比）。
+    const input = await screen.findByLabelText("每月预算（元）");
+    await waitFor(() => expect(input).toHaveValue(33.3));
+    fireEvent.change(input, { target: { value: "66.6" } });
     fireEvent.blur(input);
-    await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ai_monthly_budget_usd", "12.5"));
+    await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ai_monthly_budget_usd", "10"));
     fireEvent.change(input, { target: { value: "-3" } });
     fireEvent.blur(input);
     await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ai_monthly_budget_usd", ""));
+  });
+
+  it("英文界面用美元显示、按美元填预算", async () => {
+    await i18n.changeLanguage("en");
+    try {
+      render(<AiUsageSection />);
+      expect(await screen.findByText("$0.42 of $5.00 budget")).toBeInTheDocument();
+      const input = screen.getByLabelText("Monthly budget (USD)");
+      await waitFor(() => expect(input).toHaveValue(5));
+      fireEvent.change(input, { target: { value: "12.5" } });
+      fireEvent.blur(input);
+      await waitFor(() => expect(mockIpc.settings.set).toHaveBeenCalledWith("ai_monthly_budget_usd", "12.5"));
+    } finally {
+      await i18n.changeLanguage("zh-CN");
+    }
   });
 });
 
@@ -111,7 +127,7 @@ describe("VideoAiUsage", () => {
     await i18n.changeLanguage("zh-CN");
     mockIpc.aiUsage.video.mockResolvedValue(row("", null, 0.0123));
     wrap(<VideoAiUsage videoId="v1" />);
-    expect(await screen.findByText(/AI 处理：约 \$0\.01 · /)).toBeInTheDocument();
+    expect(await screen.findByText(/AI 处理：约 ¥0\.08 · /)).toBeInTheDocument();
   });
 
   it("stays hidden until something was recorded", async () => {

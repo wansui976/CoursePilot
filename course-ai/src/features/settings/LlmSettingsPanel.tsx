@@ -7,6 +7,7 @@ import { Select } from "@/ui/select";
 import { Switch } from "@/ui/switch";
 import { ipc } from "@/lib/ipc";
 import { LLM_PRESETS, presetFor } from "@/lib/llmPresets";
+import { formatPricePerMillion } from "@/lib/aiUsageFormat";
 import type { LlmProfile, ModelInfo, ModelList, ProviderKind } from "@/lib/types";
 
 function uid() {
@@ -114,13 +115,6 @@ function formatTokens(value?: number | null): string | null {
   return String(value);
 }
 
-function formatPrice(value?: number | null): string | null {
-  if (value == null) return null;
-  if (value === 0) return "$0";
-  const decimals = value >= 0.1 ? 2 : 3;
-  return `$${value.toFixed(decimals)}`;
-}
-
 function agoLabel(t: (key: string, options?: Record<string, unknown>) => string, at: number): string {
   const minutes = Math.floor((Date.now() - at) / 60_000);
   if (minutes < 1) return t("llmSettings.meta.justNow");
@@ -150,7 +144,7 @@ export function LlmSettingsPanel({
   onDirtyChange,
   onRegisterActions,
 }: LlmSettingsPanelProps = {}) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [profiles, setProfiles] = useState<LlmProfile[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [hasKey, setHasKey] = useState<Record<string, boolean>>({});
@@ -571,8 +565,8 @@ export function LlmSettingsPanel({
             {(info.input_price != null || info.output_price != null) && (
               <span>
                 {t("llmSettings.meta.price", {
-                  input: formatPrice(info.input_price) ?? "—",
-                  output: formatPrice(info.output_price) ?? "—",
+                  input: formatPricePerMillion(info.input_price, i18n.language) ?? "—",
+                  output: formatPricePerMillion(info.output_price, i18n.language) ?? "—",
                 })}
               </span>
             )}

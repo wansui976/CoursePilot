@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ipc, type AiUsageRow, type AiUsageSummary, type DeepSeekBalance } from "@/lib/ipc";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { FIELD, Group, Row, Select, StackRow } from "@/features/settings/primitives";
-import { formatTokens, formatUsd } from "@/lib/aiUsageFormat";
+import { currencyFor, formatCost, formatTokens, fromUsd, toUsd, USD_TO_CNY } from "@/lib/aiUsageFormat";
 
+// 预算按美元存（后端拿它和按美元记的花费比）；中文界面里按人民币填、显示。
 const BUDGET_KEY = "ai_monthly_budget_usd";
 
 const CURRENCY_SIGN: Record<string, string> = { CNY: "¥", USD: "$" };
-const money = (currency: string, amount: string) =>
+/** DeepSeek 余额：接口给的是什么币种就照写，不换算。 */
+const balanceMoney = (currency: string, amount: string) =>
   CURRENCY_SIGN[currency] ? `${CURRENCY_SIGN[currency]}${amount}` : `${amount} ${currency}`;
 
 /**
@@ -50,30 +52,47 @@ export function AiUsageSection() {
       alive = false;
     };
   }, []);
+  const currency = currencyFor(i18n.language);
+  const money = (usd: number) => formatCost(usd, i18n.language);
+  /** 存着的美元预算 → 输入框里的数（界面货币，最多两位小数）。 */
+  const budgetText = useCallback(
+    (usd: string) => (usd === "" ? "" : String(Number(fromUsd(Number(usd), currency).toFixed(2)))),
+    [currency],
+  );
   const [budget, setBudget] = useState("");
   const [savedBudget, setSavedBudget] = useState("");
+  const savedBudgetRef = useRef("");
   useEffect(() => {
     let alive = true;
     void ipc.settings
       .get(BUDGET_KEY)
       .then((value) => {
         if (!alive) return;
-        setBudget(value ?? "");
+        savedBudgetRef.current = value ?? "";
         setSavedBudget(value ?? "");
+        setBudget(budgetText(value ?? ""));
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
+    // 只在打开时读一次；换货币由下面那个 effect 管。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 切了界面语言（换了货币）：输入框按新货币重写。只跟着货币走，不跟着保存走——
+  // 保存后再改写会盖掉用户刚刚又敲进去的数。
+  useEffect(() => setBudget(budgetText(savedBudgetRef.current)), [budgetText]);
 
   async function saveBudget() {
     const trimmed = budget.trim();
     const parsed = Number(trimmed);
-    const next = trimmed === "" || !Number.isFinite(parsed) || parsed <= 0 ? "" : String(parsed);
-    setBudget(next);
-    if (next === savedBudget) return;
+    const valid = trimmed !== "" && Number.isFinite(parsed) && parsed > 0;
+    // 折回美元时去掉浮点尾巴（66.6 元 → 10，不是 9.999999999999998）。
+    const next = valid ? String(Number(toUsd(parsed, currency).toFixed(6))) : "";
+    if (!valid) setBudget("");
+    if (budgetText(next) === budgetText(savedBudget)) return;
     await ipc.settings.set(BUDGET_KEY, next);
+    savedBudgetRef.current = next;
     setSavedBudget(next);
     await load();
   }
@@ -104,7 +123,7 @@ export function AiUsageSection() {
                 )}
               </span>
               <span className="w-20 flex-none text-right tabular-nums text-[var(--text-strong)]">
-                {formatUsd(row.costUsd)}
+                {money(row.costUsd)}
               </span>
             </li>
           ))}
@@ -115,7 +134,7 @@ export function AiUsageSection() {
   const budgetValue = data?.budgetUsd ?? null;
   const ratio = budgetValue ? Math.min(1, (data?.monthCostUsd ?? 0) / budgetValue) : 0;
   return (
-    <Group header={t("aiUsage.title")} hint={t("aiUsage.footnote")}>
+    <Group header={t("aiUsage.title")} hint={t("aiUsage.footnote", { rate: USD_TO_CNY })}>
       {error != null && (
         <div className="px-4 py-3">
           <ErrorNote error={error} onRetry={() => void refetch()} />
@@ -126,10 +145,10 @@ export function AiUsageSection() {
           <span className="text-sm font-semibold tabular-nums text-[var(--text-strong)]">
             {budgetValue
               ? t("aiUsage.monthOf", {
-                  spent: formatUsd(data?.monthCostUsd ?? 0),
-                  budget: formatUsd(budgetValue),
+                  spent: money(data?.monthCostUsd ?? 0),
+                  budget: money(budgetValue),
                 })
-              : formatUsd(data?.monthCostUsd ?? 0)}
+              : money(data?.monthCostUsd ?? 0)}
           </span>
           {budgetValue != null && (
             <div
@@ -161,7 +180,7 @@ export function AiUsageSection() {
             ) : (
               balance?.balances
                 .filter((info) => Number(info.granted) > 0)
-                .map((info) => t("aiUsage.deepseekGranted", { amount: money(info.currency, info.granted) }))
+                .map((info) => t("aiUsage.deepseekGranted", { amount: balanceMoney(info.currency, info.granted) }))
                 .join(" · ") || undefined
             )
           }
@@ -169,7 +188,7 @@ export function AiUsageSection() {
           {balance && (
             <span className="text-sm font-semibold tabular-nums text-[var(--text-strong)]">
               {balance.balances.length > 0
-                ? balance.balances.map((info) => money(info.currency, info.total)).join(" · ")
+                ? balance.balances.map((info) => balanceMoney(info.currency, info.total)).join(" · ")
                 : "—"}
             </span>
           )}
