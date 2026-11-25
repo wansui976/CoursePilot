@@ -109,6 +109,16 @@ pub async fn cmd_remote_sync_save(
 ) -> AppResult<()> {
     let config = draft_config(&state, url, folder, user, password.clone()).await?;
     let db = &state.db;
+    // 换了网盘：按网盘算的同步进度清掉，下一轮把本机已有的数据全部推到新网盘。
+    if let Some(previous) = remote::saved_config(db).await? {
+        let same = |a: &str, b: &str| a.trim().trim_end_matches('/') == b.trim().trim_end_matches('/');
+        if !(same(&previous.url, &config.url)
+            && same(&previous.folder, &config.folder)
+            && previous.user.trim() == config.user.trim())
+        {
+            remote::forget_server_progress(db).await?;
+        }
+    }
     set_setting(db, remote::SETTING_URL, &config.url).await?;
     set_setting(db, remote::SETTING_FOLDER, &config.folder).await?;
     set_setting(db, remote::SETTING_USER, &config.user).await?;

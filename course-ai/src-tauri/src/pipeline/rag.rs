@@ -1076,8 +1076,7 @@ fn retrieved_citations(retrieved: &Retrieved) -> Vec<Citation> {
     renumber(windows.chain(slides).collect())
 }
 
-/// 重排引用编号。讲稿与课件是两条独立的召回路径，各自从 1 开始编号，
-/// 合起来会出现两条 index=1——前端拿 index 拼 key，重号就意味着列表项互相覆盖。
+
 /// 文稿搜索框的结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscriptSearch {
@@ -1085,68 +1084,147 @@ pub struct TranscriptSearch {
     /// 字面上一处都没找到「整个查询」，下面给的是部分相符 / 意思相近的内容——界面要说清楚，
     /// 不能当成命中摆出来。
     pub related: bool,
+    /// 写着这个词的地方比给出来的多（只列了前 `limit` 处）。
+    pub truncated: bool,
 }
 
-/// 意思相近的段落最多给几条、要多接近最像的那条（各个向量模型分数的尺度不一样，只能比相对值）。
+/// 部分相符 / 意思相近的内容最多给几条；意思相近的还要和最像的那条差不多接近
+/// （各个向量模型分数的尺度不一样，只能比相对值）。
 const RELATED_LIMIT: usize = 5;
 const RELATED_RELATIVE: f32 = 0.9;
 
-/// 文本里有没有整个查询（按空格分开的每个词都在）。
-fn contains_whole_query(text: &str, words: &[String]) -> bool {
-    let text = text.to_lowercase();
-    !words.is_empty() && words.iter().all(|word| text.contains(word.as_str()))
+/// 查询拆成要逐字出现的词：按空格和标点切开、转小写。「消沉？」「bias,」只认「消沉」「bias」。
+fn literal_words(query: &str) -> Vec<String> {
+    query
+        .split(|c: char| !c.is_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
+/// 范围里所有写着这些词（每个词都在）的字幕句和课件页，按视频顺序、时间排。
+/// 直接在 SQL 里按全文找，不从「按相关度取前 N 条」里挑：常见词出现几百次时也不漏后面几讲。
+/// 课件页比对的是整页 OCR 文字（去掉换行，跨行的「反向\n传播」也算），显示时再截成片段。
+async fn literal_hits(
+    db: &Db,
+    videos: &[(String, String)],
+    words: &[String],
+    limit: usize,
+) -> AppResult<(Vec<Citation>, bool)> {
+    if words.is_empty() || videos.is_empty() {
+        return Ok((Vec::new(), false));
+    }
+    let scope = serde_json::to_string(&videos.iter().map(|(id, _)| id).collect::<Vec<_>>())
+        .map_err(|error| crate::error::AppError::Other(error.to_string()))?;
+    let order: std::collections::HashMap<&str, (usize, &str)> = videos
+        .iter()
+        .enumerate()
+        .map(|(index, (id, title))| (id.as_str(), (index, title.as_str())))
+        .collect();
+    let all = |column: &str| {
+        (0..words.len())
+            .map(|i| format!("instr(lower({column}), ?{}) > 0", i + 2))
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    };
+    const SCOPE: &str = "video_id IN (SELECT value FROM json_each(?1))";
+    let segment_sql = format!(
+        "SELECT video_id, start_ms, end_ms, text FROM transcripts WHERE {SCOPE} AND {}",
+        all("text")
+    );
+    let mut segment_query =
+        sqlx::query_as::<_, (String, i64, i64, String)>(&segment_sql).bind(&scope);
+    for word in words {
+        segment_query = segment_query.bind(word);
+    }
+    let flat = "replace(replace(ocr_text, char(10), ''), char(13), '')";
+    let page_sql = format!(
+        "SELECT video_id, page_no, start_ms, end_ms, image_path, ocr_text FROM slides
+         WHERE {SCOPE} AND ocr_text IS NOT NULL AND {}",
+        all(flat)
+    );
+    let mut page_query =
+        sqlx::query_as::<_, (String, i64, i64, Option<i64>, String, String)>(&page_sql)
+            .bind(&scope);
+    for word in words {
+        page_query = page_query.bind(word);
+    }
+    // (视频位置, 时间, 字幕在课件前)
+    let mut keyed: Vec<((usize, i64, u8), Citation)> = Vec::new();
+    for (vid, start_ms, end_ms, text) in segment_query.fetch_all(&db.pool).await? {
+        let Some(&(index, title)) = order.get(vid.as_str()) else {
+            continue;
+        };
+        keyed.push((
+            (index, start_ms, 0),
+            Citation {
+                index: 0,
+                text,
+                start_ms,
+                end_ms,
+                video_title: Some(title.to_string()),
+                video_id: Some(vid),
+                slide_image: None,
+                slide_page: None,
+            },
+        ));
+    }
+    for (vid, page_no, start_ms, end_ms, image_path, ocr_text) in
+        page_query.fetch_all(&db.pool).await?
+    {
+        let Some(&(index, title)) = order.get(vid.as_str()) else {
+            continue;
+        };
+        keyed.push((
+            (index, start_ms, 1),
+            Citation {
+                index: 0,
+                text: slide_snippet(&ocr_text, words, SLIDE_SNIPPET_CHARS),
+                start_ms,
+                end_ms: end_ms.unwrap_or(start_ms),
+                video_title: Some(title.to_string()),
+                video_id: Some(vid),
+                slide_image: Some(image_path),
+                slide_page: Some(page_no),
+            },
+        ));
+    }
+    keyed.sort_by_key(|(key, _)| *key);
+    let truncated = keyed.len() > limit;
+    Ok((
+        keyed.into_iter().take(limit).map(|(_, citation)| citation).collect(),
+        truncated,
+    ))
 }
 
 /// 搜索框：用户输入一个词，想找的是**写着这个词**的地方。
 ///
 /// 以前和助手共用「关键词 + 语义」融合：查「消沉」，真正写着「消沉」的只有一句，后面却跟着
 /// 二十多段意思沾点边的长段落，看上去全是不相干的结果。现在：
-/// 1. 有写着整个查询的句子（字幕 / 课件文字）：只给这些，按视频顺序和时间排，像在文稿里查找；
-/// 2. 一处都没有：才给部分相符的（中文按二字组切开后只沾到一部分），标成「相关」；
-/// 3. 还没有：给意思最接近的几段（只留和最像那段差不多接近的），也标成「相关」。
+/// 1. 有写着整个查询的句子 / 课件页：只给这些，按视频顺序和时间排，像在文稿里查找；
+/// 2. 一处都没有：给最相关的几条部分相符的（中文按二字组切开后只沾到一部分），标成「相关」；
+/// 3. 还没有：给意思最接近的几段，也标成「相关」。
 pub async fn transcript_search(
     db: &Db,
     videos: &[(String, String)],
     query: &str,
     limit: usize,
 ) -> AppResult<TranscriptSearch> {
-    let words: Vec<String> = query
-        .split_whitespace()
-        .map(|word| word.to_lowercase())
-        .filter(|word| !word.is_empty())
-        .collect();
-    let keyword = keyword_search_scope_scored(db, videos, query, limit.max(200)).await?;
-    let order: std::collections::HashMap<&str, usize> = videos
-        .iter()
-        .enumerate()
-        .map(|(index, (id, _))| (id.as_str(), index))
-        .collect();
-    let (mut exact, partial): (Vec<Citation>, Vec<Citation>) = keyword
-        .into_iter()
-        .map(|(_, citation)| citation)
-        .partition(|citation| contains_whole_query(&citation.text, &words));
+    let words = literal_words(query);
+    let (exact, truncated) = literal_hits(db, videos, &words, limit).await?;
     if !exact.is_empty() {
-        exact.sort_by_key(|citation| {
-            (
-                citation
-                    .video_id
-                    .as_deref()
-                    .and_then(|id| order.get(id).copied())
-                    .unwrap_or(usize::MAX),
-                citation.start_ms,
-                citation.slide_page.is_some(),
-            )
-        });
-        exact.truncate(limit);
         return Ok(TranscriptSearch {
             citations: renumber(exact),
             related: false,
+            truncated,
         });
     }
+    let partial = keyword_search_scope_scored(db, videos, query, RELATED_LIMIT).await?;
     if !partial.is_empty() {
         return Ok(TranscriptSearch {
-            citations: renumber(partial.into_iter().take(limit).collect()),
+            citations: renumber(partial.into_iter().map(|(_, citation)| citation).collect()),
             related: true,
+            truncated: false,
         });
     }
     let ids: Vec<String> = videos.iter().map(|(id, _)| id.clone()).collect();
@@ -1180,9 +1258,12 @@ pub async fn transcript_search(
     Ok(TranscriptSearch {
         related: !citations.is_empty(),
         citations: renumber(citations),
+        truncated: false,
     })
 }
 
+/// 重排引用编号。讲稿与课件是两条独立的召回路径，各自从 1 开始编号，
+/// 合起来会出现两条 index=1——前端拿 index 拼 key，重号就意味着列表项互相覆盖。
 fn renumber(mut citations: Vec<Citation>) -> Vec<Citation> {
     for (i, citation) in citations.iter_mut().enumerate() {
         citation.index = i + 1;
@@ -3202,19 +3283,45 @@ mod tests {
         semantic::index_video_now(&db, &video.id).await.unwrap();
         let videos = vec![(video.id.clone(), "第1讲".to_string())];
 
+        // 课件上「消沉」跨了一行：也算写着这个词。
+        sqlx::query(
+            "INSERT INTO slides(video_id,image_path,start_ms,end_ms,page_no,ocr_text) VALUES (?,?,?,?,?,?)",
+        )
+        .bind(&video.id)
+        .bind("/tmp/p.jpg")
+        .bind(120_000_i64)
+        .bind(130_000_i64)
+        .bind(3_i64)
+        .bind("鸡汤环节可以消\n沉一会儿")
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
         let found = transcript_search(&db, &videos, "消沉", 30).await.unwrap();
-        assert!(!found.related);
+        assert!(!found.related && !found.truncated);
         assert_eq!(
             found.citations.iter().map(|c| c.start_ms).collect::<Vec<_>>(),
-            [60_000, 180_000],
-            "只有写着「消沉」的两句，按时间排"
+            [60_000, 120_000, 180_000],
+            "只有写着「消沉」的两句和那页课件，按时间排"
         );
-        assert_eq!(found.citations.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(found.citations[1].slide_page, Some(3));
+        assert_eq!(found.citations.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2, 3]);
 
-        // 字面上一处都没有：给部分相符的，标成「相关」。
+        // 查询里带了标点：照样算字面命中。
+        let punctuated = transcript_search(&db, &videos, "消沉？", 30).await.unwrap();
+        assert!(!punctuated.related);
+        assert_eq!(punctuated.citations.len(), 3);
+
+        // 比上限多：只列前几处，并说明还有。
+        let capped = transcript_search(&db, &videos, "消沉", 2).await.unwrap();
+        assert_eq!(capped.citations.len(), 2);
+        assert!(capped.truncated);
+
+        // 字面上一处都没有：给最相关的几条部分相符的，标成「相关」，不再铺满一屏。
         let partial = transcript_search(&db, &videos, "消沉民生", 30).await.unwrap();
         assert!(partial.related);
         assert!(!partial.citations.is_empty());
+        assert!(partial.citations.len() <= RELATED_LIMIT);
 
         // 连部分相符都没有：给意思最近的几段，也标成「相关」，而且不会把整篇都列出来。
         let meaning = transcript_search(&db, &videos, "泛化能力", 30).await.unwrap();

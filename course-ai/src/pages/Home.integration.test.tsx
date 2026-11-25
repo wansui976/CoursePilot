@@ -87,12 +87,6 @@ const { mockIpc } = vi.hoisted(() => ({
       cancel: vi.fn(),
       remove: vi.fn(),
     },
-    dev: {
-      logs: vi.fn(),
-      llmUsage: vi.fn(),
-      clearLogs: vi.fn(),
-      clearLlmUsage: vi.fn(),
-    },
   },
 }));
 
@@ -297,10 +291,6 @@ describe("Home selected-video integration", () => {
     mockIpc.settings.set.mockResolvedValue(undefined);
     mockIpc.secrets.set.mockResolvedValue(undefined);
     mockIpc.secrets.has.mockResolvedValue(false);
-    mockIpc.dev.logs.mockResolvedValue([]);
-    mockIpc.dev.llmUsage.mockResolvedValue([]);
-    mockIpc.dev.clearLogs.mockResolvedValue(undefined);
-    mockIpc.dev.clearLlmUsage.mockResolvedValue(undefined);
   });
 
   it("keeps visible learning UI when the real selected-video panels mount", async () => {

@@ -3,9 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   CleanupResult,
-  DevLogEntry,
   ExplanationResult,
-  LlmUsageTotals,
   PlaylistInfo,
   ProbeResult,
   StorageUsage,
@@ -106,14 +104,6 @@ export const secrets = {
     invoke("cmd_set_secret", { name, value }),
   // 是否已配置某项凭证（只回布尔、不回读明文），供设置页显示「已配置」。
   has: (name: string): Promise<boolean> => invoke("cmd_has_secret", { name }),
-};
-
-export const dev = {
-  logs: (): Promise<DevLogEntry[]> => invoke("cmd_get_dev_logs"),
-  clearLogs: (): Promise<void> => invoke("cmd_clear_dev_logs"),
-  // 各档 LLM 调用的累计 token 用量（进程内统计，重启即清空）。
-  llmUsage: (): Promise<LlmUsageTotals[]> => invoke("cmd_llm_usage"),
-  clearLlmUsage: (): Promise<void> => invoke("cmd_clear_llm_usage"),
 };
 
 /** 落库的大模型用量与估算花费（设置 → 大模型 → 用量与花费；视频概览底下那一行）。 */

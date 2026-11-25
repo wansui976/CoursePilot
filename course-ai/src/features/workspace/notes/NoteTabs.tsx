@@ -65,12 +65,21 @@ export function NoteTabs({
       window.clearTimeout(timer);
       timer = window.setTimeout(collect, 250);
     };
+    // 换一篇笔记时内容是 setContent(…, { emitUpdate: false }) 换上去的，不发 update；
+    // 滚动容器自己的大小也不变。所以认「改了文档的事务」，再看正文本身的高度变化——
+    // 否则换到短笔记时还挂着上一篇的标签（点了没反应），换到长笔记时一张都不出来。
+    const onTransaction = ({ transaction }: { transaction: { docChanged: boolean } }) => {
+      if (transaction.docChanged) later();
+    };
     editor.on("update", later);
+    editor.on("transaction", onTransaction);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(later);
     if (scrollRef.current) observer?.observe(scrollRef.current);
+    if (!editor.isDestroyed) observer?.observe(editor.view.dom);
     return () => {
       window.clearTimeout(timer);
       editor.off("update", later);
+      editor.off("transaction", onTransaction);
       observer?.disconnect();
     };
   }, [collect, editor, scrollRef]);

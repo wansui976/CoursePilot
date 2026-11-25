@@ -38,4 +38,12 @@ describe("more subjects and stable picks", () => {
     const picks = new Set(["新课程 1", "新课程 2", "新课程 3", "新课程 4", "新课程 5", "新课程 6"].map((n) => stableIndex(n, 4)));
     expect(picks.size).toBeGreaterThan(1);
   });
+
+  it("does not match a subject keyword inside another word", () => {
+    expect(guessCoverKind("Photography videos")).not.toBe("systems");
+    expect(guessCoverKind("Lesson2 课程")).not.toBe("language");
+    expect(guessCoverKind("Section1 导论")).not.toBe("language");
+    expect(guessCoverKind("日语N1 词汇")).toBe("language");
+    expect(guessCoverKind("OS 进程调度")).toBe("systems");
+  });
 });

@@ -284,7 +284,7 @@ export function ReviewBookPanel({
             <>
               <section
                 aria-labelledby="review-book-title"
-                className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-card)] sm:p-5"
+                className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-4 sm:p-5"
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">

@@ -244,6 +244,40 @@ fn strip_sound_tags(line: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// 逐词时间里去掉音效标注。两个词的标注（「[music playing]」）会被切成「[music」「playing]」
+/// 两个词，各自都认不出来：先把方括号里那一小段拼回去再认，是标注就整段不要。
+fn strip_timed_sound_tags(words: &[TimedWord]) -> Vec<TimedWord> {
+    let mut out = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        let first = words[i].text.trim_start();
+        if (first.starts_with('[') || first.starts_with('［')) && !first.contains([']', '］']) {
+            // 标注最多三四个词，再往后找不到收尾的方括号就不是标注。
+            let closing = (i + 1..words.len().min(i + 4)).find(|&j| words[j].text.contains([']', '］']));
+            if let Some(end) = closing {
+                let joined = words[i..=end]
+                    .iter()
+                    .map(|word| word.text.trim())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if strip_sound_tags(&joined).is_empty() {
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        let text = strip_sound_tags(&words[i].text);
+        if !text.is_empty() {
+            out.push(TimedWord {
+                text,
+                ..words[i].clone()
+            });
+        }
+        i += 1;
+    }
+    out
+}
+
 /// 每条字幕去掉音效标注；去完只剩空的行不要了（逐词时间跟着对齐）。
 fn strip_cue_sound_tags(cues: Vec<Cue>) -> Vec<Cue> {
     cues.into_iter()
@@ -256,13 +290,7 @@ fn strip_cue_sound_tags(cues: Vec<Cue>) -> Vec<Cue> {
                     continue;
                 }
                 if let Some((_, words)) = cue.timed.as_ref().filter(|(at, _)| *at == i) {
-                    let words: Vec<TimedWord> = words
-                        .iter()
-                        .filter_map(|word| {
-                            let text = strip_sound_tags(&word.text);
-                            (!text.is_empty()).then(|| TimedWord { text, ..word.clone() })
-                        })
-                        .collect();
+                    let words = strip_timed_sound_tags(words);
                     timed = (!words.is_empty()).then_some((lines.len(), words));
                 }
                 lines.push(text);
@@ -763,6 +791,28 @@ mod tests {
         let srt = "1\n00:00:01,000 --> 00:00:02,000\n[Applause]\n\n2\n00:00:02,000 --> 00:00:03,000\n谢谢大家";
         let texts: Vec<String> = parse_srt(srt).into_iter().map(|s| s.text).collect();
         assert_eq!(texts, vec!["谢谢大家"]);
+    }
+
+    #[test]
+    fn two_word_sound_tags_split_across_timed_words_are_dropped_too() {
+        let word = |at_ms: i64, text: &str| TimedWord {
+            at_ms,
+            text: text.into(),
+            spaced: true,
+        };
+        let words = vec![
+            word(0, "[music"),
+            word(100, " playing]"),
+            word(200, " so"),
+            word(300, " today"),
+            word(400, " [see"),
+            word(500, " slide]"),
+        ];
+        let kept: Vec<String> = strip_timed_sound_tags(&words)
+            .into_iter()
+            .map(|word| word.text.trim().to_string())
+            .collect();
+        assert_eq!(kept, ["so", "today", "[see", "slide]"], "不是音效的方括号原样留着");
     }
 
     /// yt-dlp 下到的 YouTube 自动字幕原文（「Yes, you should panic about AI」开头）。

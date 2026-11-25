@@ -220,7 +220,7 @@ async fn overwrite_transcript_texts_if_unchanged(
 
     // 模型纠错可能跑数分钟。先拿写锁再重读文稿，并与请求开始时的完整快照比较，
     // 最终写入就成为一次 compare-and-swap：请求期间发生的人工编辑始终优先。
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     let rows: Vec<TranscriptSegment> = sqlx::query_as(
         "SELECT id,video_id,segment_idx,start_ms,end_ms,text
          FROM transcripts WHERE video_id=? ORDER BY segment_idx",
@@ -292,28 +292,13 @@ async fn correct_batch_once(
     match provider.complete(&req).await {
         Ok(resp) => {
             let parsed = parse_corrections(batch, &resp.content);
-            let status = match &parsed {
-                Ok(_) if attempt == 1 => "已应用".to_string(),
-                Ok(_) => format!("已应用（第 {attempt} 次重试成功）"),
-                Err(error) => format!("解析失败（第 {attempt} 次）: {error}"),
-            };
-            crate::dev_log::record(
-                "transcript_correction",
-                video_id,
-                batch_json,
-                &resp.content,
-                &status,
-            );
+            if let Err(error) = &parsed {
+                tracing::warn!(%video_id, attempt, %error, "字幕纠错的回复解析失败");
+            }
             parsed
         }
         Err(error) => {
-            crate::dev_log::record(
-                "transcript_correction",
-                video_id,
-                batch_json,
-                &format!("<调用失败> {error}"),
-                &format!("调用失败（第 {attempt} 次）"),
-            );
+            tracing::warn!(%video_id, attempt, %error, "字幕纠错调用失败");
             Err(error)
         }
     }

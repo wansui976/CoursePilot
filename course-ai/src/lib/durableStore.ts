@@ -53,6 +53,56 @@ function localKeys(): string[] {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 同一个键本地和库里各有一份时合成一份（`local` 较新）：
+ * - 会话列表（带 `conversations` 数组的对象）：按 id 并起来，同一个会话取更新得晚的那条；
+ * - 数组（输入历史）：本地的在前，去重后接上库里的；
+ * - 其余（单个会话的内容等）：取本地。
+ */
+export function mergeDurableValues(local: string, stored: string): string {
+  let a: unknown;
+  let b: unknown;
+  try {
+    a = JSON.parse(local);
+    b = JSON.parse(stored);
+  } catch {
+    return local;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const seen = new Set<string>();
+    const merged: unknown[] = [];
+    for (const item of [...a, ...b]) {
+      const key = JSON.stringify(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+    }
+    return JSON.stringify(merged);
+  }
+  if (isRecord(a) && isRecord(b) && Array.isArray(a.conversations) && Array.isArray(b.conversations)) {
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const item of [...b.conversations, ...a.conversations]) {
+      if (!isRecord(item) || typeof item.id !== "string") continue;
+      const existing = byId.get(item.id);
+      const updated = (value: Record<string, unknown> | undefined) =>
+        typeof value?.updatedAt === "number" ? value.updatedAt : -Infinity;
+      if (!existing || updated(item) >= updated(existing)) byId.set(item.id, item);
+    }
+    const conversations = [...byId.values()].sort(
+      (x, y) => (Number(y.updatedAt) || 0) - (Number(x.updatedAt) || 0),
+    );
+    const activeId = [a.activeId, b.activeId].find(
+      (id) => typeof id === "string" && byId.has(id),
+    );
+    return JSON.stringify({ ...b, ...a, conversations, activeId: activeId ?? null });
+  }
+  return local;
+}
+
 /**
  * 读库进内存。成功后切到库模式；失败或超过 `timeoutMs` 仍没回来，就留在 localStorage 模式
  * （超时后才回来的结果也不再采用：界面此时已经按 localStorage 读过一遍了）。
@@ -64,12 +114,16 @@ export async function loadDurableStore(timeoutMs = 3000): Promise<boolean> {
     if (abandoned) return false;
     const fromDb = new Map(rows);
 
-    // 搬家：库里没有、本地有的键。
+    // 搬家：本地有的键都搬进库。库里也有同一个键时，本地那份只可能来自「上次没读到库、
+    // 退回 localStorage」的那次运行（库模式下本地这些键都会被清掉），比库里的新——
+    // 以前直接丢掉本地这份，那次运行里聊的对话就没了。会话列表和输入历史两边合并，别的取本地。
     const moving: [string, string][] = [];
     for (const key of localKeys()) {
-      if (fromDb.has(key)) continue;
       const value = localStorage.getItem(key);
-      if (value != null) moving.push([key, value]);
+      if (value == null) continue;
+      const stored = fromDb.get(key);
+      const next = stored == null ? value : mergeDurableValues(value, stored);
+      if (next !== stored) moving.push([key, next]);
     }
     if (moving.length > 0) {
       await ipc.clientStore.put(moving);

@@ -73,8 +73,22 @@ pub async fn remote_manifest(dav: &WebDav, fingerprint: &str) -> AppResult<Optio
         .get_optional(&format!("{}manifest.json", dir_of(fingerprint)))
         .await?
     {
-        Some(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
+        // 清单在共享的网盘文件夹里，别的版本、手改过的都可能有：对不上的当作没有（会被重新上传覆盖），
+        // 不让后面拿 0 去除、做减法下溢而崩掉，也不让扩展名里带路径。
+        Some(bytes) => Ok(serde_json::from_slice::<Manifest>(&bytes)
+            .ok()
+            .filter(Manifest::is_valid)),
         None => Ok(None),
+    }
+}
+
+impl Manifest {
+    fn is_valid(&self) -> bool {
+        self.chunk_bytes > 0
+            && self.chunks == self.size.div_ceil(self.chunk_bytes).max(1)
+            && !self.ext.is_empty()
+            && self.ext.len() <= 10
+            && self.ext.bytes().all(|byte| byte.is_ascii_alphanumeric())
     }
 }
 
@@ -365,5 +379,15 @@ mod tests {
         assert_eq!(progress.lock().unwrap().first(), Some(&100_000));
         assert_eq!(std::fs::read(&path).unwrap(), content);
         assert!(!target.join("lecture.mkv.part").exists());
+    }
+
+    #[test]
+    fn broken_manifests_are_treated_as_missing() {
+        let ok = Manifest { size: 10, chunk_bytes: 4, chunks: 3, ext: "mp4".into() };
+        assert!(ok.is_valid());
+        assert!(!Manifest { chunk_bytes: 0, ..ok.clone() }.is_valid(), "不能拿 0 去除");
+        assert!(!Manifest { chunks: 2, ..ok.clone() }.is_valid(), "块数和大小对不上");
+        assert!(!Manifest { ext: "../x".into(), ..ok.clone() }.is_valid(), "扩展名里不能带路径");
+        assert!(Manifest { size: 0, chunk_bytes: 4, chunks: 1, ext: "mp4".into() }.is_valid());
     }
 }

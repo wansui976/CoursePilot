@@ -266,17 +266,29 @@ fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
+/// 同一时刻只让一个 start 在跑：启动时的自动打开和设置里的开关同时来，
+/// 以前会各绑一个端口，先绑的那个没人管、关掉共享后还在给局域网发视频。
+fn start_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// 每次 stop 加一：start 半路上被关掉了，就别把刚绑好的端口再挂上去。
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// 打开共享（已经开着就什么都不做）。端口尽量沿用上次的，手机缓存的地址不至于马上失效。
 pub async fn start(db: Db) -> AppResult<u16> {
+    let _guard = start_lock().lock().await;
     if let Some(running) = running().lock().unwrap().as_ref() {
         return Ok(running.port);
     }
-    let result = start_inner(db).await;
+    let generation = GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+    let result = start_inner(db, generation).await;
     *last_error().lock().unwrap() = result.as_ref().err().map(|error| error.to_string());
     result
 }
 
-async fn start_inner(db: Db) -> AppResult<u16> {
+async fn start_inner(db: Db, generation: u64) -> AppResult<u16> {
     if !supported() {
         return Err(AppError::Config("只有电脑上能打开局域网直连播放".into()));
     }
@@ -327,17 +339,29 @@ async fn start_inner(db: Db) -> AppResult<u16> {
             });
         }
     });
-    *running().lock().unwrap() = Some(Running {
-        port,
-        token: keys.token,
-        fingerprint: fingerprint(&keys.cert_der),
-        task,
-    });
+    {
+        let mut slot = running().lock().unwrap();
+        if GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
+            // 打开的过程中被关掉了：不挂上去。
+            task.abort();
+            return Err(AppError::Other("局域网直连播放已关闭".into()));
+        }
+        if let Some(previous) = slot.take() {
+            previous.task.abort();
+        }
+        *slot = Some(Running {
+            port,
+            token: keys.token,
+            fingerprint: fingerprint(&keys.cert_der),
+            task,
+        });
+    }
     tracing::info!(port, "局域网直连播放已打开");
     Ok(port)
 }
 
 pub fn stop() {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Some(running) = running().lock().unwrap().take() {
         running.task.abort();
     }
@@ -1249,15 +1273,28 @@ pub async fn download_video(
         return Ok(target);
     }
     let partial = dir.join(format!("{stem}.{}.part", info.ext));
+    // 半截旁边记着它当初是照多大的文件下的。电脑转完码以后 `/v/` 换成了 playable.mp4
+    // （扩展名一样、大小不同）：照旧接着要的话，会把两个文件拼成一个放不了的视频。
+    let partial_size = dir.join(format!("{stem}.{}.part.size", info.ext));
     let existing = tokio::fs::metadata(&partial)
         .await
         .map(|meta| meta.len())
         .unwrap_or(0);
-    // 半截比整份还大：上次下的是另一份文件（比如电脑转完码换了源），从头来。
-    let have = if existing <= info.size { existing } else { 0 };
+    let same_source = tokio::fs::read_to_string(&partial_size)
+        .await
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        == Some(info.size);
+    // 不是照这份文件下的、或者半截比整份还大：从头来。
+    let have = if same_source && existing <= info.size {
+        existing
+    } else {
+        0
+    };
     if have == info.size {
         // 上次停在「下完了还没改名」：直接收尾，不再多要一遍。
         tokio::fs::rename(&partial, &target).await?;
+        let _ = tokio::fs::remove_file(&partial_size).await;
         record_local_path(db, video_id, &target).await?;
         report(info.size, info.size);
         return Ok(target);
@@ -1285,6 +1322,7 @@ pub async fn download_video(
             .open(&partial)
             .await?
     } else {
+        tokio::fs::write(&partial_size, info.size.to_string()).await?;
         tokio::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -1323,6 +1361,7 @@ pub async fn download_video(
         )));
     }
     tokio::fs::rename(&partial, &target).await?;
+    let _ = tokio::fs::remove_file(&partial_size).await;
     record_local_path(db, video_id, &target).await?;
     report(info.size, info.size);
     Ok(target)
@@ -1528,7 +1567,29 @@ mod tests {
         let phone_root = dir.path().join("phone");
         let phone_dir = phone_root.join(&video_id);
         std::fs::create_dir_all(&phone_dir).unwrap();
+        // 先放一截照别的文件（大小不同）下的半截：不能拼上去，要从头来。
+        // （测试里电脑和手机共用一个库：下完会把 file_path 指到手机这份，测完改回去。）
+        let pc_file: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
+            .bind(&video_id)
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        std::fs::write(phone_dir.join(format!("{stem}.mp4.part")), b"XXXXXXXXXXXX").unwrap();
+        std::fs::write(phone_dir.join(format!("{stem}.mp4.part.size")), "99").unwrap();
+        let fresh = download_video(&db, &phone_root, &video_id, &|_, _| {})
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"0123456789abcdef", "不拼别的文件的半截");
+        std::fs::remove_file(&fresh).unwrap();
+        sqlx::query("UPDATE videos SET file_path=? WHERE id=?")
+            .bind(&pc_file)
+            .bind(&video_id)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        // 照同一份文件下的半截：接着下。
         std::fs::write(phone_dir.join(format!("{stem}.mp4.part")), b"0123456789").unwrap();
+        std::fs::write(phone_dir.join(format!("{stem}.mp4.part.size")), "16").unwrap();
         let seen = std::sync::Mutex::new(Vec::new());
         let downloaded = download_video(&db, &phone_root, &video_id, &|done, _| {
             seen.lock().unwrap().push(done)
@@ -1546,6 +1607,7 @@ mod tests {
             "从已有的半截接着下，不从头再来"
         );
         assert!(!phone_dir.join(format!("{stem}.mp4.part")).exists());
+        assert!(!phone_dir.join(format!("{stem}.mp4.part.size")).exists());
         let stored: String = sqlx::query_scalar("SELECT file_path FROM videos WHERE id=?")
             .bind(&video_id)
             .fetch_one(&db.pool)

@@ -63,14 +63,29 @@ describe("助手对话记录存进库", () => {
 
   it("第一次加载把 localStorage 里的对话搬进库，写成功后才删本地", async () => {
     localStorage.setItem(KEY, "old");
-    localStorage.setItem(INDEX, "idx");
-    load.mockResolvedValue([[INDEX, "idx-db"]]);
+    load.mockResolvedValue([]);
     await loadDurableStore();
-    // 库里已有的不被本地旧值覆盖；库里没有的搬过去。
     expect(put).toHaveBeenCalledWith([[KEY, "old"]]);
     expect(durableStorage.getItem(KEY)).toBe("old");
-    expect(durableStorage.getItem(INDEX)).toBe("idx-db");
     expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("上次没读到库、退回本地时聊的对话，下次读到库时并进去，不被丢掉", async () => {
+    // 库里有两段旧对话；上次运行读库超时，在 localStorage 里新开了一段、又更新了旧的一段。
+    const index = (conversations: { id: string; updatedAt: number }[], activeId: string) =>
+      JSON.stringify({ version: 1, activeId, conversations });
+    load.mockResolvedValue([
+      [INDEX, index([{ id: "a", updatedAt: 2 }, { id: "b", updatedAt: 1 }], "a")],
+      [KEY, "库里的旧内容"],
+    ]);
+    localStorage.setItem(INDEX, index([{ id: "c", updatedAt: 5 }, { id: "a", updatedAt: 4 }], "c"));
+    localStorage.setItem(KEY, "本地的新内容");
+    await loadDurableStore();
+    const merged = JSON.parse(durableStorage.getItem(INDEX) ?? "{}");
+    expect(merged.conversations.map((c: { id: string }) => c.id)).toEqual(["c", "a", "b"]);
+    expect(merged.conversations[1].updatedAt).toBe(4);
+    expect(merged.activeId).toBe("c");
+    expect(durableStorage.getItem(KEY)).toBe("本地的新内容");
     expect(localStorage.getItem(INDEX)).toBeNull();
   });
 

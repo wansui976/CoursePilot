@@ -213,7 +213,7 @@ pub async fn rename_course(db: &Db, id: String, name: String) -> AppResult<()> {
 /// 按拖放后的顺序重排课程。要求提交全部未删除课程，防止过期列表覆盖别处的新课程。
 /// 只改位置变了的课程，并拨它们的 updated_at（意图组的同步时钟）。
 pub async fn reorder_courses(db: &Db, ordered_ids: Vec<String>) -> AppResult<()> {
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     let current: Vec<(String, Option<i64>)> =
         sqlx::query_as("SELECT id, sort_order FROM courses WHERE deleted_at IS NULL")
             .fetch_all(&mut *tx)

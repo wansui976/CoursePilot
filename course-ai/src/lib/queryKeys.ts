@@ -95,6 +95,4 @@ export const qk = {
   },
 
   // —— 开发者控制台 ——
-  devLogs: () => ["dev-logs"] as const,
-  llmUsage: () => ["llm-usage"] as const,
 };

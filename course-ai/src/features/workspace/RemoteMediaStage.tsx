@@ -8,13 +8,12 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type RemoteSyncDownloadEvent } from "@/lib/ipc";
 import { humanizeError } from "@/lib/errors";
 import type { Video } from "@/lib/types";
+import { formatFileSize } from "@/lib/fileSize";
 
-const MB = 1024 * 1024;
 
 /** 看起来是网盘上的文件（WebDAV，或者夸克的 `quark://`）：只用来决定提示怎么说。 */
 const looksLikeDriveFile = (video: Video) =>
   video.source_type === "url" && /^quark:\/\/|\/dav(\/|$)|remote\.php\/dav|:500[56]\//i.test(video.source_uri ?? "");
-const formatMb = (bytes: number) => `${Math.max(1, Math.round(bytes / MB))} MB`;
 
 /**
  * 视频条目是从别的设备同步过来的、这台设备上还没有文件时，舞台上显示这个，而不是让播放器报错。
@@ -78,14 +77,14 @@ export function RemoteMediaStage({
   return (
     // 手机上舞台只有 16:9 那么高，这段说明比舞台还高：用 m-auto 居中，内容超高时自动
     // 从顶部开始并可滚动。否则 justify-center 会把标题和「再找一次」同时切掉一半。
-    <div className="ca-remote-stage flex h-full flex-col overflow-y-auto bg-[#0b0d12] p-4 text-center text-white/85 sm:p-6">
+    <div className="ca-remote-stage flex h-full flex-col overflow-y-auto bg-[var(--surface-stage)] p-4 text-center text-[color-mix(in_srgb,var(--chalk)_85%,transparent)] sm:p-6">
       <div className="m-auto flex w-full flex-col items-center gap-3 sm:gap-4">
         {/* 手机舞台矮，图标占的高度正好把底部的「在局域网里再找一次」挤到画外，窄屏只留文字和按钮。 */}
-        <CloudDownload className="h-10 w-10 text-white/50 max-sm:hidden" aria-hidden="true" />
+        <CloudDownload className="h-10 w-10 text-[color-mix(in_srgb,var(--chalk)_50%,transparent)] max-sm:hidden" aria-hidden="true" />
         <div className="max-w-sm space-y-1.5">
           <p className="ca-t-md font-medium">{driveError != null ? t("webdavImport.streamFailed") : t("remoteMedia.title")}</p>
           {/* 网盘「在线看」的视频：说怎么连上那个网盘；不再接着说「从别的设备同步过来」那套，两段话互相打架。 */}
-          <p className="ca-t-sm leading-relaxed text-white/55">
+          <p className="ca-t-sm leading-relaxed text-[color-mix(in_srgb,var(--chalk)_55%,transparent)]">
             {driveError != null
               ? humanizeError(driveError, i18n.language)
               : looksLikeDriveFile(video)
@@ -97,7 +96,7 @@ export function RemoteMediaStage({
                     : t("remoteMedia.available")}
           </p>
         </div>
-        {size.isPending && <Loader2 className="h-4 w-4 animate-spin text-white/50" aria-label={t("remoteMedia.checking")} />}
+        {size.isPending && <Loader2 className="h-4 w-4 animate-spin text-[color-mix(in_srgb,var(--chalk)_50%,transparent)]" aria-label={t("remoteMedia.checking")} />}
         {typeof size.data === "number" && (
           progress ? (
             <div className="w-full max-w-xs space-y-2">
@@ -107,33 +106,33 @@ export function RemoteMediaStage({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={percent}
-                className="h-1.5 overflow-hidden rounded-full bg-white/15"
+                className="h-1.5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--chalk)_15%,transparent)]"
               >
-                <div className="h-full rounded-full bg-white/80 transition-[width] duration-300" style={{ width: `${percent}%` }} />
+                <div className="h-full rounded-full bg-[color-mix(in_srgb,var(--chalk)_80%,transparent)] transition-[width] duration-300" style={{ width: `${percent}%` }} />
               </div>
-              <p className="ca-t-xs tabular-nums text-white/55">
-                {t("remoteMedia.progress", { received: formatMb(progress.received), total: formatMb(progress.total || size.data) })}
+              <p className="ca-t-xs tabular-nums text-[color-mix(in_srgb,var(--chalk)_55%,transparent)]">
+                {t("remoteMedia.progress", { received: formatFileSize(progress.received), total: formatFileSize(progress.total || size.data) })}
               </p>
             </div>
           ) : (
             <Button variant="primary" onClick={() => void download()}>
               <CloudDownload className="h-4 w-4" />
-              {t("remoteMedia.download", { size: formatMb(size.data) })}
+              {t("remoteMedia.download", { size: formatFileSize(size.data) })}
             </Button>
           )
         )}
         {error != null && <ErrorNote className="w-full max-w-md text-left" error={error} onRetry={() => void download()} />}
         {onRetryLan && (
-          <div className="flex max-w-sm flex-col items-center gap-1.5 border-t border-white/10 pt-4">
+          <div className="flex max-w-sm flex-col items-center gap-1.5 border-t border-[color-mix(in_srgb,var(--chalk)_10%,transparent)] pt-4">
             {lanChecking ? (
-              <p className="ca-t-xs flex items-center gap-1.5 text-white/55">
+              <p className="ca-t-xs flex items-center gap-1.5 text-[color-mix(in_srgb,var(--chalk)_55%,transparent)]">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                 {t("remoteMedia.lanChecking")}
               </p>
             ) : (
               <>
-                <p className="ca-t-xs text-white/45">{t("remoteMedia.lanHint")}</p>
-                <Button size="sm" variant="ghost" className="text-white/75" onClick={onRetryLan}>
+                <p className="ca-t-xs text-[color-mix(in_srgb,var(--chalk)_45%,transparent)]">{t("remoteMedia.lanHint")}</p>
+                <Button size="sm" variant="ghost" className="text-[color-mix(in_srgb,var(--chalk)_75%,transparent)]" onClick={onRetryLan}>
                   <Wifi className="h-3.5 w-3.5" />
                   {t("remoteMedia.lanRetry")}
                 </Button>

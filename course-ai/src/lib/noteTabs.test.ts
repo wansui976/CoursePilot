@@ -9,6 +9,10 @@ describe("tabLabel", () => {
     expect(tabLabel("（二）材料处理")).toBe("材料处理");
     expect(tabLabel("附：参考答案")).toBe("附参考答案");
     expect(tabLabel("五、Adam")).toBe("Adam");
+    expect(tabLabel("1.2 背景知识")).toBe("背景知识");
+    expect(tabLabel("2.3.1 递归")).toBe("递归");
+    expect(tabLabel("第一部分：概述")).toBe("概述");
+    expect(tabLabel("第2讲 梯度")).toBe("梯度");
   });
 
   it("stops at the first punctuation so tabs never show symbols", () => {

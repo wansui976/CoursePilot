@@ -279,7 +279,7 @@ pub async fn create_folder(
     name: &str,
 ) -> AppResult<Folder> {
     let name = clean_name(name)?;
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     ensure_active_course(&mut tx, course_id).await?;
     if let Some(parent) = &parent_id {
         if folder_course(&mut tx, parent).await? != course_id {
@@ -373,7 +373,7 @@ pub async fn folder_video_ids(db: &Db, id: &str) -> AppResult<Vec<String>> {
 
 /// 删除文件夹：各级子文件夹一并删掉，里面的视频移入回收站（恢复后回到课程根目录）。
 pub async fn delete_folder(db: &Db, id: &str) -> AppResult<()> {
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     let course_id = folder_course(&mut tx, id).await?;
     let tree = CourseTree::load(&mut tx, &course_id).await?;
     let folders = tree.subtree_folders(id);
@@ -407,7 +407,7 @@ pub async fn move_items(
     target_folder: Option<String>,
     items: Vec<ItemRef>,
 ) -> AppResult<()> {
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     ensure_active_course(&mut tx, target_course).await?;
     if let Some(folder) = &target_folder {
         if folder_course(&mut tx, folder).await? != target_course {
@@ -615,7 +615,7 @@ pub async fn reorder_container(
     folder_id: Option<String>,
     ordered: Vec<ItemRef>,
 ) -> AppResult<()> {
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     ensure_active_course(&mut tx, course_id).await?;
     let tree = CourseTree::load(&mut tx, course_id).await?;
     let mut current = tree.children(&folder_id, &HashMap::new());

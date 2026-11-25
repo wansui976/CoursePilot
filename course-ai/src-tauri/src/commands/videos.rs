@@ -225,7 +225,7 @@ pub async fn add_local_video(
     // Serialize the active-course check, duplicate lookup and order allocation.
     // A deferred transaction lets two imports both pass the lookup before either
     // writes; BEGIN IMMEDIATE reserves the single SQLite writer up front.
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     let active: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM courses WHERE id=? AND deleted_at IS NULL)",
     )
@@ -1219,16 +1219,11 @@ pub async fn cmd_media_url(
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|elapsed| elapsed.as_millis())
         .unwrap_or(0);
-    crate::dev_log::record(
-        "media-url",
-        &video_id,
-        &path.to_string_lossy(),
-        &format!(
-            "查库 {}ms / 总计 {}ms",
-            after_query.as_millis(),
-            started.elapsed().as_millis()
-        ),
-        "已交给播放器",
+    tracing::debug!(
+        %video_id,
+        query_ms = after_query.as_millis() as u64,
+        total_ms = started.elapsed().as_millis() as u64,
+        "播放地址已交给播放器"
     );
     Ok(format!("{}?v={version}", media.url(&video_id)))
 }

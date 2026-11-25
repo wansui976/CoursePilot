@@ -499,7 +499,14 @@ pub async fn resolve(db: &Db, url: &str) -> AppResult<Option<(String, RemoteAuth
             // 连了好几个夸克账号：挨个问，谁给出链接就是谁的文件。都不行就报第一个账号的原因。
             let mut first_error = None;
             for (source_id, cookie) in accounts {
-                let client = crate::quark::Client::new(&cookie)?;
+                // 某个账号的 Cookie 坏得连客户端都建不起来：记下原因，接着试下一个。
+                let client = match crate::quark::Client::new(&cookie) {
+                    Ok(client) => client,
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                        continue;
+                    }
+                };
                 let link = client.download_url(fid).await;
                 keep_quark_cookie(db, &source_id, &cookie, &client).await;
                 match link {
@@ -835,7 +842,7 @@ pub async fn import_streaming(
     course_id: &str,
     items: &[StreamItem],
 ) -> AppResult<Vec<String>> {
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     let active: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM courses WHERE id=? AND deleted_at IS NULL)",
     )
@@ -888,9 +895,12 @@ pub async fn import_streaming(
         created.push((id, data_dir));
     }
     tx.commit().await?;
-    // 写进库以后再建各自的数据目录：事务没提交成就不会留下一堆空目录。
+    // 写进库以后再建各自的数据目录：事务没提交成就不会留下一堆空目录。条目已经在课程里了，
+    // 这里建不成（磁盘满、没权限）也不算导入失败——要往里写东西时还会再建。
     for (_, data_dir) in &created {
-        std::fs::create_dir_all(data_dir)?;
+        if let Err(error) = std::fs::create_dir_all(data_dir) {
+            tracing::warn!(%error, dir = %data_dir.display(), "在线看导入：数据目录没建成");
+        }
     }
     Ok(created.into_iter().map(|(id, _)| id).collect())
 }

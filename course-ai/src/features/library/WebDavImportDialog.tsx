@@ -34,6 +34,7 @@ import { qk } from "@/lib/queryKeys";
 import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { isActiveDownload, useDownloads } from "@/stores/downloads";
+import { formatFileSize } from "@/lib/fileSize";
 
 type Mode = "download" | "stream";
 type PresetKey = "openlist" | "quark" | "jianguoyun" | "nextcloud" | "synology" | "other";
@@ -65,9 +66,6 @@ const FIELD =
 // 勾选框用墨色：选中是中性状态，绿色只留给「导入」这一个主操作。
 const CHECKBOX = "h-4 w-4 flex-none cursor-pointer accent-[var(--text-strong)] disabled:cursor-not-allowed";
 
-const MB = 1024 * 1024;
-const formatSize = (bytes: number) =>
-  bytes >= 1024 * MB ? `${(bytes / 1024 / MB).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`;
 
 const titleOf = (name: string) => name.replace(/\.[^.]+$/, "");
 const extensionOf = (name: string) => name.match(/\.[^.]+$/)?.[0] ?? "";
@@ -564,6 +562,7 @@ export function WebDavImportDialog({
   }
 
   function startEdit(source: WebDavSource) {
+    remove.reset();
     setEditing({
       draft: {
         id: source.id,
@@ -643,7 +642,14 @@ export function WebDavImportDialog({
             key={editing?.draft.id ?? "new"}
             initial={editing?.draft ?? emptyDraft()}
             hasSavedPassword={editing?.hasSavedPassword ?? false}
-            onCancel={noSources && !editing ? undefined : () => setEditing(null)}
+            onCancel={
+              noSources && !editing
+                ? undefined
+                : () => {
+                    remove.reset();
+                    setEditing(null);
+                  }
+            }
             onDelete={editing?.draft.id ? () => void confirmRemove(editing.draft) : undefined}
             deleting={remove.isPending}
             deleteError={remove.error}
@@ -688,7 +694,10 @@ export function WebDavImportDialog({
               size="sm"
               variant="default"
               className="h-9 flex-none"
-              onClick={() => setEditing({ draft: emptyDraft(), hasSavedPassword: false })}
+              onClick={() => {
+                remove.reset();
+                setEditing({ draft: emptyDraft(), hasSavedPassword: false });
+              }}
             >
               <Plus className="h-3.5 w-3.5" />
               {t("webdavImport.addSource")}
@@ -795,7 +804,7 @@ export function WebDavImportDialog({
                         </span>
                         {state && <RowTag>{t(`webdavImport.${state}`)}</RowTag>}
                         {entry.size != null && (
-                          <span className="flex-none font-mono text-[12px] text-[var(--text-faint)]">{formatSize(entry.size)}</span>
+                          <span className="flex-none font-mono text-[12px] text-[var(--text-faint)]">{formatFileSize(entry.size)}</span>
                         )}
                       </label>
                     </li>
@@ -839,7 +848,7 @@ export function WebDavImportDialog({
             <p className="ca-t-xs min-w-0 flex-1 truncate text-[var(--text-muted)]">
               {chosen.length > 0
                 ? sizeKnown
-                  ? t("webdavImport.summary", { count: chosen.length, size: formatSize(chosenBytes) })
+                  ? t("webdavImport.summary", { count: chosen.length, size: formatFileSize(chosenBytes) })
                   : t("webdavImport.summaryCount", { count: chosen.length })
                 : t(isMobile() || pickable.length < 2 ? "webdavImport.pickFirst" : "webdavImport.pickFirstShift")}
             </p>

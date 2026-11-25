@@ -769,7 +769,7 @@ button.ca-time:hover {
   bottom: 9px;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #ffffff;
+  color: var(--chalk);
   background: var(--surface-stage-overlay);
   padding: 1px 6px;
   border-radius: var(--r-xs);
@@ -781,13 +781,14 @@ button.ca-time:hover {
   right: 0;
   bottom: 0;
   height: 3px;
-  background: rgb(255 255 255 / 0.18);
+  background: color-mix(in srgb, var(--chalk) 18%, transparent);
 }
 
+/* 黑板上的进度用粉笔白：荧光黄只给用户自己划的高亮和播放头。 */
 .ca-deck-progress > i {
   display: block;
   height: 100%;
-  background: var(--marker-strong);
+  background: var(--chalk);
 }
 
 .ca-deck-meta {
@@ -1947,7 +1948,7 @@ button.ca-time:hover {
   color: var(--chalk);
   text-align: center;
   box-shadow:
-    inset 0 0 0 10px #2a1f16,
+    inset 0 0 0 10px var(--wood-dark),
     inset 0 0 0 11px rgb(0 0 0 / 0.3),
     0 24px 48px -24px rgb(16 24 20 / 0.55);
 }
@@ -1972,13 +1973,13 @@ button.ca-time:hover {
   font-family: var(--font-display);
   font-style: italic;
   font-size: 17px;
-  color: rgb(238 242 236 / 0.78);
+  color: color-mix(in srgb, var(--chalk) 78%, transparent);
 }
 
 .ca-chalk-steps li + li::before {
   content: "→";
   margin-right: 10px;
-  color: var(--marker-strong);
+  color: color-mix(in srgb, var(--chalk) 55%, transparent);
   font-style: normal;
 }
 

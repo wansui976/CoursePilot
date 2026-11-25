@@ -188,33 +188,6 @@ export interface TranscriptSegment {
   text: string;
 }
 
-export interface DevLogEntry {
-  id: number;
-  at_ms: number;
-  kind: string;
-  video_id: string;
-  request: string;
-  response: string;
-  status: string;
-}
-
-/**
- * 一档 LLM 调用的累计用量。
- *
- * cached_tokens / prompt_tokens 就是这一档的缓存命中率；reasoning_tokens 是计费在
- * 输出里、但只读正式回答、并不使用的思考 token——那部分钱花得有没有道理，
- * 得先看得见才谈得上。
- */
-export interface LlmUsageTotals {
-  label: string;
-  model: string;
-  calls: number;
-  prompt_tokens: number;
-  cached_tokens: number;
-  completion_tokens: number;
-  reasoning_tokens: number;
-}
-
 export interface TrashedVideo {
   id: string;
   title: string;
@@ -392,6 +365,8 @@ export interface Citation {
 export interface TranscriptSearch {
   citations: Citation[];
   related: boolean;
+  /** 写着这个词的地方比给出来的多（只列了前面一部分）。 */
+  truncated?: boolean;
 }
 
 export interface RagAnswer {

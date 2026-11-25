@@ -633,7 +633,8 @@
     "noSearchResults": "没有匹配的字幕或课件文字。",
     "slidePageAlt": "课件第 {{page}} 页",
     "selectionContext": "【所选文稿{{time}}】{{text}}\n\n{{query}}",
-    "relatedNote": "没有找到「{{query}}」，下面是部分相符或意思相近的内容："
+    "relatedNote": "没有找到「{{query}}」，下面是部分相符或意思相近的内容：",
+    "truncatedNote": "只列出了前 {{count}} 处，换个更具体的词能缩小范围。"
   },
   "transcript": {
     "loading": "正在加载文稿",

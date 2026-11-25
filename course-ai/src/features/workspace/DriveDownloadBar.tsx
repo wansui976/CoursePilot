@@ -7,10 +7,7 @@ import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type WebDavDownloadEvent } from "@/lib/ipc";
 import type { Video } from "@/lib/types";
-
-const MB = 1024 * 1024;
-const formatMb = (bytes: number) =>
-  bytes >= 1024 * MB ? `${(bytes / 1024 / MB).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`;
+import { formatFileSize } from "@/lib/fileSize";
 
 /**
  * 「在线看」导入的网盘视频正在从网盘边下边播：播放器上方一条，可以下载到本机。
@@ -48,7 +45,7 @@ export function DriveDownloadBar({ video }: { video: Video }) {
     : percent != null
       ? t("webdavImport.downloading", { percent })
       : progress
-        ? t("webdavImport.downloadingBytes", { size: formatMb(progress.downloaded) })
+        ? t("webdavImport.downloadingBytes", { size: formatFileSize(progress.downloaded) })
         : t("webdavImport.downloading", { percent: 0 });
 
   return (

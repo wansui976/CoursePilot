@@ -18,8 +18,8 @@ import {
 import { Modal } from "@/ui/dialog";
 import { Skeleton } from "@/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { formatFileSize } from "@/lib/fileSize";
 
-const MB = 1024 * 1024;
 // 按「人看的顺序」排：第 2 讲在第 10 讲前面。导入也按这个顺序，课程里的集数才对。
 const byLectureOrder = new Intl.Collator("zh-Hans-CN", { numeric: true, sensitivity: "base" });
 // 勾选框用墨色：选中是中性状态，绿色只留给「导入」这一个主操作。
@@ -27,10 +27,6 @@ const CHECKBOX = "h-[18px] w-[18px] flex-none cursor-pointer accent-[var(--text-
 // 文字按钮（刷新、全选）：中性色，不和主操作抢绿色。
 const TEXT_ACTION =
   "ca-touch-44 inline-flex items-center gap-1 rounded-md px-1.5 text-[13px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-strong)] disabled:opacity-50";
-const formatSize = (bytes: number) =>
-  bytes >= 1024 * MB
-    ? `${(bytes / 1024 / MB).toFixed(1)} GB`
-    : `${Math.max(1, Math.round(bytes / MB))} MB`;
 
 /** 对话框开着时多久重新看一次文件夹。Android 用 USB 传文件时 App 一直在前台，
  *  不会有「回到前台」这个时机，只能自己定时看；iOS 也顺带受益（拷完不用手点刷新）。 */
@@ -331,7 +327,7 @@ export function CableImportDialog({
                           </span>
                         ) : (
                           <span className="flex-none font-mono text-[12px] text-[var(--text-faint)]">
-                            {formatSize(file.size)}
+                            {formatFileSize(file.size)}
                           </span>
                         )}
                       </label>
@@ -370,7 +366,7 @@ export function CableImportDialog({
             {progress
               ? t("cableImport.progressItem", { done: progress.done + 1, total: progress.total, name: progress.name })
               : ordered.length > 0
-                ? t("cableImport.summary", { count: ordered.length, size: formatSize(chosenBytes) })
+                ? t("cableImport.summary", { count: ordered.length, size: formatFileSize(chosenBytes) })
                 : null}
           </p>
           <Button variant="ghost" disabled={importSelected.isPending} onClick={onClose}>

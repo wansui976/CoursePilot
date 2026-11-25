@@ -2,7 +2,6 @@ pub mod backup;
 pub mod cloud_sync;
 pub mod commands;
 pub mod db;
-pub mod dev_log;
 pub mod downloads;
 pub mod error;
 pub mod export;
@@ -137,7 +136,6 @@ use crate::commands::whisper::{
     cmd_set_models_dir,
 };
 use crate::db::Db;
-use crate::dev_log::{cmd_clear_dev_logs, cmd_get_dev_logs};
 use crate::downloads::{
     cmd_cancel_all_downloads, cmd_cancel_download, cmd_enqueue_downloads, cmd_list_downloads,
     cmd_remove_download, cmd_retry_download, DownloadQueue,
@@ -374,8 +372,6 @@ pub fn run() {
             cmd_has_secret,
             cmd_storage_usage,
             cmd_cleanup_orphan_media,
-            cmd_get_dev_logs,
-            cmd_clear_dev_logs,
             cmd_llm_usage,
             cmd_ai_usage_summary,
             cmd_video_ai_usage,

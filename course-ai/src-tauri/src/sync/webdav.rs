@@ -369,8 +369,9 @@ fn network_error(error: reqwest::Error) -> AppError {
     AppError::Other(format!("连不上同步服务器：{error}"))
 }
 
-/// 限流时的说明。后台同步认这句话来决定先歇一阵（见 `remote::RATE_LIMIT_COOLDOWN`）。
-const RATE_LIMITED: &str = "网盘限流了（请求太频繁），过一刻钟会自动再试";
+/// 限流时的说明。后台同步和视频上传认这句话来决定先歇一阵（见 `remote::RATE_LIMIT_COOLDOWN`）；
+/// 浏览网盘、「立即同步」这些手动操作也会碰到，所以这里不许诺「会自动再试」。改措辞时测试会提醒。
+const RATE_LIMITED: &str = "网盘限流了（请求太频繁），等十几分钟再试";
 
 /// 这个错误是不是网盘限流（429 / 503）。
 pub fn is_rate_limited(error: &AppError) -> bool {
@@ -408,7 +409,10 @@ pub(crate) fn parse_propfind(xml: &str, own_path: &str) -> Vec<Entry> {
         let path = reqwest::Url::parse(href)
             .map(|url| url.path().to_string())
             .unwrap_or_else(|_| href.to_string());
-        if path.trim_end_matches('/') == own_path.trim_end_matches('/') {
+        // 两边都解码再比：我们把 ( ) : @ 这些也编码了，服务器（Nextcloud / SabreDAV）常常不编，
+        // 十六进制还可能是小写。直接比的话「课程 (2024)」这种文件夹会把自己列成自己的子文件夹。
+        if percent_decode(path.trim_end_matches('/')) == percent_decode(own_path.trim_end_matches('/'))
+        {
             continue;
         }
         let is_dir = path.ends_with('/') || contains_element(response, "collection");
@@ -562,5 +566,29 @@ mod tests {
             "https://dav.example/dav/%E5%AD%A6%E4%B9%A0%20%E8%B5%84%E6%96%99/CoursePilot/x.json"
         );
         assert!(WebDav::new("ftp://x", "a", "u", "p").is_err());
+    }
+
+    #[test]
+    fn a_folder_with_brackets_does_not_list_itself_as_its_own_child() {
+        // 服务器不编码括号、用小写十六进制；我们这边编码得更狠。
+        let xml = r#"<d:multistatus xmlns:d="DAV:">
+<d:response><d:href>/remote.php/dav/files/u/%e8%af%be%e7%a8%8b%20(2024)/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>
+<d:response><d:href>/remote.php/dav/files/u/%e8%af%be%e7%a8%8b%20(2024)/01.mp4</d:href><d:propstat><d:prop><d:getcontentlength>3</d:getcontentlength></d:prop></d:propstat></d:response>
+</d:multistatus>"#;
+        let own = format!("/remote.php/dav/files/u/{}", encode_path("课程 (2024)/"));
+        let entries = parse_propfind(xml, &own);
+        assert_eq!(
+            entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["01.mp4"]
+        );
+    }
+
+    #[test]
+    fn rate_limit_errors_are_recognised_wherever_they_come_from() {
+        for status in [StatusCode::TOO_MANY_REQUESTS, StatusCode::SERVICE_UNAVAILABLE] {
+            let error = check(status, "上传").unwrap_err();
+            assert!(is_rate_limited(&error), "{error}");
+        }
+        assert!(!is_rate_limited(&check(StatusCode::UNAUTHORIZED, "上传").unwrap_err()));
     }
 }

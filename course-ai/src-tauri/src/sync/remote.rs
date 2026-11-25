@@ -1045,7 +1045,10 @@ pub fn init(app: tauri::AppHandle, db: Db) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(20)).await;
         loop {
-            media.upload_media_if_enabled().await;
+            if media.upload_media_if_enabled().await {
+                // 网盘限流了：先歇一阵，别接着撞。
+                tokio::time::sleep(RATE_LIMIT_COOLDOWN).await;
+            }
             tokio::select! {
                 _ = media.media_wake.notified() => {}
                 _ = tokio::time::sleep(MEDIA_INTERVAL) => {}
@@ -1096,6 +1099,30 @@ fn next_interval(current: Duration, busy: bool) -> Duration {
     } else {
         (current * 2).min(MAX_INTERVAL)
     }
+}
+
+/// 换了网盘（地址、文件夹或账号变了）：把「已经推过全量」「推到第几批」「读到对端第几批」
+/// 这些按网盘算的进度清掉，下一轮像第一次开同步那样把本机已有的数据全部推到新网盘。
+///
+/// 以前这些标记是全局的：从坚果云换到 Nextcloud 以后，已有的课程、笔记、复习卡、字幕都不会再推，
+/// 只有换完以后的改动过去；新设备连上新网盘看到的几乎是空的。
+pub async fn forget_server_progress(db: &Db) -> AppResult<()> {
+    sqlx::query("UPDATE sync_device_state SET bootstrap_complete=0 WHERE singleton=1")
+        .execute(&db.pool)
+        .await?;
+    sqlx::query("DELETE FROM sync_remote_cursors")
+        .execute(&db.pool)
+        .await?;
+    for key in [
+        SETTING_CONTENT_SNAPSHOT,
+        SETTING_COVER_SNAPSHOT,
+        SETTING_NEXT_SEQ,
+        SETTING_BASE_UPTO,
+        SETTING_TIDY_PENDING,
+    ] {
+        set_setting(db, key, "").await?;
+    }
+    Ok(())
 }
 
 /// 让后台尽快同步一轮（回到前台、刚改完设置）。
@@ -1217,7 +1244,8 @@ impl Engine {
         .await
     }
 
-    async fn upload_media_if_enabled(&self) {
+    /// 上传一轮视频文件。返回这一轮是不是被网盘限流了。
+    async fn upload_media_if_enabled(&self) -> bool {
         let enabled = is_enabled(&self.db).await.unwrap_or(false)
             && get_setting(&self.db, SETTING_UPLOAD_MEDIA)
                 .await
@@ -1226,10 +1254,10 @@ impl Engine {
                 .as_deref()
                 == Some("true");
         if !enabled {
-            return;
+            return false;
         }
         let Ok(Some(config)) = saved_config(&self.db).await else {
-            return;
+            return false;
         };
         let db = self.db.clone();
         UPLOAD_ALLOWED.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1254,6 +1282,7 @@ impl Engine {
         self.app
             .emit(MEDIA_EVENT, self.media_state.lock().unwrap().clone())
             .ok();
+        matches!(&result, Err(error) if crate::sync::webdav::is_rate_limited(error))
     }
 
     async fn restore_state(&self) {
@@ -2083,6 +2112,24 @@ mod tests {
                     .map(|(_, rest)| rest.to_string())
             })
             .collect()
+    }
+
+    #[tokio::test]
+    async fn switching_to_another_drive_pushes_everything_there_again() {
+        let (old_url, _old) = test_server::start().await;
+        let (new_url, _new) = test_server::start().await;
+        let pc = Device::new("pc").await;
+        crate::commands::courses::create_course(&pc.db, "申论".into(), String::new())
+            .await
+            .unwrap();
+        pc.sync(&config(&old_url)).await.unwrap();
+
+        // 换到新网盘：清掉按网盘算的进度，再同步一轮，已有的课程也推过去。
+        forget_server_progress(&pc.db).await.unwrap();
+        pc.sync(&config(&new_url)).await.unwrap();
+        let phone = Device::new("phone").await;
+        phone.sync(&config(&new_url)).await.unwrap();
+        assert_eq!(course_names(&phone.db).await, ["申论"]);
     }
 
     async fn course_names(db: &Db) -> Vec<String> {

@@ -13,7 +13,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 设置 → 外观 → 窗外的天气「用当前位置」：WebView 的 navigator.geolocation 要这两项，
          没声明时 wry 的定位授权流程拿不到权限，点了就闪退。只用大致位置（坐标取两位小数），
-         Android 12+ 上用户选「大致位置」也能用（wry 会退回只认 COARSE）。 -->
+         Android 12+ 上用户选「大致位置」也能用（wry 会退回只认 COARSE）。
+         FINE 也要声明：wry 一次申请这两项，Android 11 及以下只有两项都给了才放行定位。 -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 

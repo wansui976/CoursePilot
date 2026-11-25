@@ -120,6 +120,8 @@ type SearchHistoryEntry =
       citations: Citation[];
       /** 没找到整个查询，结果是部分相符 / 意思相近的（旧记录没有这一项）。 */
       related?: boolean;
+      /** 写着这个词的地方比列出来的多。 */
+      truncated?: boolean;
     };
 type AskTurn = {
   id: string;
@@ -799,10 +801,10 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
 
   const search = useMutation<TranscriptSearch, unknown, string>({
     mutationFn: (q: string) => ipc.ai.searchTranscript(videoId, scope, q),
-    onSuccess: ({ citations, related }, q) => {
+    onSuccess: ({ citations, related, truncated }, q) => {
       setHistory((prev) => {
         const next: SearchHistoryEntry[] = [
-          { id: crypto.randomUUID(), mode: "search", query: q, citations, related },
+          { id: crypto.randomUUID(), mode: "search", query: q, citations, related, truncated },
           ...prev,
         ];
         writeSearchHistory(videoId, "search", next);
@@ -923,6 +925,11 @@ function SearchTranscriptPanel({ videoId }: { videoId: string }) {
                     </span>
                   </button>
                 ))}
+                {entry.truncated && (
+                  <p className="px-1.5 pt-1 text-xs text-[var(--text-muted)]">
+                    {t("ragSearch.truncatedNote", { count: entry.citations.length })}
+                  </p>
+                )}
               </div>
             )}
           </div>

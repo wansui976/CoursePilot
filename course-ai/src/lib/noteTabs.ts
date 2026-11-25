@@ -9,7 +9,8 @@ const PUNCT = /[\p{P}\p{S}]/u;
 export function tabLabel(heading: string): string {
   const stripped = heading
     .trim()
-    .replace(/^第?[一二三四五六七八九十百零〇\d]+[章节讲部分课]?\s*[、.．:：)）\s]\s*/, "")
+    // 多级编号（1.2、2.3.1）整段去掉；「部分」是两个字，单独列出来（字符类里只能一个字一个字地配）。
+    .replace(/^第?[一二三四五六七八九十百零〇\d]+(?:[.．][\d]+)*(?:部分|[章节讲课])?\s*[、.．:：)）\s]\s*/, "")
     .replace(/^[（(][一二三四五六七八九十\d]+[)）]\s*/, "")
     .trim();
   const text = stripped || heading.trim();

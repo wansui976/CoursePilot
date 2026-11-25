@@ -1263,7 +1263,7 @@ async fn store_generated_notes_if_unchanged(
 ) -> AppResult<()> {
     // The model can run for minutes. Take the SQLite write lock before the final
     // read so no manual save can slip between the comparison and replacement.
-    let mut tx = db.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let mut tx = db.begin_write().await?;
     let current = notes_edit_snapshot_from_row(
         sqlx::query_as("SELECT content_json,user_edited_at FROM notes WHERE video_id=?")
             .bind(video_id)

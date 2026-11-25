@@ -544,11 +544,78 @@ struct VideoVectors {
     matrix: Vec<f32>,
 }
 
+impl VideoVectors {
+    /// 大约占多少内存（向量 + 块文本）。
+    fn bytes(&self) -> usize {
+        self.matrix.len() * std::mem::size_of::<f32>()
+            + self.chunks.iter().map(|chunk| chunk.text.len()).sum::<usize>()
+    }
+}
+
 type CacheKey = (String, String);
 
-fn cache() -> &'static Mutex<HashMap<CacheKey, Arc<VideoVectors>>> {
-    static CACHE: OnceLock<Mutex<HashMap<CacheKey, Arc<VideoVectors>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+/// 向量缓存最多占多少内存。以前从不清：全库搜一次，几百讲的向量就一直占着（一小时一讲、
+/// 1024 维时约 120 MB），手机上容易被系统杀掉。超了就按「最久没用」先扔。
+#[cfg(any(target_os = "ios", target_os = "android"))]
+const CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+const CACHE_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+
+#[derive(Default)]
+struct VectorCache {
+    entries: HashMap<CacheKey, (Arc<VideoVectors>, u64)>,
+    bytes: usize,
+    clock: u64,
+}
+
+impl VectorCache {
+    fn get(&mut self, key: &CacheKey) -> Option<Arc<VideoVectors>> {
+        self.clock += 1;
+        let clock = self.clock;
+        self.entries.get_mut(key).map(|(vectors, used)| {
+            *used = clock;
+            vectors.clone()
+        })
+    }
+
+    fn insert(&mut self, key: CacheKey, vectors: Arc<VideoVectors>) {
+        self.clock += 1;
+        self.bytes += vectors.bytes();
+        if let Some((old, _)) = self.entries.insert(key.clone(), (vectors, self.clock)) {
+            self.bytes -= old.bytes();
+        }
+        while self.bytes > CACHE_BUDGET_BYTES && self.entries.len() > 1 {
+            let Some(oldest) = self
+                .entries
+                .iter()
+                .filter(|(candidate, _)| **candidate != key)
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(candidate, _)| candidate.clone())
+            else {
+                break;
+            };
+            if let Some((evicted, _)) = self.entries.remove(&oldest) {
+                self.bytes -= evicted.bytes();
+            }
+        }
+    }
+
+    fn retain(&mut self, keep: impl Fn(&CacheKey) -> bool) {
+        let mut freed = 0;
+        self.entries.retain(|key, (vectors, _)| {
+            let kept = keep(key);
+            if !kept {
+                freed += vectors.bytes();
+            }
+            kept
+        });
+        self.bytes -= freed;
+    }
+}
+
+fn cache() -> &'static Mutex<VectorCache> {
+    static CACHE: OnceLock<Mutex<VectorCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(VectorCache::default()))
 }
 
 async fn load_vectors(
@@ -558,9 +625,10 @@ async fn load_vectors(
     indexed_at: i64,
 ) -> AppResult<Arc<VideoVectors>> {
     let key = (video_id.to_string(), embedder.to_string());
-    if let Some(hit) = cache().lock().unwrap().get(&key) {
+    let cached = cache().lock().unwrap().get(&key);
+    if let Some(hit) = cached {
         if hit.indexed_at == indexed_at {
-            return Ok(hit.clone());
+            return Ok(hit);
         }
     }
     let rows: Vec<(i64, i64, i64, i64, i64, String, Vec<u8>)> = sqlx::query_as(
@@ -1002,7 +1070,7 @@ pub async fn rebuild(db: &Db) -> AppResult<()> {
         cache()
             .lock()
             .unwrap()
-            .retain(|(_, embedder), _| embedder != &id);
+            .retain(|(_, embedder)| embedder != &id);
     }
     restart();
     Ok(())
@@ -1354,5 +1422,31 @@ mod tests {
             model: "m".into(),
         };
         assert_eq!(a.id(), b.id());
+    }
+
+    #[test]
+    fn the_vector_cache_drops_the_least_recently_used_videos_when_over_budget() {
+        let vectors = |floats: usize| {
+            Arc::new(VideoVectors {
+                indexed_at: 1,
+                dim: 1,
+                chunks: Vec::new(),
+                matrix: vec![0.0; floats],
+            })
+        };
+        let quarter = CACHE_BUDGET_BYTES / 4 / std::mem::size_of::<f32>();
+        let key = |name: &str| (name.to_string(), "e".to_string());
+        let mut cache = VectorCache::default();
+        for name in ["a", "b", "c"] {
+            cache.insert(key(name), vectors(quarter));
+        }
+        assert!(cache.get(&key("a")).is_some(), "a 刚用过");
+        cache.insert(key("d"), vectors(quarter * 2));
+        assert!(cache.bytes <= CACHE_BUDGET_BYTES);
+        assert!(cache.get(&key("b")).is_none(), "最久没用的 b 先扔");
+        assert!(cache.get(&key("a")).is_some() && cache.get(&key("d")).is_some());
+        cache.retain(|(name, _)| name != "a");
+        assert!(cache.get(&key("a")).is_none());
+        assert_eq!(cache.bytes, cache.entries.values().map(|(v, _)| v.bytes()).sum::<usize>());
     }
 }

@@ -72,9 +72,17 @@ async fn ratings_by_card(
     if card_ids.is_empty() {
         return Ok(out);
     }
+    // 在 SQL 里按卡筛：以前把全库所有复习记录读出来逐条解析 JSON 再挑，
+    // 打开一张卡的记忆曲线也要扫一遍全部历史。
+    let scope = serde_json::to_string(card_ids)?;
     let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT ts, meta_json FROM study_events WHERE kind='review' ORDER BY ts, id",
+        "SELECT ts, meta_json FROM study_events
+         WHERE kind='review'
+           AND json_valid(meta_json)
+           AND json_extract(meta_json, '$.cardId') IN (SELECT value FROM json_each(?))
+         ORDER BY ts, id",
     )
+    .bind(&scope)
     .fetch_all(&db.pool)
     .await?;
     let wanted: std::collections::HashSet<&str> = card_ids.iter().map(String::as_str).collect();
@@ -323,7 +331,14 @@ pub async fn review_mistake(db: &Db, card_id: &str, rating: i64, now: i64) -> Ap
             .bind(card_id)
             .fetch_optional(&db.pool)
             .await?;
-    if lapses.unwrap_or(0) == 0 {
+    // 错题本的规矩：答错过、而且还没连对够 MISTAKE_STREAK_TO_CLEAR 次。连对够了的已经离开错题本，
+    // 不能再从这里提前复习（以前只看答错过没有）。
+    let streak = ratings_by_card(db, &[card_id.to_string()])
+        .await?
+        .get(card_id)
+        .map(|ratings| trailing_streak(ratings))
+        .unwrap_or(0);
+    if lapses.unwrap_or(0) == 0 || streak >= MISTAKE_STREAK_TO_CLEAR {
         return Err(AppError::NotFound(format!("mistake card {card_id}")));
     }
     crate::commands::srs::review_card(db, card_id, rating, now).await
@@ -490,5 +505,11 @@ mod tests {
             mistake_cards(&db, None).await.unwrap().is_empty(),
             "连对三次就赢回来"
         );
+        assert!(
+            review_mistake(&db, &card, 3, t0 + 13 * day).await.is_err(),
+            "离开错题本的卡不能再从错题入口提前复习"
+        );
+        // 记忆曲线只读这一张卡的记录（SQL 里按卡筛）。
+        assert_eq!(card_history(&db, &card).await.unwrap().reviews.len(), 4);
     }
 }

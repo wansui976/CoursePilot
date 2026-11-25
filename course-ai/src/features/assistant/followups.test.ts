@@ -26,4 +26,9 @@ describe("splitFollowups", () => {
     const block = JSON.stringify(["a", "a", long, "b", "c", "d"]);
     expect(splitFollowups(`x\n\`\`\`followups\n${block}\n\`\`\``).followups).toEqual(["a", "b", "c"]);
   });
+
+  it("回答以行内代码结尾时不剪掉收尾的反引号", () => {
+    expect(splitFollowups("运行 `git status`").text).toBe("运行 `git status`");
+    expect(splitFollowups("结论：`O(n)`").text).toBe("结论：`O(n)`");
+  });
 });

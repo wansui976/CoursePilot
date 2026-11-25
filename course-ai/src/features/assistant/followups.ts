@@ -39,7 +39,9 @@ function parseFollowups(raw: string): string[] {
 export function splitFollowups(answer: string): { text: string; followups: string[] } {
   const start = answer.lastIndexOf(FENCE);
   if (start < 0) {
-    const partial = answer.match(/\n?`{1,3}[a-z]*$/);
+    // 追问块总是自成一行：只认行首的半截围栏。行内代码收尾的那个 `（「运行 `git status`」）
+    // 不能当成围栏的开头剪掉——以前回答写完以后也会被剪，复制、存笔记里都少一个反引号。
+    const partial = answer.match(/(?:^|\n)`{1,3}[a-z]*$/);
     // 前面的 ``` 是奇数个时，这一截是在合上别的代码块，不是追问块的开头。
     const opensBlock =
       partial && (answer.slice(0, partial.index).match(/```/g)?.length ?? 0) % 2 === 0;

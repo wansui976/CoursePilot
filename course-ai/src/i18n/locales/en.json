@@ -635,7 +635,8 @@
     "noSearchResults": "No matching subtitles or slide text.",
     "slidePageAlt": "Slide page {{page}}",
     "selectionContext": "[Selected transcript{{time}}]{{text}}\n\n{{query}}",
-    "relatedNote": "No exact match for “{{query}}”. These are partial or related matches:"
+    "relatedNote": "No exact match for “{{query}}”. These are partial or related matches:",
+    "truncatedNote": "Showing the first {{count}} matches. Try a more specific word to narrow it down."
   },
   "transcript": {
     "loading": "Loading transcript",
