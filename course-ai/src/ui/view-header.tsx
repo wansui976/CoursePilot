@@ -2,6 +2,8 @@ import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { displayTitle } from "@/lib/videoTitle";
+import { useOptionalShell } from "@/app/shell";
 
 /**
  * 次级视图统一头部：返回键 + 大标题(可选描述) + 右侧操作区。
@@ -29,6 +31,7 @@ export function ViewHeader({
   className?: string;
 }) {
   const { t } = useTranslation();
+  const videoReturn = useOptionalShell()?.videoReturn ?? null;
   return (
     <header className={cn("ca-view-header", className)} data-level={level}>
       {onBack ? (
@@ -42,6 +45,26 @@ export function ViewHeader({
         </button>
       ) : null}
       <div className="ca-view-header-text">
+        {videoReturn ? (
+          // 设计系统里根级页头标题上方的那行面包屑：13px 无衬线、淡色，链接用 text-muted。
+          // 叠在视频会话上的整页都有一条回去的路，写明回哪门课的哪个视频。
+          <button
+            type="button"
+            className="ca-view-crumb"
+            onClick={videoReturn.onReturn}
+            aria-label={t("nav.returnToVideoLabel", { title: displayTitle(videoReturn.title) })}
+            title={t("nav.returnToVideo")}
+          >
+            <ChevronLeft className="ca-view-crumb-icon" aria-hidden="true" />
+            {videoReturn.courseName ? (
+              <>
+                <span className="ca-view-crumb-course">{videoReturn.courseName}</span>
+                <span className="ca-view-crumb-sep" aria-hidden="true">/</span>
+              </>
+            ) : null}
+            <span className="ca-view-crumb-video">{displayTitle(videoReturn.title)}</span>
+          </button>
+        ) : null}
         <h1 className="ca-view-title">{title}</h1>
         {description ? <p className="ca-view-desc">{description}</p> : null}
       </div>

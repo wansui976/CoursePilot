@@ -11,7 +11,6 @@ import { useAutoClassifyCovers } from "@/lib/useCourseCover";
 import { useProcessingQueue } from "@/features/library/useProcessingQueue";
 import { useDownloadsSync } from "@/features/library/useDownloads";
 import { useRecorrection } from "@/features/library/useRecorrection";
-import { ReturnToVideoBar } from "@/features/shell/ReturnToVideoBar";
 import { BottomTabBar, type CompactTab } from "@/features/shell/BottomTabBar";
 import {
   coarsePointer,
@@ -653,6 +652,14 @@ export function Home() {
     returnToKnowledge,
     returnFromVideo,
     goBackOneLevel,
+    videoReturn:
+      selectedVideo && !isWorkbenchView
+        ? {
+            title: selectedVideo.title,
+            courseName: selectedCourse?.name ?? null,
+            onReturn: returnToVideo,
+          }
+        : null,
     forgetQueuedVideo,
     setVideoFullscreen,
     registerTransientClose,
@@ -694,13 +701,6 @@ export function Home() {
             />
       )}
       <main className="ca-main">
-        {selectedVideo && !isWorkbenchView && !showConcepts && (
-          <ReturnToVideoBar
-            title={selectedVideo.title}
-            courseName={selectedCourse?.name}
-            onReturn={returnToVideo}
-          />
-        )}
         {/* key=视图类型(而非视频 id):切换顶层视图时重挂以重播入场动画;在工作台内
             切换视频时 key 不变,播放器与面板状态保留、不被打断。 */}
         <div key={mainViewKey} className="ca-view">

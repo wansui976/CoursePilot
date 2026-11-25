@@ -65,6 +65,9 @@ function docTextLength(editor: { state?: { doc: { textContent: string } } }): nu
   return editor.state?.doc.textContent.length ?? 0;
 }
 
+/** 恢复笔记滚动位置后钉住多久（毫秒）：盖住编辑器排版、图片加载撑高正文的那段时间。 */
+const RESTORE_PIN_MS = 2500;
+
 export function NotesPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const notePaper = useNotePaper((state) => state.paper);
@@ -76,6 +79,9 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   // 是否已经真正按历史位置恢复过（而不是只在骨架上试了一下）。
   // StrictMode（dev）挂载后会立刻跑一次 cleanup，那时还没恢复，不能把 0 写回本地。
   const restoreReadyRef = useRef<string | null>(null);
+  // 这篇笔记最后停在哪（像素）：滚动时更新，卸载时照它写回，不在卸载时现读 DOM。
+  const lastScrollTopRef = useRef(0);
+  const pinUntilRef = useRef(0);
   // 用户在哪篇笔记里放过光标（点进正文、打过字）。「记一笔」据此决定插在光标处还是接在末尾：
   // 刚打开时 ProseMirror 的选区默认停在文档开头，那不是用户选的位置。按视频 id 记，换视频即失效。
   const cursorPlacedRef = useRef<string | null>(null);
@@ -351,40 +357,70 @@ export function NotesPanel({ videoId }: { videoId: string }) {
   useEffect(() => {
     if (!captureRequest || captureRequest.videoId !== videoId) return;
     if (!editor || editor.isDestroyed || notesQuery.isPending) return;
+    // 刚恢复完滚动位置的钉住期里也要让插入点滚进视野，不能被拉回去。
+    pinUntilRef.current = 0;
     insertNoteStamp(editor, captureRequest.ms, cursorPlacedRef.current === videoId);
     cursorPlacedRef.current = videoId;
     useNoteCapture.getState().done(captureRequest.nonce);
   }, [captureRequest, editor, notesQuery.isPending, videoId]);
 
+  // 卸载时补写最后一次滚动位置。写的是 onScroll 记下的值，不能在 cleanup 里现读容器：
+  // 离开工作台（进设置、回收站……）时视图已经整块卸掉，那时读到的 scrollTop 永远是 0，
+  // 刚存好的位置就被 0 覆盖——回来笔记总在开头。
   useEffect(() => {
-    // 把 ref 快照进闭包：cleanup 运行时 scrollerRef.current 可能已被 React 置空。
-    const scroller = scrollerRef.current;
     return () => {
-      // StrictMode（dev）会在首次挂载后立刻跑一次 cleanup：此时正文可能还没装载，
-      // scroller.scrollTop 还是 0，写回会把真正的历史位置抹掉。只有真正恢复过才补写。
-      if (scroller && restoreReadyRef.current === videoId) {
-        writeVideoResumeState(videoId, {
-          notesScrollTop: scroller.scrollTop,
-        });
+      // StrictMode（dev）会在首次挂载后立刻跑一次 cleanup：那时还没恢复过，不能写。
+      if (restoreReadyRef.current === videoId) {
+        writeVideoResumeState(videoId, { notesScrollTop: lastScrollTopRef.current });
       }
     };
   }, [videoId]);
 
   useEffect(() => {
-    if (!scrollerRef.current) return;
-    // 正文还没落定先不动：在骨架上恢复会被浏览器夹回 0，也会让上面的 cleanup 误以为
-    // 「当前就在顶部」。等真正的正文（或本地草稿）渲染出来再恢复。
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    // 正文还没落定先不动：在骨架上恢复会被浏览器夹回 0。等真正的正文（或本地草稿）渲染出来再恢复。
     if (notesQuery.isPending) return;
-    const savedScrollTop = readVideoResumeState(videoId).notesScrollTop;
-    scrollerRef.current.scrollTop = savedScrollTop;
-    restoreReadyRef.current = videoId;
+    if (restoreReadyRef.current !== videoId) {
+      lastScrollTopRef.current = readVideoResumeState(videoId).notesScrollTop;
+      restoreReadyRef.current = videoId;
+      // 恢复后的一小段时间里钉住这个位置：编辑器排版、图片撑开会让上方内容变高，浏览器的
+      // 滚动锚定随之把视区往下挪（实测 400 → 624），那不是用户滚的，不能当新位置存下。
+      pinUntilRef.current = performance.now() + RESTORE_PIN_MS;
+    }
+    pinRestoredScroll();
+    const content = scroller.firstElementChild;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => pinRestoredScroll());
+    observer.observe(content);
+    const stop = window.setTimeout(() => observer.disconnect(), RESTORE_PIN_MS);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(stop);
+    };
   }, [notesContent, videoId, notesQuery.isPending]);
 
+  /** 还在钉住期内（用户没动手）就把视区拉回恢复的位置。返回是否还在钉住期。 */
+  function pinRestoredScroll() {
+    const scroller = scrollerRef.current;
+    if (!scroller || performance.now() > pinUntilRef.current) return false;
+    const target = lastScrollTopRef.current;
+    if (Math.abs(scroller.scrollTop - target) > 1) scroller.scrollTop = target;
+    return true;
+  }
+
+  // 用户在笔记里动了手（滚轮、触摸、按键、按住滚动条），位置就交给他。
+  function releaseRestorePin() {
+    pinUntilRef.current = 0;
+  }
+
   function rememberNotesScroll() {
-    if (!scrollerRef.current) return;
-    writeVideoResumeState(videoId, {
-      notesScrollTop: scrollerRef.current.scrollTop,
-    });
+    const scroller = scrollerRef.current;
+    // 还没恢复完不算数；钉住期内的滚动是排版造成的，拉回去。
+    if (!scroller || restoreReadyRef.current !== videoId) return;
+    if (pinRestoredScroll()) return;
+    lastScrollTopRef.current = scroller.scrollTop;
+    writeVideoResumeState(videoId, { notesScrollTop: scroller.scrollTop });
   }
 
   // 铅笔批注：AI 读一遍编辑器里的当前内容，在页边写几句。
@@ -623,6 +659,10 @@ export function NotesPanel({ videoId }: { videoId: string }) {
         aria-label={t("notes.scrollArea")}
         className="ca-panel-actions-clearance min-h-0 flex-1 overflow-y-auto"
         onScroll={rememberNotesScroll}
+        onWheel={releaseRestorePin}
+        onTouchStart={releaseRestorePin}
+        onKeyDown={releaseRestorePin}
+        onPointerDown={releaseRestorePin}
       >
         {notesQuery.isPending && !localDraft ? (
           <div className="p-4">

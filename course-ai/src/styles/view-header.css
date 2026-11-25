@@ -90,3 +90,67 @@
   padding-left: var(--column-gutter);
   padding-right: var(--column-gutter);
 }
+
+/* 标题上方的面包屑：整页叠在视频会话上时「‹ 课程 / 视频」，点了回到那个视频。
+   设计系统 ViewHeader 的 breadcrumb：13px 无衬线 text-faint，可点的部分 text-muted。 */
+.ca-view-crumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 6px -4px;
+  padding: 2px 4px;
+  border-radius: var(--r-xs, 4px);
+  font-family: var(--font-app);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-faint);
+  transition: color 0.12s var(--ease), background-color 0.12s var(--ease);
+}
+.ca-view-crumb:hover {
+  color: var(--text-muted);
+  background: var(--surface-card-hover);
+}
+.ca-view-crumb:hover .ca-view-crumb-video {
+  color: var(--text-strong);
+}
+.ca-view-crumb:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.ca-view-crumb-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.ca-view-crumb-course {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+.ca-view-crumb-sep {
+  flex: none;
+}
+.ca-view-crumb-video {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+/* 触屏：外观不变，点按区往上下扩到 32px 以上。 */
+@media (any-pointer: coarse) {
+  .ca-view-crumb {
+    position: relative;
+  }
+  .ca-view-crumb::after {
+    content: "";
+    position: absolute;
+    inset: -8px -4px;
+  }
+}
