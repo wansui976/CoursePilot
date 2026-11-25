@@ -37,7 +37,7 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 🖼️ **Slides included** — detects page turns, captures every slide, and OCRs it, so formulas and definitions that are shown but never spoken still reach the AI.
 - 💬 **Answers with sources** — ask about one video or a whole course; answers cite `[mm:ss]` timestamps and slide pages you can click to jump back.
 - 📝 **Take notes as you watch** — press `N` to jot a note (the video pauses and a timestamp is inserted), or select transcript text and send it to your notes. Notes hold images and one-click video frame captures, and keep a version history.
-- 🧠 **Built for retention** — FSRS-4.5 spaced repetition, knowledge points merged across videos, chaptered review notes for a whole course, a study heatmap, and weak-topic analysis.
+- 🧠 **Built for retention** — FSRS-4.5 spaced repetition with flip cards, a memory curve and a mistake deck, knowledge points merged across videos (and a collection book), chaptered review notes for a whole course, a study heatmap, and weak-topic analysis.
 - 🤖 **Run the app in plain language** — the AI assistant searches Bilibili, creates courses, checks your progress, and turns a chat into notes. It asks before changing anything.
 - 📺 **Bilibili-friendly** — paste a link to download, batch-import playlists or collections, keep the danmaku and comment threads, and follow collections so new videos import themselves.
 - 🌍 **Beyond Bilibili** — YouTube, podcast links and local audio (mp3, m4a…) work too, and foreign-language lectures get one-click translated, bilingual subtitles.
@@ -47,7 +47,17 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - 🎙️ **Transcribe without a network** — built-in SenseVoice / Qwen3-ASR local recognition makes a quarter to a fifth of the errors of Whisper base on Chinese lectures, and runs on Mac, Windows, iPhone, iPad and Android.
 - 🔒 **Your data stays yours** — everything lives on your device and uses your own API keys (stored in the system keychain). It runs fully offline with local transcription and OCR.
 
-## 🆕 Recent updates (v0.4.2)
+## 🆕 Recent updates (v0.4.3)
+
+- **A complete review loop** — flashcards are now paper cards you flip (swipe left for "forgot", right for "remembered" on phones), with a memory curve under the answer. Wrong answers go into a mistake deck you can review on its own, and a new collection book gives every knowledge point a small chalkboard card that lights up when you know it and fades when it's due.
+- **Chalkboard covers and a study desk** — course covers are chalkboards: AI picks the subject from the course name, draws it in chalk and writes a few key terms. The home page can become a desk with a window showing your local sky, season and weather, the lecture you left open, and your due cards and mistakes.
+- **Notes** — lined / grid / dot / practice-grid paper, index tabs down the edge of long notes, AI margin notes in pencil you can erase, and A4 handout export with a binding margin.
+- **Import** — copy videos in over a cable on iPhone, iPad and Android; new imports start processing right away by default; missing subtitles are explained; cloud-drive import no longer imports a video twice.
+- **Faster and cheaper** — downloads on Mac and Windows start in a fraction of a second instead of 20+ seconds; multi-device sync no longer gets rate-limited by Jianguoyun.
+- **Fixes** — subtitle translations made on the computer now sync to phones; "use current location" no longer crashes on Android and images can be inserted into notes there; transcript search no longer mixes in unrelated passages.
+
+<details>
+<summary>v0.4.2</summary>
 
 - **Multi-device sync** — in Settings → Sync, sign in to Jianguoyun (or any WebDAV drive: Nextcloud, Synology…) and progress, notes and flashcards sync between Windows, Android, Mac and iOS. Transcripts, summaries, quizzes, mind maps and thumbnails come along, so another device doesn't have to transcribe or generate again. Video files can optionally be uploaded and downloaded on other devices in one click.
 - **Play over the local network** — turn it on on your computer, and phones and tablets on the same Wi‑Fi play its videos directly: nothing goes to the cloud drive and nothing takes space on the phone. Codecs the phone can't play are converted on the computer first, and a streamed video can be saved to the device.
@@ -55,6 +65,8 @@ CoursePilot exists to fix that. Whether it's a public course on Bilibili, a reco
 - **Semantic search and review notes** — find passages by meaning even when your words differ from the lecture's; turn a whole course's notes into chaptered review notes where every point links back to the moment in the video.
 - **Cheaper AI** — a "deep thinking" switch for DeepSeek (off by default); turn off individual auto-generated outputs (chapters / summary / notes / quiz / mind map); see your DeepSeek balance, with peak / off-peak pricing.
 - **Also** — sort a course by the lecture numbers in titles; faster startup; polished menus and import dialog. Fixed: progress missing after switching devices, assistant history filling up local storage, and "database is locked" when two videos processed at once.
+
+</details>
 
 <details>
 <summary>v0.4.1</summary>
@@ -117,6 +129,14 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
 
 <table>
   <tr>
+    <td width="50%"><b>v0.4.3 · The study desk: window, due cards, mistakes, course deck</b><br><img src="assets/screenshots/desk.webp" alt="The desk home page: a night window and a sticky note on the left, the last lecture open in the middle, 12 cards due and the mistake deck on the right, and the course deck below"></td>
+    <td width="50%"><b>v0.4.3 · Flip-card review with a memory curve</b><br><img src="assets/screenshots/review-cards.webp" alt="A review card showing its answer, with links to the source and the memory curve, and the four rating keys: again, hard, good, easy"></td>
+  </tr>
+  <tr>
+    <td><b>v0.4.3 · Collection book and mistake deck</b><br><img src="assets/screenshots/collection-book.webp" alt="The collection book: 1 of 4 lit, 1 fading, small chalkboard cards grouped by topic, and the red-edged mistake deck below"></td>
+    <td><b>v0.4.3 · Index tabs on long notes</b><br><img src="assets/screenshots/notes-tabs.webp" alt="A long note with a row of index tabs down the right edge; the tab for the current section sticks out"></td>
+  </tr>
+  <tr>
     <td width="50%"><b>v0.4.2 · Multi-device sync and local-network playback</b><br><img src="assets/screenshots/multi-device-sync.webp" alt="Sync settings: sync on, last synced 4 minutes ago, a video uploading at 42%, local-network playback on at 192.168.1.5, and a device list with this Mac, a Windows PC and an Android phone"></td>
     <td width="50%"><b>v0.4.2 · Import from a cloud drive, download or stream</b><br><img src="assets/screenshots/drive-import.webp" alt="The cloud-drive import dialog browsing a course folder on Baidu Netdisk, five lectures ticked in order, with the download / stream switch and 5 selected · 2.2 GB"></td>
   </tr>
@@ -166,7 +186,7 @@ Full notes for every version are on the [Releases](https://github.com/wansui976/
   </tr>
 </table>
 
-<sub>Screenshots marked v0.4.0 / v0.4.2 come from the UI screenshot tool's sample course (demo data); the rest are from the real v0.3.6 app. The course is a public Bilibili course (袁东申论领跑营, a Chinese civil-service essay course); all study materials were generated by CoursePilot.</sub>
+<sub>Screenshots marked v0.4.0 / v0.4.2 / v0.4.3 come from the UI screenshot tool's sample course (demo data); the rest are from the real v0.3.6 app. The course is a public Bilibili course (袁东申论领跑营, a Chinese civil-service essay course); all study materials were generated by CoursePilot.</sub>
 
 ## 🚀 Download
 

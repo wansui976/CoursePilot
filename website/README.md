@@ -15,6 +15,7 @@ python3 -m http.server 8000   # 然后打开 http://localhost:8000
 
 - `workbench-overview.webp`、`slides.webp`、`assistant.webp`：首屏、课件、提问三处大图。
 - `local-asr` / `mobile-local-asr` / `keep-alive` / `bilibili-cache`：「v0.3.9 新功能」轮播的四张图，与仓库 `assets/screenshots/` 同名文件一致。界面来自截图工具（`course-ai/tools/ui-shots` 的 `local-asr*`、`bilibili-cache` 场景），`keep-alive` 右侧的 Android 通知栏是模拟器上的真实截图。
+- `review-cards` / `collection-book` / `desk` / `notes-tabs`：「v0.4.3 新功能」轮播的四张图，与仓库 `assets/screenshots/` 同名文件一致。来自截图工具（`review` 的 answer 截取卡片一块、`collection`、`home-desk`、`notes-pages` 场景），桌面浅色拍完缩到 1600×1000 转 webp。
 - `multi-device-sync` / `drive-import` / `drive-add` / `review-book`：「v0.4.2 新功能」轮播的四张图，与仓库 `assets/screenshots/` 同名文件一致。来自截图工具（`settings-sync` 的 bottom、`webdav-import` 的 folder / add、`review-book` 场景），桌面尺寸拍完缩到 1600×1000 转 webp。
 - `quiz-answered` / `quiz-new-set` / `course-folders` / `gpu-asr`：「v0.4.0 新功能」轮播的四张图；`batch-select`、`course-search`、`sidebar-folders` 只在仓库 README 里用。都来自截图工具（`quiz`、`folders`、`selection`、`search`、`sidebar-tree`、`local-asr` 场景）。
 - `feynman` / `guided` / `find-explanation` / `highlights`：v0.3.8 的四张图，现在只在「界面一览」之外的仓库 README 里保留（演示课程「机器学习导论」）。

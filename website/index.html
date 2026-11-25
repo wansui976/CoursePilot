@@ -1319,7 +1319,7 @@
         <div class="aurora" aria-hidden="true"></div>
         <div class="tile__inner" style="position: relative; z-index: 1;">
           <a class="new-pill" href="#whats-new" data-animate="hero" style="--motion-delay: 40ms" data-umami-event="hero-whats-new">
-            <span class="new-pill__tag">v0.4.2</span>多设备网盘同步、手机直接播电脑上的视频、从网盘导入课程
+            <span class="new-pill__tag">v0.4.3</span>翻卡复习、错题本与收集册，黑板封面和课桌主页
           </a>
           <p class="eyebrow" data-animate="hero" style="--motion-delay: 80ms">CoursePilot</p>
           <h1 class="hero-display" data-animate="hero" style="--motion-delay: 160ms">把课程视频变成<br />真正记得住的东西。</h1>
@@ -1340,8 +1340,68 @@
         </div>
       </section>
 
-      <!-- ============ v0.4.2 新功能 ============ -->
+      <!-- ============ v0.4.3 新功能 ============ -->
       <section class="tile tile--light" id="whats-new">
+        <div class="tile__inner">
+          <p class="eyebrow" data-animate>v0.4.3 新功能</p>
+          <h2 class="display-lg" data-animate>看过的，记得住。</h2>
+          <div class="showcase" data-showcase data-animate>
+            <div class="showcase__tabs" role="tablist" aria-label="v0.4.3 新功能">
+              <button class="showcase__tab" type="button" role="tab" id="tab-review-cards" aria-controls="panel-review-cards" aria-selected="true">翻卡复习<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-collection" aria-controls="panel-collection" aria-selected="false" tabindex="-1">收集册<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-desk" aria-controls="panel-desk" aria-selected="false" tabindex="-1">课桌主页<span class="showcase__bar"><i></i></span></button>
+              <button class="showcase__tab" type="button" role="tab" id="tab-notes-tabs" aria-controls="panel-notes-tabs" aria-selected="false" tabindex="-1">笔记索引<span class="showcase__bar"><i></i></span></button>
+            </div>
+            <div class="showcase__panels">
+              <figure class="showcase__panel is-active" id="panel-review-cards" role="tabpanel" aria-labelledby="tab-review-cards">
+                <figcaption class="showcase__copy">
+                  <h3>一张能翻的纸卡。</h3>
+                  <p>点一下翻面，评完就甩到一边；手机上左滑忘了、右滑记得。答案下面能展开记忆曲线，看每次复习后记得多牢、下次什么时候该再看。答错的题收进错题本，可以只复习错题。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/review-cards.webp" width="1600" height="1000" loading="lazy" alt="复习卡翻到答案面：题目是学习率过大时梯度下降会出现什么现象，下面是回看出处、记忆曲线和重来、困难、良好、容易四个评分键" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-collection" role="tabpanel" aria-labelledby="tab-collection">
+                <figcaption class="showcase__copy">
+                  <h3>每个知识点，一块小黑板。</h3>
+                  <p>课程知识页新增「收集册」：记得牢的知识点亮着，快忘了的慢慢褪色并标出「该复习了」，还没出过题的留着剪影。错题本叠成一小摞红边卡放在旁边。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/collection-book.webp" width="1600" height="1000" loading="lazy" alt="收集册：已点亮 1 / 4、正在褪色 1，按主题排的小黑板卡片，下面是红边的错题本" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-desk" role="tabpanel" aria-labelledby="tab-desk">
+                <figcaption class="showcase__copy">
+                  <h3>打开就是你的课桌。</h3>
+                  <p>主页可以换成一张课桌：窗外是当地的天色、季节和天气，中间摊开上次看的那一讲，右边是待复习的卡和错题本，下面是课程牌堆。课程封面换成黑板，AI 看课程名画上板书。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/desk.webp" width="1600" height="1000" loading="lazy" alt="课桌主页：左上一扇夜里的窗和便利贴，中间摊开上次看的那一讲，右边待复习 12 张和错题本，下面是黑板封面的课程牌堆" />
+                </div>
+              </figure>
+              <figure class="showcase__panel" id="panel-notes-tabs" role="tabpanel" aria-labelledby="tab-notes-tabs">
+                <figcaption class="showcase__copy">
+                  <h3>长笔记也翻得快。</h3>
+                  <p>长笔记的右边缘贴一排索引标签，点一下跳到那一节，当前小节那张探出来。纸张可选横线、方格、点阵、米字格；AI 还会在页边写几条铅笔批注，不要就擦掉。</p>
+                </figcaption>
+                <div class="showcase__shot" data-zoom>
+                  <img src="./screenshots/notes-tabs.webp" width="1600" height="1000" loading="lazy" alt="笔记页右边缘贴着一排竖写的索引标签，当前小节那张探出来，正文是带时间戳的要点" />
+                </div>
+              </figure>
+            </div>
+            <div class="showcase__more">
+              <span>数据线导入（iPhone / iPad / 安卓）</span>
+              <span>导入后立刻处理</span>
+              <span>字幕译文多设备同步</span>
+              <span>下载启动快几十倍</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ v0.4.2 新功能 ============ -->
+      <section class="tile tile--light" id="whats-new-042">
         <div class="tile__inner">
           <p class="eyebrow" data-animate>v0.4.2 新功能</p>
           <h2 class="display-lg" data-animate>换一台设备，接着学。</h2>
