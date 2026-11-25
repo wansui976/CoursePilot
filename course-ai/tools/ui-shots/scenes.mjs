@@ -745,6 +745,36 @@ export const scenes = [
     },
   },
   {
+    // 笔记滚到中间 → 进设置 → 回到视频：笔记要停在原来的位置。
+    name: "notes-scroll-return",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-long-notes", "1"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await openNotes(page);
+      const area = page.getByLabel("笔记内容滚动区");
+      await area.waitFor();
+      await page.waitForTimeout(500);
+      const max = await area.evaluate((el) => el.scrollHeight - el.clientHeight);
+      await area.hover().catch(() => {});
+      await page.mouse.wheel(0, Math.min(400, max));
+      await page.waitForTimeout(400);
+      const before = await area.evaluate((el) => el.scrollTop);
+      const settings = page.getByRole("button", { name: "设置", exact: true });
+      // 窄屏工作台没有设置入口（见 settings-from-video），这里只验桌面式外壳。
+      if (!(await settings.first().isVisible().catch(() => false))) return;
+      await settings.first().click();
+      await page.getByRole("button", { name: /^回到视频/ }).click();
+      await page.locator("[data-video-player]").first().waitFor({ timeout: 5000 });
+      await openNotes(page);
+      await page.waitForTimeout(1000);
+      const after = await page.getByLabel("笔记内容滚动区").evaluate((el) => el.scrollTop);
+      await shot();
+      if (Math.abs(after - before) > 4) throw new Error(`笔记位置没恢复：之前 ${before}，回来 ${after}`);
+    },
+  },
+  {
     name: "concepts",
     devices: ALL,
     run: async ({ page, shot }) => {

@@ -130,6 +130,14 @@ function renderNotesPanel(videoId = "video-1", instanceKey = "one", strict = fal
   return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
+/** 等笔记正文装载完：滚动位置要在正文到位后才恢复、才开始记。 */
+async function notesLoaded() {
+  await waitFor(() => expect(mockIpc.ai.getNotes).toHaveBeenCalled());
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 describe("NotesPanel", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -179,8 +187,11 @@ describe("NotesPanel", () => {
   it("restores the last notes scroll position for each video when remounted", async () => {
     const { rerender } = renderNotesPanel("video-1", "one");
     const scroller = await screen.findByLabelText("笔记内容滚动区");
+    await notesLoaded();
 
     act(() => {
+      // 用户自己滚（先有一次滚轮）；没有用户输入的滚动在恢复后的钉住期里会被拉回。
+      fireEvent.wheel(scroller);
       scroller.scrollTop = 360;
       fireEvent.scroll(scroller);
     });
@@ -207,6 +218,34 @@ describe("NotesPanel", () => {
     await waitFor(() => {
       expect(remountedScroller.scrollTop).toBe(360);
     });
+  });
+
+  it("恢复位置后排版把视区挤走（滚动锚定）不算用户滚的，拉回原位、不覆盖存的值", async () => {
+    writeVideoResumeState("video-1", { notesScrollTop: 400 });
+    renderNotesPanel("video-1", "one");
+    const scroller = await screen.findByLabelText("笔记内容滚动区");
+    await waitFor(() => expect(scroller.scrollTop).toBe(400));
+    act(() => {
+      scroller.scrollTop = 624; // 浏览器自己挪的，没有任何用户输入
+      fireEvent.scroll(scroller);
+    });
+    expect(scroller.scrollTop).toBe(400);
+    expect(readVideoResumeState("video-1").notesScrollTop).toBe(400);
+  });
+
+  it("卸载时写回最后记下的位置，不现读已经卸掉的容器", async () => {
+    const { unmount } = renderNotesPanel("video-1", "one");
+    const scroller = await screen.findByLabelText("笔记内容滚动区");
+    await notesLoaded();
+    act(() => {
+      fireEvent.wheel(scroller);
+      scroller.scrollTop = 300;
+      fireEvent.scroll(scroller);
+    });
+    // 视图整块卸掉时容器的 scrollTop 读出来是 0。
+    scroller.scrollTop = 0;
+    unmount();
+    expect(readVideoResumeState("video-1").notesScrollTop).toBe(300);
   });
 
   it("waits for notes content before applying the saved scroll under StrictMode", async () => {

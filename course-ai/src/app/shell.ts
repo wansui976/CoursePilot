@@ -64,6 +64,11 @@ export interface Shell {
   returnToKnowledge: () => void;
   returnFromVideo: () => void;
   goBackOneLevel: () => boolean;
+  /**
+   * 整页（设置、回收站、学习、控制台、队列）叠在视频会话上时，回到那个视频的入口；
+   * 其余时候为 null。ViewHeader 据此在标题上方画一行面包屑。
+   */
+  videoReturn: { title: string; courseName: string | null; onReturn: () => void } | null;
   forgetQueuedVideo: (videoId: string) => void;
   setVideoFullscreen: (fullscreen: boolean) => void;
 
