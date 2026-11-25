@@ -417,43 +417,69 @@ pub async fn browse(db: &Db, source_id: &str, path: &str) -> AppResult<Vec<Brows
 /// 能访问某个地址的来源。
 pub enum Access {
     Basic { user: String, password: String },
-    Quark { source_id: String, cookie: String },
+    /// 夸克：按顺序试的几个账号（id, Cookie）。地址里只有文件 id，认不出是哪个账号的。
+    Quark(Vec<(String, String)>),
 }
 
-/// 哪个来源能访问这个地址：WebDAV 按根地址前缀认（最长的优先）；`quark://` 用第一个夸克来源。
-pub async fn source_for_url(db: &Db, url: &str) -> AppResult<Option<Access>> {
-    if url.starts_with(QUARK_SCHEME) {
-        for source in list_sources(db)
+/// 全部来源的（id, 类型, 根地址），不碰钥匙串：只用来按地址挑来源。
+async fn source_bases(db: &Db) -> AppResult<Vec<(String, String, String)>> {
+    let mut bases = Vec::new();
+    if let Some(config) = crate::sync::remote::saved_config(db).await? {
+        if let Ok(url) = normalize_base(&config.url) {
+            bases.push((SYNC_SOURCE_ID.to_string(), KIND_WEBDAV.to_string(), url));
+        }
+    }
+    bases.extend(
+        stored_sources(db)
             .await?
             .into_iter()
-            .filter(|source| source.kind == KIND_QUARK)
-        {
-            let (_, _, _, cookie) = credentials(db, &source.id).await?;
+            .map(|source| (source.id, source.kind, source.url)),
+    );
+    Ok(bases)
+}
+
+/// 能访问这个地址的来源 id：WebDAV 按根地址前缀认（最长的优先）；`quark://` 是全部夸克来源。
+async fn candidates_for_url(db: &Db, url: &str) -> AppResult<Vec<String>> {
+    let bases = source_bases(db).await?;
+    if url.starts_with(QUARK_SCHEME) {
+        return Ok(bases
+            .into_iter()
+            .filter(|(_, kind, _)| kind == KIND_QUARK)
+            .map(|(id, ..)| id)
+            .collect());
+    }
+    Ok(bases
+        .into_iter()
+        .filter(|(_, kind, base)| kind == KIND_WEBDAV && url.starts_with(base.as_str()))
+        .max_by_key(|(_, _, base)| base.len())
+        .map(|(id, ..)| id)
+        .into_iter()
+        .collect())
+}
+
+/// 这个地址是不是某个网盘来源上的文件（只看地址，不读密码）。下载队列用它决定走不走 yt-dlp。
+pub async fn is_drive_url(db: &Db, url: &str) -> AppResult<bool> {
+    Ok(!candidates_for_url(db, url).await?.is_empty())
+}
+
+/// 哪个来源能访问这个地址，连同它的凭据。没有（或者密码 / Cookie 是空的）时返回 None。
+pub async fn source_for_url(db: &Db, url: &str) -> AppResult<Option<Access>> {
+    let candidates = candidates_for_url(db, url).await?;
+    if url.starts_with(QUARK_SCHEME) {
+        let mut accounts = Vec::new();
+        for id in candidates {
+            let (_, _, _, cookie) = credentials(db, &id).await?;
             if !cookie.is_empty() {
-                return Ok(Some(Access::Quark {
-                    source_id: source.id,
-                    cookie,
-                }));
+                accounts.push((id, cookie));
             }
         }
+        return Ok((!accounts.is_empty()).then_some(Access::Quark(accounts)));
+    }
+    let Some(id) = candidates.into_iter().next() else {
         return Ok(None);
-    }
-    let mut best: Option<(usize, String, String)> = None;
-    for source in list_sources(db)
-        .await?
-        .into_iter()
-        .filter(|source| source.kind == KIND_WEBDAV)
-    {
-        if url.starts_with(&source.url)
-            && best
-                .as_ref()
-                .is_none_or(|(length, _, _)| source.url.len() > *length)
-        {
-            let (_, _, user, password) = credentials(db, &source.id).await?;
-            best = Some((source.url.len(), user, password));
-        }
-    }
-    Ok(best.map(|(_, user, password)| Access::Basic { user, password }))
+    };
+    let (_, _, user, password) = credentials(db, &id).await?;
+    Ok(Some(Access::Basic { user, password }))
 }
 
 /// 地址 → 真正去拉的链接和要带的认证。夸克的下载链接有时效，每次现取。没有能访问它的来源时返回 None。
@@ -464,19 +490,28 @@ pub async fn resolve(db: &Db, url: &str) -> AppResult<Option<(String, RemoteAuth
             url.to_string(),
             RemoteAuth::Basic { user, password },
         ))),
-        Some(Access::Quark { source_id, cookie }) => {
+        Some(Access::Quark(accounts)) => {
             let fid = url
                 .trim_start_matches(QUARK_SCHEME)
                 .split('/')
                 .next()
                 .unwrap_or_default();
-            let client = crate::quark::Client::new(&cookie)?;
-            let link = client.download_url(fid).await;
-            keep_quark_cookie(db, &source_id, &cookie, &client).await;
-            Ok(Some((
-                link?,
-                RemoteAuth::Headers(client.download_headers()),
-            )))
+            // 连了好几个夸克账号：挨个问，谁给出链接就是谁的文件。都不行就报第一个账号的原因。
+            let mut first_error = None;
+            for (source_id, cookie) in accounts {
+                let client = crate::quark::Client::new(&cookie)?;
+                let link = client.download_url(fid).await;
+                keep_quark_cookie(db, &source_id, &cookie, &client).await;
+                match link {
+                    Ok(link) => {
+                        return Ok(Some((link, RemoteAuth::Headers(client.download_headers()))))
+                    }
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            Err(first_error.unwrap_or_else(|| AppError::Other("夸克网盘没给下载链接".into())))
         }
     }
 }
@@ -793,7 +828,7 @@ pub async fn download(
     Ok(destination)
 }
 
-/// 「在线看」导入：只建视频条目，不下文件。同一门课里已经有这个地址的跳过。返回新建了几条。
+/// 「在线看」导入：只建视频条目，不下文件。同一门课里已经有这个地址的跳过。返回新建的视频 id。
 pub async fn import_streaming(
     db: &Db,
     video_root: &Path,
@@ -831,7 +866,6 @@ pub async fn import_streaming(
         order += 1;
         let id = uuid::Uuid::new_v4().to_string();
         let data_dir = video_root.join(&id);
-        std::fs::create_dir_all(&data_dir)?;
         let title = if item.title.trim().is_empty() {
             file_name_of(&item.url)
         } else {
@@ -851,10 +885,14 @@ pub async fn import_streaming(
         .bind(now)
         .execute(&mut *tx)
         .await?;
-        created.push(id);
+        created.push((id, data_dir));
     }
     tx.commit().await?;
-    Ok(created)
+    // 写进库以后再建各自的数据目录：事务没提交成就不会留下一堆空目录。
+    for (_, data_dir) in &created {
+        std::fs::create_dir_all(data_dir)?;
+    }
+    Ok(created.into_iter().map(|(id, _)| id).collect())
 }
 
 /// 在线看的视频：返回给本机媒体服务转发用的来源。不是网盘视频、本机已经有文件、
@@ -1272,6 +1310,18 @@ mod tests {
         // Cookie 不对：说清楚要重新复制。
         let error = test(KIND_QUARK, "", "", "__puus=wrong").await.unwrap_err();
         assert!(error.to_string().contains("Cookie"), "{error}");
+        // 先连过一个已经失效的夸克账号：在线看、下载时挨个试，不卡在它身上。
+        save_source(
+            &db,
+            None,
+            KIND_QUARK.into(),
+            "旧账号".into(),
+            String::new(),
+            String::new(),
+            Some("__puus=stale".into()),
+        )
+        .await
+        .unwrap();
 
         let source = save_source(
             &db,

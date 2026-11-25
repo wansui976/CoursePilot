@@ -1688,7 +1688,21 @@
     "editTitle": "编辑网盘",
     "up": "上一层",
     "summary": "已选 {{count}} 个 · {{size}}",
-    "importShort": "导入"
+    "importShort": "导入",
+    "inCourse": "已在课程里",
+    "inQueue": "正在下载",
+    "emptyHint": "能导入常见的视频和音频文件，比如 mp4、mkv、mp3。",
+    "loadingFolder": "正在读取文件夹",
+    "checkSource": "检查这个网盘的设置",
+    "syncSourceHint": "同步用的网盘在「设置 → 多设备同步」里改。",
+    "deleteTitle": "删除这个网盘？",
+    "deleteConfirm": "删除「{{name}}」后，用它在线看的视频要重新连上同一个网盘才能播放；已经下载到本机的视频不受影响。",
+    "deleteOk": "删除",
+    "summaryCount": "已选 {{count}} 个",
+    "pickFirstShift": "勾选要导入的视频，按住 Shift 可以连选",
+    "downloadingBytes": "正在下载 {{size}}",
+    "streamFailed": "连上网盘了，但没能拿到这个视频",
+    "takenCount": "{{count}} 个已在课程里"
   },
   "bilibiliImport": {
     "title": "下载网络视频",

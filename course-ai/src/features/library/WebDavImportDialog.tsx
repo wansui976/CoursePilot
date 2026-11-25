@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,15 +22,18 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { Modal } from "@/ui/dialog";
 import { Select } from "@/ui/select";
+import { Skeleton } from "@/ui/skeleton";
 import { ipc, type WebDavEntry, type WebDavSource } from "@/lib/ipc";
+import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
 import { isMobile } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { useDownloads } from "@/stores/downloads";
+import { isActiveDownload, useDownloads } from "@/stores/downloads";
 
 type Mode = "download" | "stream";
 type PresetKey = "openlist" | "quark" | "jianguoyun" | "nextcloud" | "synology" | "other";
@@ -44,15 +47,41 @@ const PRESETS: { key: PresetKey; url: string; icon: LucideIcon }[] = [
   { key: "other", url: "", icon: Globe },
 ];
 
+/** 已保存的来源大概是哪一种：编辑时据此给对应的提示（地址认不出就按「其它」）。 */
+function presetOf(source: Pick<WebDavSource, "kind" | "url">): PresetKey {
+  if (source.kind === "quark") return "quark";
+  const url = source.url.toLowerCase();
+  if (url.includes("jianguoyun.com")) return "jianguoyun";
+  if (url.includes("remote.php/dav")) return "nextcloud";
+  if (/:5244\//.test(url)) return "openlist";
+  if (/:500[56]\//.test(url)) return "synology";
+  return "other";
+}
+
+// 输入框：r-sm、surface-input；悬停加深边线，聚焦用固定的蓝色焦点环（不和绿色的操作色混）。
 const FIELD =
-  "w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-muted)] focus-visible:border-[var(--accent-text)]";
+  "w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-strong)] outline-none transition-colors placeholder:text-[var(--text-faint)] hover:border-[var(--border-strong)] focus-visible:border-[var(--focus-ring)] focus-visible:ring-[3px] focus-visible:ring-[color-mix(in_srgb,var(--focus-ring)_22%,transparent)]";
+
+// 勾选框用墨色：选中是中性状态，绿色只留给「导入」这一个主操作。
+const CHECKBOX = "h-4 w-4 flex-none cursor-pointer accent-[var(--text-strong)] disabled:cursor-not-allowed";
 
 const MB = 1024 * 1024;
-const formatSize = (bytes: number | null) =>
-  bytes == null ? "" : bytes >= 1024 * MB ? `${(bytes / 1024 / MB).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`;
+const formatSize = (bytes: number) =>
+  bytes >= 1024 * MB ? `${(bytes / 1024 / MB).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / MB))} MB`;
 
 const titleOf = (name: string) => name.replace(/\.[^.]+$/, "");
 const extensionOf = (name: string) => name.match(/\.[^.]+$/)?.[0] ?? "";
+
+const MODE_KEY = "courseai.webdavImport.mode";
+function initialMode(): Mode {
+  try {
+    const saved = window.localStorage.getItem(MODE_KEY);
+    if (saved === "download" || saved === "stream") return saved;
+  } catch {
+    // 拿不到本地存储（隐私模式之类）：按设备给默认值。
+  }
+  return isMobile() ? "stream" : "download";
+}
 
 type Draft = { id: string | null; preset: PresetKey; name: string; url: string; user: string; password: string };
 
@@ -68,8 +97,8 @@ const OPENLIST_LINKS: Partial<Record<(typeof OPENLIST_STEPS)[number], string>> =
 function OpenListGuide() {
   const { t } = useTranslation();
   return (
-    <details className="group rounded-xl border border-[var(--border-faint)] px-3.5 py-3">
-      <summary className="ca-t-sm flex cursor-pointer list-none items-center gap-1.5 font-medium text-[var(--text-strong)] [&::-webkit-details-marker]:hidden">
+    <details className="group rounded-lg border border-[var(--border-faint)] px-3.5 py-3">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 font-[family-name:var(--font-display)] text-[15px] font-medium text-[var(--text-strong)] [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className="h-4 w-4 flex-none text-[var(--text-muted)] transition-transform group-open:rotate-90"
           aria-hidden="true"
@@ -81,7 +110,7 @@ function OpenListGuide() {
           const link = OPENLIST_LINKS[step];
           return (
             <li key={step} className="flex gap-2.5">
-              <span className="ca-t-xs mt-px flex h-5 w-5 flex-none items-center justify-center rounded-full bg-[var(--accent-weak)] font-semibold tabular-nums text-[var(--accent-text)]">
+              <span className="mt-px flex h-5 w-5 flex-none items-center justify-center rounded-[var(--r-xs)] bg-[var(--surface-card-hover)] font-mono text-[11px] text-[var(--text-muted)]">
                 {index + 1}
               </span>
               <p className="ca-t-xs min-w-0 leading-relaxed text-[var(--text-normal)]">
@@ -89,7 +118,7 @@ function OpenListGuide() {
                 {link && (
                   <button
                     type="button"
-                    className="ml-1 inline-flex items-center gap-0.5 font-medium text-[var(--accent-text)] hover:underline"
+                    className="ml-1 inline-flex items-center gap-0.5 font-medium text-[var(--accent-text)] underline decoration-[color-mix(in_srgb,var(--accent-text)_35%,transparent)] underline-offset-[3px] hover:decoration-current"
                     onClick={() => void openUrl(link)}
                   >
                     {link.replace(/^https:\/\//, "").replace(/\/$/, "")}
@@ -108,11 +137,11 @@ function OpenListGuide() {
   );
 }
 
-/** 表单里的一项：小标签在上，输入框在下。 */
+/** 表单里的一项：标签在上，输入框在下。 */
 function Field({ label, children, htmlFor }: { label: string; htmlFor: string; children: ReactNode }) {
   return (
     <div className="min-w-0 space-y-1.5">
-      <label htmlFor={htmlFor} className="ca-t-xs block font-medium text-[var(--text-muted)]">
+      <label htmlFor={htmlFor} className="block text-[13px] font-medium text-[var(--text-normal)]">
         {label}
       </label>
       {children}
@@ -120,13 +149,15 @@ function Field({ label, children, htmlFor }: { label: string; htmlFor: string; c
   );
 }
 
-/** 添加 / 编辑一个网盘来源。 */
+/** 添加 / 编辑一个网盘来源。编辑时不再让换类型：地址、账号、凭据都跟着类型走。 */
 function SourceForm({
   initial,
   hasSavedPassword,
   onSaved,
   onCancel,
   onDelete,
+  deleting,
+  deleteError,
 }: {
   initial: Draft;
   hasSavedPassword: boolean;
@@ -134,11 +165,14 @@ function SourceForm({
   onCancel?: () => void;
   /** 编辑已保存的来源时才有。 */
   onDelete?: () => void;
+  deleting?: boolean;
+  deleteError?: unknown;
 }) {
   const { t } = useTranslation();
   const id = useId();
   const [draft, setDraft] = useState<Draft>(initial);
   const [tested, setTested] = useState<number | null>(null);
+  const editing = draft.id != null;
   const set = (patch: Partial<Draft>) => {
     setTested(null);
     setDraft((current) => ({ ...current, ...patch }));
@@ -173,47 +207,54 @@ function SourceForm({
     set({ preset, url: url || (draft.url && !PRESETS.some((one) => one.url === draft.url) ? draft.url : "") });
   }
 
+  const error = test.error ?? save.error ?? deleteError;
+
   return (
     <div className="space-y-5">
-      <div role="radiogroup" aria-label={t("webdavImport.kind")} className="grid grid-cols-2 gap-2">
-        {PRESETS.map(({ key, icon: Icon }) => {
-          const active = draft.preset === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => choose(key)}
-              className={cn(
-                "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
-                active
-                  ? "border-[var(--accent-text)] bg-[var(--accent-weak)]"
-                  : "border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)]",
-              )}
-            >
-              <span
+      {!editing && (
+        <div role="radiogroup" aria-label={t("webdavImport.kind")} className="grid grid-cols-2 gap-2">
+          {PRESETS.map(({ key, icon: Icon }) => {
+            const active = draft.preset === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => choose(key)}
                 className={cn(
-                  "flex h-8 w-8 flex-none items-center justify-center rounded-lg",
-                  active ? "bg-[var(--surface-panel)] text-[var(--accent-text)]" : "bg-[var(--surface-input)] text-[var(--text-muted)]",
+                  "flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  // 选中用中性底：一屏里的绿色只留给主操作。
+                  active
+                    ? "border-[var(--border-strong)] bg-[var(--surface-card-active)]"
+                    : "border-[var(--border-subtle)] hover:bg-[var(--surface-card-hover)]",
                 )}
               >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-[var(--text-strong)]">
-                  {t(`webdavImport.tiles.${key}.title`)}
+                <span
+                  className={cn(
+                    "flex h-8 w-8 flex-none items-center justify-center rounded-md transition-colors",
+                    active
+                      ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-[var(--shadow-raise)]"
+                      : "bg-[var(--surface-card-hover)] text-[var(--text-muted)]",
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden="true" />
                 </span>
-                <span className="ca-t-xs block truncate text-[var(--text-muted)]">{t(`webdavImport.tiles.${key}.sub`)}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-[var(--text-strong)]">
+                    {t(`webdavImport.tiles.${key}.title`)}
+                  </span>
+                  <span className="ca-t-xs block truncate text-[var(--text-muted)]">{t(`webdavImport.tiles.${key}.sub`)}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      <p className="ca-t-xs flex gap-2 rounded-lg bg-[var(--surface-input)] px-3 py-2.5 leading-relaxed text-[var(--text-muted)]">
-        <Info className="mt-0.5 h-3.5 w-3.5 flex-none" aria-hidden="true" />
-        <span>{t(`webdavImport.presetHints.${draft.preset}`)}</span>
+      <p className="ca-callout info">
+        <Info className="ca-callout-icon" aria-hidden="true" />
+        <span className="min-w-0">{t(`webdavImport.presetHints.${draft.preset}`)}</span>
       </p>
 
       {quark ? (
@@ -232,6 +273,10 @@ function SourceForm({
             <input
               id={`${id}-url`}
               className={FIELD}
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder={t(`webdavImport.urlPlaceholders.${draft.preset}`)}
               value={draft.url}
               onChange={(event) => set({ url: event.target.value })}
@@ -243,6 +288,9 @@ function SourceForm({
                 id={`${id}-user`}
                 className={FIELD}
                 autoComplete="username"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={draft.user}
                 onChange={(event) => set({ user: event.target.value })}
               />
@@ -271,15 +319,22 @@ function SourceForm({
         />
       </Field>
 
-      {(test.error || save.error) && <ErrorNote error={test.error ?? save.error} />}
-      <div className="flex flex-wrap items-center gap-2">
+      {error != null && <ErrorNote error={error} />}
+      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border-faint)] pt-4">
         {onDelete ? (
-          <Button size="sm" variant="ghost" className="text-[var(--text-muted)] hover:text-[var(--status-err)]" onClick={onDelete}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-[var(--text-muted)] hover:text-[var(--status-err)]"
+            disabled={deleting}
+            onClick={onDelete}
+          >
+            {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {t("webdavImport.delete")}
           </Button>
         ) : null}
         {tested != null && (
-          <span className="ca-t-xs inline-flex items-center gap-1 font-medium text-[var(--status-ok)]">
+          <span role="status" className="ca-t-xs inline-flex items-center gap-1 font-medium text-[var(--status-ok)]">
             <Check className="h-3.5 w-3.5" aria-hidden="true" />
             {t("webdavImport.testOk", { count: tested })}
           </span>
@@ -290,7 +345,7 @@ function SourceForm({
               {t("common.cancel")}
             </Button>
           )}
-          <Button size="sm" variant="outline" disabled={!complete || test.isPending} onClick={() => test.mutate()}>
+          <Button size="sm" variant="default" disabled={!complete || test.isPending} onClick={() => test.mutate()}>
             {test.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {t("webdavImport.test")}
           </Button>
@@ -316,20 +371,23 @@ function Breadcrumb({
 }) {
   const { t } = useTranslation();
   const collapsed = trail.length > 3;
-  const shown = collapsed ? trail.slice(-2).map((crumb, i) => ({ crumb, depth: trail.length - 1 + i })) : trail.map((crumb, i) => ({ crumb, depth: i + 1 }));
-  const crumbClass = "min-w-0 max-w-[14rem] truncate rounded-md px-1.5 py-0.5 hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
+  const shown = collapsed
+    ? trail.slice(-2).map((crumb, i) => ({ crumb, depth: trail.length - 1 + i }))
+    : trail.map((crumb, i) => ({ crumb, depth: i + 1 }));
+  const crumbClass =
+    "min-w-0 max-w-[14rem] truncate rounded-[var(--r-xs)] px-1.5 py-0.5 transition-colors hover:bg-[var(--surface-card-hover)] hover:text-[var(--text-strong)]";
   return (
     <nav
       aria-label={t("webdavImport.location")}
       className="ca-t-sm flex min-w-0 flex-nowrap items-center gap-0.5 overflow-hidden text-[var(--text-muted)]"
     >
-      <button type="button" className={cn(crumbClass, "inline-flex flex-none items-center gap-1")} onClick={() => onGo(0)}>
+      <button type="button" className={cn(crumbClass, "inline-flex flex-none items-center gap-1", trail.length === 0 && "font-medium text-[var(--text-strong)]")} onClick={() => onGo(0)}>
         <Home className="h-3.5 w-3.5" aria-hidden="true" />
         {t("webdavImport.root")}
       </button>
       {collapsed && (
         <>
-          <ChevronRight className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+          <ChevronRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" aria-hidden="true" />
           <button type="button" className={cn(crumbClass, "flex-none")} aria-label={t("webdavImport.up")} onClick={() => onGo(trail.length - 2)}>
             …
           </button>
@@ -337,9 +395,10 @@ function Breadcrumb({
       )}
       {shown.map(({ crumb, depth }) => (
         <span key={`${depth}-${crumb.path}`} className="flex min-w-0 items-center gap-0.5">
-          <ChevronRight className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+          <ChevronRight className="h-3.5 w-3.5 flex-none text-[var(--text-faint)]" aria-hidden="true" />
           <button
             type="button"
+            aria-current={depth === trail.length ? "location" : undefined}
             className={cn(crumbClass, depth === trail.length && "font-medium text-[var(--text-strong)]")}
             onClick={() => onGo(depth)}
           >
@@ -349,6 +408,54 @@ function Breadcrumb({
       ))}
     </nav>
   );
+}
+
+/** 读文件夹时的占位：几行和真实行一样高的骨架。 */
+function ListingSkeleton() {
+  const { t } = useTranslation();
+  return (
+    <div role="status" aria-label={t("webdavImport.loadingFolder")} className="space-y-1 px-3 py-2">
+      {[62, 48, 70, 40, 56].map((width) => (
+        <div key={width} className="flex h-9 items-center gap-3">
+          <Skeleton className="h-4 w-4 flex-none rounded-[var(--r-xs)]" />
+          <div className="min-w-0" style={{ width: `${width}%` }}>
+            <Skeleton className="h-3 w-full rounded-[var(--r-xs)]" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 行尾的小签：已经在课程里、正在下载。中性色，配一个词。 */
+function RowTag({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex-none rounded-[var(--r-xs)] border border-[var(--border-faint)] px-1.5 py-px text-[12px] leading-[18px] text-[var(--text-muted)]">
+      {children}
+    </span>
+  );
+}
+
+/** 按住 Shift 没有：勾选时据此连选一段。 */
+function useShiftHeld() {
+  const held = useRef(false);
+  useEffect(() => {
+    const update = (event: KeyboardEvent) => {
+      held.current = event.shiftKey;
+    };
+    const reset = () => {
+      held.current = false;
+    };
+    window.addEventListener("keydown", update);
+    window.addEventListener("keyup", update);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("keydown", update);
+      window.removeEventListener("keyup", update);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+  return held;
 }
 
 /** 从网盘导入：选来源 → 浏览文件夹 → 勾选视频 → 下载到本机 / 在线看。 */
@@ -371,8 +478,11 @@ export function WebDavImportDialog({
   const [trail, setTrail] = useState<{ name: string; path: string }[]>([]);
   const path = trail.length > 0 ? trail[trail.length - 1].path : "";
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [mode, setMode] = useState<Mode>(isMobile() ? "stream" : "download");
+  const [mode, setModeState] = useState<Mode>(initialMode);
   const [editing, setEditing] = useState<{ draft: Draft; hasSavedPassword: boolean } | null>(null);
+  const shiftHeld = useShiftHeld();
+  // 上一次点的那一行（在可勾选的视频里的位置）：Shift 连选从这里起。
+  const anchor = useRef<number | null>(null);
 
   const sources = useQuery({ queryKey: ["webdav-sources"], queryFn: () => ipc.webdavImport.sources() });
   const activeId = sourceId ?? sources.data?.[0]?.id ?? null;
@@ -383,35 +493,87 @@ export function WebDavImportDialog({
     enabled: activeId != null && editing == null,
     retry: false,
   });
+
+  // 课程里已经有的（同一个网盘地址）和下载队列里正在下的：不再让重复导入。
+  const courseVideos = useQuery(queries.videos(courseId));
+  const jobs = useDownloads((state) => state.byId);
+  const taken = useMemo(() => {
+    const map = new Map<string, "inCourse" | "inQueue">();
+    for (const job of Object.values(jobs)) {
+      if (job.courseId === courseId && isActiveDownload(job.status)) map.set(job.url, "inQueue");
+    }
+    for (const video of courseVideos.data ?? []) {
+      if (video.source_uri) map.set(video.source_uri, "inCourse");
+    }
+    return map;
+  }, [courseId, courseVideos.data, jobs]);
+
   const entries = useMemo(() => (listing.data ?? []).filter((entry) => entry.isDir || entry.isVideo), [listing.data]);
   const videos = entries.filter((entry) => entry.isVideo);
-  const chosen = videos.filter((entry) => selected.has(entry.url));
-  const allChosen = videos.length > 0 && chosen.length === videos.length;
+  const pickable = videos.filter((entry) => !taken.has(entry.url));
+  const chosen = pickable.filter((entry) => selected.has(entry.url));
+  const allChosen = pickable.length > 0 && chosen.length === pickable.length;
+  const takenCount = videos.length - pickable.length;
+  const sizeKnown = chosen.some((entry) => entry.size != null);
   const chosenBytes = chosen.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+
+  function setMode(next: Mode) {
+    setModeState(next);
+    try {
+      window.localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // 存不下就只管这一次。
+    }
+  }
 
   function open(entry: WebDavEntry) {
     setTrail((current) => [...current, { name: entry.name, path: entry.path }]);
     setSelected(new Set());
+    anchor.current = null;
   }
 
   /** 回到第 depth 层（0 = 根目录）。 */
   function goTo(depth: number) {
     setTrail((current) => current.slice(0, depth));
     setSelected(new Set());
+    anchor.current = null;
   }
 
   function switchSource(id: string) {
     setSourceId(id);
     setTrail([]);
     setSelected(new Set());
+    anchor.current = null;
   }
 
-  function toggle(url: string) {
+  /** 勾 / 取消一行；按住 Shift 时把上一次点的那行到这行之间都设成同样的状态。 */
+  function toggle(entry: WebDavEntry) {
+    const index = pickable.indexOf(entry);
+    const on = !selected.has(entry.url);
+    const from = shiftHeld.current && anchor.current != null ? Math.min(anchor.current, index) : index;
+    const to = shiftHeld.current && anchor.current != null ? Math.max(anchor.current, index) : index;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(url)) next.delete(url);
-      else next.add(url);
+      for (const one of pickable.slice(from, to + 1)) {
+        if (on) next.add(one.url);
+        else next.delete(one.url);
+      }
       return next;
+    });
+    anchor.current = index;
+  }
+
+  function startEdit(source: WebDavSource) {
+    setEditing({
+      draft: {
+        id: source.id,
+        preset: presetOf(source),
+        name: source.name,
+        url: source.url,
+        user: source.user,
+        password: "",
+      },
+      hasSavedPassword: source.hasPassword,
     });
   }
 
@@ -425,17 +587,23 @@ export function WebDavImportDialog({
     },
   });
 
+  async function confirmRemove(draft: Draft) {
+    if (!draft.id) return;
+    const ok = await confirmDialog(
+      t("webdavImport.deleteConfirm", { name: draft.name || t(`webdavImport.tiles.${draft.preset}.title`) }),
+      { title: t("webdavImport.deleteTitle"), kind: "warning", okLabel: t("webdavImport.deleteOk"), cancelLabel: t("common.cancel") },
+    );
+    if (ok) remove.mutate(draft.id);
+  }
+
   const importing = useMutation({
     mutationFn: async () => {
       const items = chosen.map((entry) => ({ url: entry.url, title: titleOf(entry.name) }));
       if (mode === "stream") {
         await ipc.webdavImport.importStream(courseId, items);
       } else {
-        const jobs = await ipc.downloads.enqueue(
-          courseId,
-          // 下完要不要立刻处理，按设置「导入后立刻处理」。
-          items.map((item) => ({ url: item.url, title: item.title })),
-        );
+        // 下完要不要立刻处理，按设置「导入后立刻处理」。
+        const jobs = await ipc.downloads.enqueue(courseId, items);
         useDownloads.getState().addMany(jobs);
       }
     },
@@ -476,7 +644,9 @@ export function WebDavImportDialog({
             initial={editing?.draft ?? emptyDraft()}
             hasSavedPassword={editing?.hasSavedPassword ?? false}
             onCancel={noSources && !editing ? undefined : () => setEditing(null)}
-            onDelete={editing?.draft.id ? () => remove.mutate(editing.draft.id as string) : undefined}
+            onDelete={editing?.draft.id ? () => void confirmRemove(editing.draft) : undefined}
+            deleting={remove.isPending}
+            deleteError={remove.error}
             onSaved={async (source) => {
               setEditing(null);
               await queryClient.invalidateQueries({ queryKey: ["webdav-sources"] });
@@ -504,32 +674,20 @@ export function WebDavImportDialog({
             </Select>
             {!active.isSync && (
               <Button
-                size="sm"
+                size="icon"
                 variant="ghost"
-                className="h-9 w-9 flex-none px-0 text-[var(--text-muted)]"
+                className="h-9 w-9 flex-none text-[var(--text-muted)]"
                 aria-label={t("webdavImport.edit")}
                 title={t("webdavImport.edit")}
-                onClick={() =>
-                  setEditing({
-                    draft: {
-                      id: active.id,
-                      preset: active.kind === "quark" ? "quark" : "other",
-                      name: active.name,
-                      url: active.url,
-                      user: active.user,
-                      password: "",
-                    },
-                    hasSavedPassword: active.hasPassword,
-                  })
-                }
+                onClick={() => startEdit(active)}
               >
                 <Settings2 className="h-4 w-4" />
               </Button>
             )}
             <Button
               size="sm"
-              variant="outline"
-              className="flex-none"
+              variant="default"
+              className="h-9 flex-none"
               onClick={() => setEditing({ draft: emptyDraft(), hasSavedPassword: false })}
             >
               <Plus className="h-3.5 w-3.5" />
@@ -537,75 +695,112 @@ export function WebDavImportDialog({
             </Button>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)]">
-            <div className="flex items-center gap-2 border-b border-[var(--border-faint)] bg-[var(--surface-input)] px-2 py-1.5">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel)]">
+            <div className="flex h-10 flex-none items-center border-b border-[var(--border-faint)] px-2">
               <Breadcrumb trail={trail} onGo={goTo} />
             </div>
             <div className="h-[min(20rem,42vh)] overflow-y-auto">
-              {listing.isPending && <Loader2 className="mx-auto my-10 h-5 w-5 animate-spin text-[var(--text-muted)]" />}
+              {listing.isPending && <ListingSkeleton />}
               {listing.error && (
-                <div className="p-3">
+                <div className="space-y-2 p-3">
                   <ErrorNote error={listing.error} onRetry={() => void listing.refetch()} />
+                  {active.isSync ? (
+                    <p className="ca-t-xs px-1 text-[var(--text-muted)]">{t("webdavImport.syncSourceHint")}</p>
+                  ) : (
+                    <Button size="sm" variant="link" className="ml-1" onClick={() => startEdit(active)}>
+                      {t("webdavImport.checkSource")}
+                    </Button>
+                  )}
                 </div>
               )}
               {listing.isSuccess && entries.length === 0 && (
-                <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
-                  <Folder className="h-6 w-6 opacity-60" aria-hidden="true" />
-                  <p className="ca-t-sm">{t("webdavImport.empty")}</p>
+                <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center">
+                  <p className="font-[family-name:var(--font-display)] text-[15px] font-medium text-[var(--text-strong)]">
+                    {t("webdavImport.empty")}
+                  </p>
+                  <p className="ca-t-xs max-w-[22rem] text-[var(--text-muted)]">{t("webdavImport.emptyHint")}</p>
                 </div>
               )}
-              {videos.length > 0 && (
-                <label className="ca-t-xs sticky top-0 z-10 flex cursor-pointer items-center gap-3 border-b border-[var(--border-faint)] bg-[var(--surface-panel)] px-3 py-2 text-[var(--text-muted)]">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 flex-none accent-[var(--accent-text)]"
-                    checked={allChosen}
-                    ref={(node) => {
-                      if (node) node.indeterminate = chosen.length > 0 && !allChosen;
-                    }}
-                    onChange={() => setSelected(allChosen ? new Set() : new Set(videos.map((entry) => entry.url)))}
-                  />
-                  {chosen.length > 0 && !allChosen
-                    ? t("webdavImport.selectedOf", { count: chosen.length, total: videos.length })
-                    : t("webdavImport.selectAll", { count: videos.length })}
-                </label>
+              {pickable.length > 0 && (
+                <div className="ca-t-xs sticky top-0 z-10 flex h-9 items-center gap-3 border-b border-[var(--border-faint)] bg-[var(--surface-panel)] px-3 text-[var(--text-muted)]">
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className={CHECKBOX}
+                      checked={allChosen}
+                      ref={(node) => {
+                        if (node) node.indeterminate = chosen.length > 0 && !allChosen;
+                      }}
+                      onChange={() => {
+                        setSelected(allChosen ? new Set() : new Set(pickable.map((entry) => entry.url)));
+                        anchor.current = null;
+                      }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {chosen.length > 0 && !allChosen
+                        ? t("webdavImport.selectedOf", { count: chosen.length, total: pickable.length })
+                        : t("webdavImport.selectAll", { count: pickable.length })}
+                    </span>
+                  </label>
+                  {takenCount > 0 && (
+                    <span className="flex-none text-[var(--text-faint)]">{t("webdavImport.takenCount", { count: takenCount })}</span>
+                  )}
+                </div>
               )}
-              <ul className="py-1">
-                {entries.map((entry) =>
-                  entry.isDir ? (
-                    <li key={`dir-${entry.path}`} className="px-1">
-                      <button
-                        type="button"
-                        className="flex h-10 w-full items-center gap-3 rounded-lg px-2 text-left text-sm text-[var(--text-strong)] hover:bg-[var(--surface-card-hover)]"
-                        onClick={() => open(entry)}
+              <ul className="p-1">
+                {entries.map((entry) => {
+                  if (entry.isDir) {
+                    return (
+                      <li key={`dir-${entry.path}`}>
+                        <button
+                          type="button"
+                          className="flex h-10 w-full items-center gap-3 rounded-md px-2 text-left text-sm text-[var(--text-strong)] transition-colors hover:bg-[var(--surface-card-hover)]"
+                          onClick={() => open(entry)}
+                        >
+                          {/* 有视频可勾选时留出勾选框的位置，文件夹和文件的图标上下对齐。 */}
+                          {videos.length > 0 && <span className="w-4 flex-none" aria-hidden="true" />}
+                          <Folder className="h-4 w-4 flex-none text-[var(--text-muted)]" aria-hidden="true" />
+                          <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                          <ChevronRight className="h-4 w-4 flex-none text-[var(--text-faint)]" aria-hidden="true" />
+                        </button>
+                      </li>
+                    );
+                  }
+                  const state = taken.get(entry.url);
+                  const checked = !state && selected.has(entry.url);
+                  return (
+                    <li key={entry.url}>
+                      <label
+                        className={cn(
+                          "flex h-10 items-center gap-3 rounded-md px-2 text-sm transition-colors",
+                          state
+                            ? "cursor-default"
+                            : checked
+                              ? "cursor-pointer bg-[var(--surface-card-active)]"
+                              : "cursor-pointer hover:bg-[var(--surface-card-hover)]",
+                        )}
                       >
-                        {/* 有视频可勾选时留出勾选框的位置，文件夹和文件的图标上下对齐。 */}
-                        {videos.length > 0 && <span className="w-4 flex-none" aria-hidden="true" />}
-                        <Folder className="h-4 w-4 flex-none fill-[var(--accent-weak)] text-[var(--accent-text)]" aria-hidden="true" />
-                        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                        <ChevronRight className="h-4 w-4 flex-none text-[var(--text-muted)]" aria-hidden="true" />
-                      </button>
-                    </li>
-                  ) : (
-                    <li key={entry.url} className="px-1">
-                      <label className="flex h-10 cursor-pointer items-center gap-3 rounded-lg px-2 text-sm hover:bg-[var(--surface-card-hover)]">
                         <input
                           type="checkbox"
-                          className="h-4 w-4 flex-none accent-[var(--accent-text)]"
-                          checked={selected.has(entry.url)}
-                          onChange={() => toggle(entry.url)}
+                          className={CHECKBOX}
+                          checked={checked}
+                          disabled={state != null}
+                          onChange={() => toggle(entry)}
                           aria-label={entry.name}
                         />
                         <FileVideo className="h-4 w-4 flex-none text-[var(--text-muted)]" aria-hidden="true" />
-                        <span className="min-w-0 flex-1 truncate text-[var(--text-strong)]">
+                        <span className={cn("min-w-0 flex-1 truncate", state ? "text-[var(--text-muted)]" : "text-[var(--text-strong)]")}>
                           {titleOf(entry.name)}
-                          <span className="text-[var(--text-muted)]">{extensionOf(entry.name)}</span>
+                          <span className="text-[var(--text-faint)]">{extensionOf(entry.name)}</span>
                         </span>
-                        <span className="ca-t-xs flex-none tabular-nums text-[var(--text-muted)]">{formatSize(entry.size)}</span>
+                        {state && <RowTag>{t(`webdavImport.${state}`)}</RowTag>}
+                        {entry.size != null && (
+                          <span className="flex-none font-mono text-[12px] text-[var(--text-faint)]">{formatSize(entry.size)}</span>
+                        )}
                       </label>
                     </li>
-                  ),
-                )}
+                  );
+                })}
               </ul>
             </div>
           </div>
@@ -614,7 +809,7 @@ export function WebDavImportDialog({
             <div
               role="radiogroup"
               aria-label={t("webdavImport.mode")}
-              className="grid grid-cols-2 gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-input)] p-1"
+              className="grid grid-cols-2 gap-0.5 rounded-lg bg-[var(--surface-card-hover)] p-0.5"
             >
               {(["download", "stream"] as const).map((value) => {
                 const Icon = value === "download" ? HardDriveDownload : Cloud;
@@ -623,28 +818,30 @@ export function WebDavImportDialog({
                   <label
                     key={value}
                     className={cn(
-                      "flex cursor-pointer items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+                      "flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus-ring)]",
                       activeMode
-                        ? "bg-[var(--surface-panel)] font-medium text-[var(--text-strong)] shadow-[0_1px_2px_rgb(0_0_0/0.08)]"
+                        ? "bg-[var(--surface-panel)] text-[var(--text-strong)] shadow-[var(--shadow-raise)]"
                         : "text-[var(--text-muted)] hover:text-[var(--text-strong)]",
                     )}
                   >
                     <input type="radio" name="webdav-mode" className="sr-only" checked={activeMode} onChange={() => setMode(value)} />
-                    <Icon className={cn("h-4 w-4", activeMode && "text-[var(--accent-text)]")} aria-hidden="true" />
+                    <Icon className="h-[15px] w-[15px]" aria-hidden="true" />
                     {t(`webdavImport.modes.${value}`)}
                   </label>
                 );
               })}
             </div>
-            <p className="ca-t-xs px-1 leading-relaxed text-[var(--text-muted)]">{t(`webdavImport.modeHints.${mode}`)}</p>
+            <p className="ca-t-xs px-1 leading-relaxed text-[var(--text-faint)]">{t(`webdavImport.modeHints.${mode}`)}</p>
           </div>
 
           {importing.error && <ErrorNote error={importing.error} />}
-          <div className="flex items-center gap-2 pt-1">
+          <div className="flex items-center gap-2 border-t border-[var(--border-faint)] pt-3">
             <p className="ca-t-xs min-w-0 flex-1 truncate text-[var(--text-muted)]">
               {chosen.length > 0
-                ? t("webdavImport.summary", { count: chosen.length, size: formatSize(chosenBytes) })
-                : t("webdavImport.pickFirst")}
+                ? sizeKnown
+                  ? t("webdavImport.summary", { count: chosen.length, size: formatSize(chosenBytes) })
+                  : t("webdavImport.summaryCount", { count: chosen.length })
+                : t(isMobile() || pickable.length < 2 ? "webdavImport.pickFirst" : "webdavImport.pickFirstShift")}
             </p>
             <Button variant="ghost" onClick={onClose} disabled={importing.isPending}>
               {t("common.cancel")}

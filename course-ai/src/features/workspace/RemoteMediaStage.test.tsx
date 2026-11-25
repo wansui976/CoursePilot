@@ -14,11 +14,14 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 
 const video = { id: "v1", course_id: "c1", title: "01 概括", file_path: "" } as unknown as Video;
 
-function renderStage(props: { lanChecking?: boolean; onRetryLan?: () => void } = {}) {
+function renderStage(
+  props: { lanChecking?: boolean; onRetryLan?: () => void; driveError?: unknown } = {},
+  target: Video = video,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <RemoteMediaStage video={video} {...props} />
+      <RemoteMediaStage video={target} {...props} />
     </QueryClientProvider>,
   );
 }
@@ -75,5 +78,21 @@ describe("RemoteMediaStage", () => {
     );
     expect(await screen.findByText(/这台设备还没连上能访问它的网盘/)).toBeInTheDocument();
     expect(screen.queryByText(/从别的设备同步过来/)).not.toBeInTheDocument();
+  });
+  it("夸克网盘上的视频、这台设备没连夸克：说去添加同一个网盘", async () => {
+    mockIpc.remoteSync.mediaSize.mockResolvedValue(null);
+    renderStage({}, { ...video, source_type: "url", source_uri: "quark://f1/%E7%AC%AC1%E8%AE%B2.mp4" } as Video);
+    expect(await screen.findByText(/添加同一个网盘/)).toBeInTheDocument();
+  });
+
+  it("网盘那边出错：照实说原因，不说没连网盘", async () => {
+    mockIpc.remoteSync.mediaSize.mockResolvedValue(null);
+    renderStage(
+      { driveError: new Error("夸克网盘的登录已失效：在浏览器里重新登录 pan.quark.cn，再复制一份 Cookie") },
+      { ...video, source_type: "url", source_uri: "quark://f1/a.mp4" } as Video,
+    );
+    expect(await screen.findByText("连上网盘了，但没能拿到这个视频")).toBeInTheDocument();
+    expect(screen.getByText(/登录已失效/)).toBeInTheDocument();
+    expect(screen.queryByText(/添加同一个网盘/)).not.toBeInTheDocument();
   });
 });

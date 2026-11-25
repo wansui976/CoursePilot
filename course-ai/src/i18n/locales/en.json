@@ -1691,7 +1691,21 @@
     "editTitle": "Edit drive",
     "up": "Up one level",
     "summary": "{{count}} selected · {{size}}",
-    "importShort": "Import"
+    "importShort": "Import",
+    "inCourse": "In this course",
+    "inQueue": "Downloading",
+    "emptyHint": "Common video and audio files can be imported, such as mp4, mkv and mp3.",
+    "loadingFolder": "Reading folder",
+    "checkSource": "Check this drive's settings",
+    "syncSourceHint": "The sync drive is edited in Settings → Sync across devices.",
+    "deleteTitle": "Delete this drive?",
+    "deleteConfirm": "After deleting “{{name}}”, videos streamed from it can only play once the same drive is connected again. Videos already downloaded are not affected.",
+    "deleteOk": "Delete",
+    "summaryCount": "{{count}} selected",
+    "pickFirstShift": "Tick the videos to import; hold Shift to select a range",
+    "downloadingBytes": "Downloading {{size}}",
+    "streamFailed": "Connected to the drive, but couldn't get this video",
+    "takenCount": "{{count}} already in this course"
   },
   "bilibiliImport": {
     "title": "Download Online Video",

@@ -6,13 +6,14 @@ import { CloudDownload, Loader2, Wifi } from "lucide-react";
 import { Button } from "@/ui/button";
 import { ErrorNote } from "@/ui/ErrorNote";
 import { ipc, type RemoteSyncDownloadEvent } from "@/lib/ipc";
+import { humanizeError } from "@/lib/errors";
 import type { Video } from "@/lib/types";
 
 const MB = 1024 * 1024;
 
-/** 看起来是网盘（WebDAV）上的文件：只用来决定提示怎么说。 */
+/** 看起来是网盘上的文件（WebDAV，或者夸克的 `quark://`）：只用来决定提示怎么说。 */
 const looksLikeDriveFile = (video: Video) =>
-  video.source_type === "url" && /\/dav(\/|$)|remote\.php\/dav|:500[56]\//i.test(video.source_uri ?? "");
+  video.source_type === "url" && /^quark:\/\/|\/dav(\/|$)|remote\.php\/dav|:500[56]\//i.test(video.source_uri ?? "");
 const formatMb = (bytes: number) => `${Math.max(1, Math.round(bytes / MB))} MB`;
 
 /**
@@ -25,14 +26,17 @@ const formatMb = (bytes: number) => `${Math.max(1, Math.round(bytes / MB))} MB`;
  */
 export function RemoteMediaStage({
   video,
+  driveError = null,
   lanChecking = false,
   onRetryLan,
 }: {
   video: Video;
+  /** 有能访问它的网盘来源、但网盘那边出错了（登录失效、文件没了）：照实说原因。 */
+  driveError?: unknown;
   lanChecking?: boolean;
   onRetryLan?: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<{ received: number; total: number } | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -79,16 +83,18 @@ export function RemoteMediaStage({
         {/* 手机舞台矮，图标占的高度正好把底部的「在局域网里再找一次」挤到画外，窄屏只留文字和按钮。 */}
         <CloudDownload className="h-10 w-10 text-white/50 max-sm:hidden" aria-hidden="true" />
         <div className="max-w-sm space-y-1.5">
-          <p className="ca-t-md font-medium">{t("remoteMedia.title")}</p>
+          <p className="ca-t-md font-medium">{driveError != null ? t("webdavImport.streamFailed") : t("remoteMedia.title")}</p>
           {/* 网盘「在线看」的视频：说怎么连上那个网盘；不再接着说「从别的设备同步过来」那套，两段话互相打架。 */}
           <p className="ca-t-sm leading-relaxed text-white/55">
-            {looksLikeDriveFile(video)
-              ? t("webdavImport.streamUnavailable")
-              : size.isError
-                ? t("remoteMedia.noSync")
-                : size.data === null
-                  ? t("remoteMedia.notUploaded")
-                  : t("remoteMedia.available")}
+            {driveError != null
+              ? humanizeError(driveError, i18n.language)
+              : looksLikeDriveFile(video)
+                ? t("webdavImport.streamUnavailable")
+                : size.isError
+                  ? t("remoteMedia.noSync")
+                  : size.data === null
+                    ? t("remoteMedia.notUploaded")
+                    : t("remoteMedia.available")}
           </p>
         </div>
         {size.isPending && <Loader2 className="h-4 w-4 animate-spin text-white/50" aria-label={t("remoteMedia.checking")} />}

@@ -822,6 +822,7 @@ export const scenes = [
     name: "webdav-import",
     devices: ALL,
     run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-drive-dup", "1"));
       await openCourse(page);
       await page.getByRole("button", { name: "导入" }).first().click();
       await page.getByRole("menuitem", { name: /从网盘导入/ }).click();
@@ -838,6 +839,7 @@ export const scenes = [
       await shot("guide");
       await dialog.getByRole("radio", { name: /夸克网盘/ }).click();
       await shot("quark");
+      await page.evaluate(() => localStorage.removeItem("__shot-drive-dup"));
     },
   },
   {

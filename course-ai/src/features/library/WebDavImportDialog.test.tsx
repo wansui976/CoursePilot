@@ -18,12 +18,15 @@ const { mockIpc, mockMobile } = vi.hoisted(() => ({
       importStream: vi.fn(),
     },
     downloads: { enqueue: vi.fn() },
+    videos: { list: vi.fn() },
   },
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@/lib/platform", () => ({ isMobile: () => mockMobile.value }));
 const { mockOpenUrl } = vi.hoisted(() => ({ mockOpenUrl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mockOpenUrl }));
+const { mockConfirm } = vi.hoisted(() => ({ mockConfirm: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mockConfirm }));
 
 const nas: WebDavSource = { id: "nas", kind: "webdav", name: "家里的 NAS", url: "http://nas:5244/dav/", user: "me", hasPassword: true, isSync: false };
 const dir = (name: string, path: string): WebDavEntry => ({ name, path, isDir: true, size: null, isVideo: false, url: "" });
@@ -51,7 +54,9 @@ describe("WebDavImportDialog", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("zh-CN");
     vi.clearAllMocks();
+    window.localStorage.clear();
     mockMobile.value = false;
+    mockIpc.videos.list.mockResolvedValue([]);
     mockIpc.webdavImport.browse.mockImplementation(async (_source: string, path: string) =>
       path === ""
         ? [dir("申论 2027", "申论 2027/")]
@@ -145,5 +150,68 @@ describe("WebDavImportDialog", () => {
     expect(mockOpenUrl).toHaveBeenCalledWith("https://api.oplist.org/");
     fireEvent.click(screen.getByRole("radio", { name: /坚果云/ }));
     expect(screen.queryByText("怎么用 OpenList 挂百度网盘（5 步，一次就好）")).not.toBeInTheDocument();
+  });
+  it("课程里已经有的视频标出来、不能再勾，全选只选剩下的", async () => {
+    mockIpc.webdavImport.sources.mockResolvedValue([nas]);
+    mockIpc.webdavImport.browse.mockImplementation(async (_source: string, path: string) =>
+      path === ""
+        ? [dir("申论 2027", "申论 2027/")]
+        : ["第1讲", "第2讲", "第3讲"].map((name) => file(`${name}.mp4`, `申论 2027/${name}.mp4`)),
+    );
+    mockIpc.videos.list.mockResolvedValue([{ id: "v1", source_uri: file("第1讲.mp4", "申论 2027/第1讲.mp4").url }]);
+    mockIpc.downloads.enqueue.mockResolvedValue([]);
+    renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
+    expect(await screen.findByLabelText("第1讲.mp4")).toBeDisabled();
+    expect(screen.getByText("已在课程里")).toBeInTheDocument();
+    expect(screen.getByText("1 个已在课程里")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("全选这里的 2 个视频"));
+    expect(screen.getByText("已选 2 个 · 600 MB")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "导入 2 个视频" }));
+    await waitFor(() => expect(mockIpc.downloads.enqueue).toHaveBeenCalled());
+    expect(mockIpc.downloads.enqueue.mock.calls[0][1].map((item: { title: string }) => item.title)).toEqual(["第2讲", "第3讲"]);
+  });
+
+  it("按住 Shift 连选一段；不知道大小时只报个数", async () => {
+    mockIpc.webdavImport.sources.mockResolvedValue([nas]);
+    mockIpc.webdavImport.browse.mockImplementation(async (_source: string, path: string) =>
+      path === ""
+        ? [dir("申论 2027", "申论 2027/")]
+        : ["第1讲", "第2讲", "第3讲", "第4讲"].map((name) => ({ ...file(`${name}.mp4`, `申论 2027/${name}.mp4`), size: null })),
+    );
+    renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: /申论 2027/ }));
+    expect(await screen.findByText("勾选要导入的视频，按住 Shift 可以连选")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("第1讲.mp4"));
+    fireEvent.keyDown(window, { key: "Shift", shiftKey: true });
+    fireEvent.click(screen.getByLabelText("第3讲.mp4"));
+    fireEvent.keyUp(window, { key: "Shift", shiftKey: false });
+    expect(screen.getByLabelText("第2讲.mp4")).toBeChecked();
+    expect(screen.getByLabelText("第4讲.mp4")).not.toBeChecked();
+    expect(screen.getByText("已选 3 个")).toBeInTheDocument();
+  });
+
+  it("编辑已保存的网盘：不再给换类型，删除要先确认", async () => {
+    mockIpc.webdavImport.sources.mockResolvedValue([nas]);
+    mockConfirm.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    mockIpc.webdavImport.deleteSource.mockResolvedValue(undefined);
+    renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "编辑这个网盘" }));
+    expect(screen.queryByRole("radiogroup", { name: "网盘类型" })).not.toBeInTheDocument();
+    // 地址是 OpenList 的默认端口：给 OpenList 的提示。
+    expect(screen.getByText(/OpenList 能把百度/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除这个网盘" }));
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalledTimes(1));
+    expect(mockIpc.webdavImport.deleteSource).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "删除这个网盘" }));
+    await waitFor(() => expect(mockIpc.webdavImport.deleteSource).toHaveBeenCalledWith("nas"));
+  });
+
+  it("读文件夹失败时能直接去改这个网盘的设置", async () => {
+    mockIpc.webdavImport.sources.mockResolvedValue([nas]);
+    mockIpc.webdavImport.browse.mockRejectedValue(new Error("网盘拒绝了：账号、密码或 Cookie 不对"));
+    renderDialog();
+    fireEvent.click(await screen.findByRole("button", { name: "检查这个网盘的设置" }));
+    expect(await screen.findByLabelText("WebDAV 地址")).toHaveValue("http://nas:5244/dav/");
   });
 });

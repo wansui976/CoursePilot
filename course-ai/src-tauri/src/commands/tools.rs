@@ -363,10 +363,7 @@ pub async fn import_url_with(
     begin_import: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<Video> {
     // 网盘（WebDAV）上的文件：不走 yt-dlp，直接按 HTTP 下（手机上也能下）。
-    if crate::webdav_import::source_for_url(&state.db, &url)
-        .await?
-        .is_some()
-    {
+    if crate::webdav_import::is_drive_url(&state.db, &url).await? {
         return import_webdav_file(
             &app,
             state,

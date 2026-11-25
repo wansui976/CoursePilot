@@ -551,6 +551,10 @@ export function installMockIpc({ theme, safeArea }) {
             ? { ...video, file_path: "", source_type: "url", source_uri: "http://192.168.1.5:5244/dav/%E8%AF%BE/03.mp4" }
             : video,
         );
+      // __shot-drive-dup：第 1 个视频是从网盘下过来的（网盘导入对话框里那一行标「已在课程里」）。
+      if (localStorage.getItem("__shot-drive-dup") === "1") {
+        list[0] = { ...list[0], source_type: "url", source_uri: `http://192.168.1.5:5244/dav/${encodeURI("百度网盘/2027 申论系统班/第01讲 概括题的作答逻辑.mp4")}` };
+      }
       if (localStorage.getItem("__shot-shuffled") !== "1") return list;
       return [7, 2, 0, 5, 1, 8, 3, 6, 4].map((i, order_index) => ({ ...list[i], order_index }));
     },

@@ -62,13 +62,19 @@ export function VideoWorkbench({
   });
   // 本机没有文件：网盘导入的「在线看」视频从网盘边下边播；不是的话在局域网里找开着
   // 「局域网直连播放」的电脑。都找不到就给「从网盘下载」（RemoteMediaStage）。
+  // 网盘那边出错（夸克 Cookie 失效、密码改了）时把原因留着：局域网也找不到的话，舞台上照实说，
+  // 不笼统地说「这台设备没连上网盘」。
   const remoteStream = useQuery({
     queryKey: qk.mediaUrl.lan(video.id),
-    queryFn: async (): Promise<{ src: string; kind: "drive" | "lan" } | null> => {
-      const drive = await ipc.webdavImport.streamUrl(video.id).catch(() => null);
-      if (drive) return { src: drive, kind: "drive" };
+    queryFn: async (): Promise<{ stream: { src: string; kind: "drive" | "lan" } | null; driveError: unknown }> => {
+      let driveError: unknown = null;
+      const drive = await ipc.webdavImport.streamUrl(video.id).catch((error: unknown) => {
+        driveError = error;
+        return null;
+      });
+      if (drive) return { stream: { src: drive, kind: "drive" }, driveError: null };
       const lan = await ipc.lanShare.streamUrl(video.id);
-      return lan ? { src: lan, kind: "lan" } : null;
+      return { stream: lan ? { src: lan, kind: "lan" } : null, driveError };
     },
     enabled: !hasLocalFile,
     retry: false,
@@ -150,8 +156,8 @@ export function VideoWorkbench({
           )}
           <ClipQueueBar />
           {/* 存到本机之后文件就有了，这条不用再留着（下载完成会立刻刷新 video.file_path）。 */}
-          {!hasLocalFile && remoteStream.data?.kind === "drive" && <DriveDownloadBar video={video} />}
-          {!hasLocalFile && remoteStream.data?.kind === "lan" && <LanDownloadBar video={video} />}
+          {!hasLocalFile && remoteStream.data?.stream?.kind === "drive" && <DriveDownloadBar video={video} />}
+          {!hasLocalFile && remoteStream.data?.stream?.kind === "lan" && <LanDownloadBar video={video} />}
           <div className="ca-stage-wrap">
             {isPhoneDevice && (
               <button
@@ -166,19 +172,20 @@ export function VideoWorkbench({
             )}
             <div className="ca-stage">
               {!hasLocalFile ? (
-                remoteStream.data ? (
+                remoteStream.data?.stream ? (
                   <VideoPlayer
-                    src={remoteStream.data.src}
+                    src={remoteStream.data.stream.src}
                     videoId={video.id}
                     courseId={video.course_id}
                     immersive={isIOS()}
                     onFullscreenChange={onFullscreenChange}
                     onTranscoded={() => remoteStream.refetch()}
-                    remote={{ kind: remoteStream.data.kind, onReconnect: () => remoteStream.refetch() }}
+                    remote={{ kind: remoteStream.data.stream.kind, onReconnect: () => remoteStream.refetch() }}
                   />
                 ) : (
                   <RemoteMediaStage
                     video={video}
+                    driveError={remoteStream.data?.driveError ?? null}
                     lanChecking={remoteStream.isFetching}
                     onRetryLan={() => void remoteStream.refetch()}
                   />
