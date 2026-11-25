@@ -474,6 +474,15 @@ export type AssistantAction =
       video_title: string;
       topic: string;
       markdown: string;
+    }
+  /** 提案：新建一张复习卡。用户确认才由前端加卡，题面和答案都在提案里。 */
+  | {
+      kind: "propose_create_card";
+      video_id: string;
+      video_title: string;
+      front: string;
+      back: string;
+      at_ms?: number | null;
     };
 
 export type AgentStopReason =

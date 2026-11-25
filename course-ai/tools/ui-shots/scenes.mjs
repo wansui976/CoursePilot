@@ -710,6 +710,10 @@ export const scenes = [
       await page.getByLabel("发送").click();
       await page.getByText("课上建议先从").waitFor({ timeout: 4000 });
       await shot("answer");
+      await page.getByLabel("对 AI 助手说").fill("把这两种情况做成复习卡");
+      await page.getByLabel("发送").click();
+      await page.getByRole("button", { name: "加进复习" }).waitFor({ timeout: 4000 });
+      await shot("card");
     },
   },
   {

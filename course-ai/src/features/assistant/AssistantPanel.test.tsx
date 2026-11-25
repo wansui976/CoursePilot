@@ -1882,6 +1882,42 @@ describe("AssistantPanel", () => {
     );
   });
 
+  it("复习卡提案先给题面和答案，点了才加进复习", async () => {
+    mockIpc.srs.addCard.mockResolvedValueOnce("m:1");
+    mockIpc.assistant.ask.mockResolvedValueOnce(
+      reply({
+        actions: [
+          {
+            kind: "propose_create_card",
+            video_id: "v1",
+            video_title: "第一讲",
+            front: "学习率太大会怎样？",
+            back: "在谷底两侧来回震荡，甚至发散",
+            at_ms: 430_000,
+          },
+        ],
+      }),
+    );
+    renderPanel(vi.fn(), { context: { course_id: "c1", video_id: "v1" } });
+    await ask("把这个做成复习卡");
+
+    expect(await screen.findByText("学习率太大会怎样？")).toBeInTheDocument();
+    expect(screen.getByText("在谷底两侧来回震荡，甚至发散")).toBeInTheDocument();
+    expect(screen.getByText("出处《第一讲》07:10")).toBeInTheDocument();
+    expect(mockIpc.srs.addCard).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "加进复习" }));
+    await waitFor(() =>
+      expect(mockIpc.srs.addCard).toHaveBeenCalledWith(
+        "v1",
+        "assistant",
+        "学习率太大会怎样？",
+        "在谷底两侧来回震荡，甚至发散",
+        430_000,
+      ),
+    );
+  });
+
   it("保留统一笔记写入失败，避免显示假的保存成功", async () => {
     notesCoordinatorMock.appendAnswer.mockRejectedValueOnce(new Error("database locked"));
     mockIpc.assistant.ask.mockResolvedValueOnce(reply({ answer: "尚未落库的回答" }));

@@ -113,6 +113,7 @@ fn action_kind(action: &AssistantAction) -> &'static str {
         AssistantAction::ProposeRenameCourse { .. } => "propose_rename_course",
         AssistantAction::SetTheme { .. } => "set_theme",
         AssistantAction::ProposeCreateNote { .. } => "propose_create_note",
+        AssistantAction::ProposeCreateCard { .. } => "propose_create_card",
     }
 }
 
@@ -1650,7 +1651,7 @@ fn setting_values_are_validated_before_being_proposed() {
 fn the_tool_list_matches_what_dispatch_actually_handles() {
     // 报出去却没实现，模型会反复调一个永远失败的工具；
     // 实现了却没报出去，那段代码永远走不到。
-    let names: Vec<String> = tool_specs().into_iter().map(|s| s.name).collect();
+    let names: Vec<String> = all_tool_specs().into_iter().map(|s| s.name).collect();
     assert_eq!(
         names,
         [
@@ -1674,9 +1675,10 @@ fn the_tool_list_matches_what_dispatch_actually_handles() {
             "search_bilibili",
             "import_video",
             "create_note",
-            "get_video_summary",
-            "get_video_chapters",
-            "get_video_notes",
+            "get_video_material",
+            "list_mistakes",
+            "list_clips",
+            "create_card",
             "get_video_comments",
         ]
     );
@@ -1684,7 +1686,8 @@ fn the_tool_list_matches_what_dispatch_actually_handles() {
 
 #[test]
 fn every_model_visible_tool_has_exactly_one_effect_policy() {
-    let spec_names: Vec<_> = tool_specs().into_iter().map(|spec| spec.name).collect();
+    let mut spec_names: Vec<_> = all_tool_specs().into_iter().map(|spec| spec.name).collect();
+    spec_names.push(MORE_TOOLS.to_string());
     let policy_names: Vec<_> = TOOL_POLICIES.iter().map(|policy| policy.name).collect();
     assert_eq!(
         spec_names, policy_names,
@@ -1707,6 +1710,10 @@ fn every_model_visible_tool_has_exactly_one_effect_policy() {
         "get_transcript_around",
         "search_bilibili",
         "get_video_comments",
+        "get_video_material",
+        "list_mistakes",
+        "list_clips",
+        "more_tools",
     ] {
         assert_eq!(tool_effect(name), Some(ToolEffect::ReadOnly), "{name}");
     }
@@ -1721,6 +1728,7 @@ fn every_model_visible_tool_has_exactly_one_effect_policy() {
         "rename_course",
         "import_video",
         "create_note",
+        "create_card",
     ] {
         assert_eq!(
             tool_effect(name),
@@ -1796,8 +1804,9 @@ async fn failed_tool_rolls_back_only_its_new_actions() {
 fn destructive_tools_say_out_loud_that_they_only_propose() {
     // 提示词里必须写明「只是提案」，否则模型会在回答里跟用户说「已经删好了」，
     // 而实际上东西还在——用户以为做完了，这比没做更糟。
-    let specs = tool_specs();
+    let specs = all_tool_specs();
     for name in [
+        "create_card",
         "rename_video",
         "delete_video",
         "update_setting",
@@ -1824,4 +1833,262 @@ fn navigation_tools_say_that_the_user_must_click() {
             "{name} 的说明没有声明待点击动作"
         );
     }
+}
+
+// ---------- 工具目录 ----------
+
+#[test]
+fn every_executable_tool_is_either_core_or_in_exactly_one_group() {
+    // 两边都没有的工具模型永远找不到；两边都有的会在列表和目录里各出现一次。
+    let all: Vec<String> = all_tool_specs().into_iter().map(|spec| spec.name).collect();
+    for name in &all {
+        let core = CORE_TOOLS.contains(&name.as_str());
+        let groups = TOOL_GROUPS
+            .iter()
+            .filter(|group| group.tools.iter().any(|(tool, _)| tool == name))
+            .count();
+        assert_eq!(
+            usize::from(core) + groups,
+            1,
+            "{name} 必须恰好在常驻列表或某一个分组里"
+        );
+    }
+    for group in TOOL_GROUPS {
+        for (tool, _) in group.tools {
+            assert!(
+                all.iter().any(|name| name == tool),
+                "目录里的 {tool} 没有实现"
+            );
+        }
+    }
+    let exposed: Vec<String> = tool_specs().into_iter().map(|spec| spec.name).collect();
+    let mut expected: Vec<String> = CORE_TOOLS.iter().map(|name| name.to_string()).collect();
+    expected.push(MORE_TOOLS.into());
+    expected.push(CALL_MORE_TOOL.into());
+    assert_eq!(exposed, expected, "每次报给模型的只有常驻工具和两个入口");
+}
+
+#[test]
+fn the_catalog_is_stable_and_lists_signatures_for_every_grouped_tool() {
+    let catalog = tool_catalog();
+    assert_eq!(catalog, tool_catalog(), "逐字节稳定才命得中缓存");
+    assert!(catalog.contains("set_theme(pref: dark|light|auto)"));
+    assert!(catalog.contains("create_card(front, back, at_ms?, video_id?)"));
+    for group in TOOL_GROUPS {
+        for (tool, _) in group.tools {
+            assert!(catalog.contains(&format!("{tool}(")), "目录漏了 {tool}");
+        }
+    }
+    // 目录远比完整说明短：这正是把它们收进来的意义。
+    let full: usize = TOOL_GROUPS
+        .iter()
+        .flat_map(|group| group.tools.iter())
+        .filter_map(|(tool, _)| all_tool_specs().into_iter().find(|spec| spec.name == *tool))
+        .map(|spec| spec.description.chars().count() + spec.parameters.to_string().chars().count())
+        .sum();
+    assert!(
+        catalog.chars().count() * 2 < full,
+        "目录 {} 字，完整说明 {full} 字",
+        catalog.chars().count()
+    );
+}
+
+#[test]
+fn call_more_tool_unwraps_to_the_inner_call_and_keeps_the_outer_id() {
+    let outer = scripted_call(
+        "x1",
+        CALL_MORE_TOOL,
+        r#"{"name":"set_theme","arguments":{"pref":"dark"}}"#,
+    );
+    let inner = effective_call(&outer).unwrap();
+    assert_eq!(inner.id, "x1");
+    assert_eq!(inner.name, "set_theme");
+    assert_eq!(inner.arguments, r#"{"pref":"dark"}"#);
+    assert_eq!(visible_tool_name(&outer), "set_theme");
+
+    // 有的模型把参数对象再序列化成字符串；省略参数时当空对象。
+    let stringly = scripted_call(
+        "x2",
+        CALL_MORE_TOOL,
+        r#"{"name":"list_mistakes","arguments":"{\"course_id\":\"c1\"}"}"#,
+    );
+    assert_eq!(
+        effective_call(&stringly).unwrap().arguments,
+        r#"{"course_id":"c1"}"#
+    );
+    let bare = scripted_call("x3", CALL_MORE_TOOL, r#"{"name":"list_mistakes"}"#);
+    assert_eq!(effective_call(&bare).unwrap().arguments, "{}");
+
+    // 不能转调入口自己。
+    let nested = scripted_call("x4", CALL_MORE_TOOL, r#"{"name":"call_more_tool"}"#);
+    assert!(effective_call(&nested).is_err());
+}
+
+#[tokio::test]
+async fn preflight_and_concurrency_follow_the_inner_tool() {
+    let (db, _course_id, _video_id, _dir) = seed().await;
+    let tools = AssistantTools::new(&db, AssistantContext::default());
+    let read = scripted_call(
+        "r",
+        CALL_MORE_TOOL,
+        r#"{"name":"list_mistakes","arguments":{}}"#,
+    );
+    let write = scripted_call(
+        "w",
+        CALL_MORE_TOOL,
+        r#"{"name":"delete_video","arguments":{}}"#,
+    );
+    assert!(tools.is_read_only(&read), "只读的内层可以进并发批次");
+    assert!(!tools.is_read_only(&write), "会改东西的内层必须串行");
+    assert!(tools.preflight(&read).is_ok());
+
+    let unknown = scripted_call(
+        "u",
+        CALL_MORE_TOOL,
+        r#"{"name":"drop_database","arguments":{}}"#,
+    );
+    let rejected = tools.preflight(&unknown).unwrap_err();
+    assert!(rejected.content.contains("drop_database"));
+    assert!(
+        rejected.content.contains("more_tools"),
+        "拒绝时告诉它去哪查"
+    );
+
+    // 目录里的工具被直接点名调用也放行。
+    assert!(tools
+        .preflight(&scripted_call("d", "list_mistakes", "{}"))
+        .is_ok());
+}
+
+#[tokio::test]
+async fn scripted_eval_runs_a_catalog_tool_through_the_entry_and_keeps_its_policy() {
+    let (db, course_id, video_id, _dir) = seed().await;
+    let snapshot = run_scripted_eval(
+        &db,
+        AssistantContext {
+            course_id: Some(course_id),
+            video_id: Some(video_id.clone()),
+            position_ms: Some(60_000),
+        },
+        vec![
+            scripted_tools(vec![scripted_call("m", MORE_TOOLS, r#"{"group":"review"}"#)]),
+            scripted_tools(vec![scripted_call(
+                "c",
+                CALL_MORE_TOOL,
+                r#"{"name":"create_card","arguments":{"front":"学习率太大会怎样？","back":"在谷底两侧来回震荡，甚至发散","at_ms":430000}}"#,
+            )]),
+            scripted_answer(),
+        ],
+        false,
+    )
+    .await;
+    assert_eq!(snapshot.stop_reason, AgentStopReason::Completed);
+    assert!(
+        snapshot.tool_results[0].contains("create_card"),
+        "more_tools 返回这一组的完整说明"
+    );
+    assert!(snapshot.tool_results[1].contains("用户确认"));
+    assert_eq!(snapshot.actions, ["propose_create_card"]);
+    let cards: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cards")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(cards, 0, "提案不写库");
+}
+
+#[tokio::test]
+async fn create_card_refuses_empty_sides_and_more_than_five_per_turn() {
+    let (db, course_id, video_id, _dir) = seed().await;
+    let tools = AssistantTools::new(
+        &db,
+        AssistantContext {
+            course_id: Some(course_id),
+            video_id: Some(video_id),
+            position_ms: None,
+        },
+    );
+    let empty = tools
+        .run(&call("create_card", r#"{"front":" ","back":"x"}"#))
+        .await;
+    assert_eq!(empty.status, ToolExecutionStatus::Failed);
+    for i in 0..5 {
+        let made = tools
+            .run(&call(
+                "create_card",
+                &format!(r#"{{"front":"问题 {i}","back":"答案"}}"#),
+            ))
+            .await;
+        assert_eq!(
+            made.status,
+            ToolExecutionStatus::Completed,
+            "{}",
+            made.content
+        );
+    }
+    let sixth = tools
+        .run(&call("create_card", r#"{"front":"问题 6","back":"答案"}"#))
+        .await;
+    assert_eq!(sixth.status, ToolExecutionStatus::Failed);
+    assert_eq!(tools.take_actions().len(), 5);
+}
+
+#[tokio::test]
+async fn video_material_reads_the_quiz_with_answers_and_explanations() {
+    let (db, _course_id, video_id, _dir) = seed().await;
+    sqlx::query("INSERT INTO quizzes(video_id,questions_json,generated_at) VALUES (?,?,0)")
+        .bind(&video_id)
+        .bind(
+            r#"[{"type":"single","stem":"学习率过大会？","options":["收敛更快","来回震荡"],"answer":"B","explanation":"步子太大越过谷底","ref_ms":430000},
+                {"type":"judge","stem":"学习率越小越好","answer":false}]"#,
+        )
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let tools = AssistantTools::new(
+        &db,
+        AssistantContext {
+            video_id: Some(video_id),
+            ..Default::default()
+        },
+    );
+    let out = tools
+        .run(&call("get_video_material", r#"{"part":"quiz"}"#))
+        .await;
+    assert_eq!(out.status, ToolExecutionStatus::Completed);
+    assert!(out.content.contains("第 1 题：学习率过大会？"));
+    assert!(out.content.contains("B. 来回震荡"));
+    assert!(out.content.contains("答案：B"));
+    assert!(out.content.contains("解析：步子太大越过谷底"));
+    assert!(out.content.contains("[07:10]"));
+    assert!(out.content.contains("答案：错"));
+
+    let bad = tools
+        .run(&call("get_video_material", r#"{"part":"mindmap"}"#))
+        .await;
+    assert_eq!(bad.status, ToolExecutionStatus::Failed);
+}
+
+#[tokio::test]
+async fn mistakes_and_clips_say_plainly_when_there_is_nothing_yet() {
+    let (db, course_id, video_id, _dir) = seed().await;
+    let tools = AssistantTools::new(
+        &db,
+        AssistantContext {
+            course_id: Some(course_id),
+            video_id: Some(video_id),
+            position_ms: None,
+        },
+    );
+    let mistakes = tools.run(&call("list_mistakes", "{}")).await;
+    assert!(
+        mistakes.content.contains("错题本是空的"),
+        "{}",
+        mistakes.content
+    );
+    let clips = tools.run(&call("list_clips", "{}")).await;
+    assert!(
+        clips.content.contains("还没有摘过片段"),
+        "{}",
+        clips.content
+    );
 }

@@ -1486,9 +1486,20 @@
     "get_video_chapters": "读取重点章节",
     "get_video_notes": "读取笔记",
     "match_slides": "比对课件画面",
-    "compact_history": "整理较早的对话"
+    "compact_history": "整理较早的对话",
+    "get_video_material": "读取视频资料",
+    "list_mistakes": "查看错题本",
+    "list_clips": "查看摘录",
+    "create_card": "准备复习卡",
+    "get_video_comments": "读取评论区",
+    "more_tools": "查看更多工具",
+    "call_more_tool": "调用更多工具"
   },
   "assistantActions": {
+    "cardTitle": "做成复习卡",
+    "cardConfirm": "加进复习",
+    "cardSource": "出处《{{title}}》{{time}}",
+    "cardVideo": "挂在《{{title}}》上",
     "renameTitle": "改名",
     "renameConfirm": "确认改名",
     "deleteTitle": "删除视频",

@@ -40,10 +40,11 @@ export const ASSISTANT_CHECKPOINT_TTL_MS = 24 * 60 * 60 * 1_000;
 export const MAX_ASSISTANT_PROMPT_HISTORY = 50;
 export const MAX_ASSISTANT_PROMPT_CHARS = MAX_QUESTION_CHARS;
 
-// 主题即时生效无需检查点；笔记追加不幂等（中断后自动重试会重复写一段），同样不纳入恢复。
+// 主题即时生效无需检查点；笔记追加、加复习卡都不幂等（中断后自动重试会重复写一段 / 多一张卡），
+// 同样不纳入恢复。
 type CheckpointAction = Exclude<
   AssistantAction,
-  { kind: "set_theme" } | { kind: "propose_create_note" }
+  { kind: "set_theme" } | { kind: "propose_create_note" } | { kind: "propose_create_card" }
 >;
 export type AssistantCheckpointActionKind = CheckpointAction["kind"];
 

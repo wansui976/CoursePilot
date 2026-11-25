@@ -6,6 +6,7 @@ import {
   Check,
   Download,
   FolderPlus,
+  Layers,
   NotebookPen,
   PenLine,
   Settings2,
@@ -86,6 +87,13 @@ async function refreshAfter(action: Proposal, queryClient: QueryClient) {
       return;
     case "propose_create_note":
       // 笔记写入走 notesCoordinator 的事件订阅，不经过 query 缓存。
+      return;
+    case "propose_create_card":
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: qk.srs.countDue() }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.cardMarks(action.video_id) }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.dueByCourse() }),
+      ]);
       return;
   }
 }
@@ -206,6 +214,15 @@ async function execute(
       return;
     case "propose_create_note":
       await notesCoordinator.appendAnswer(action.video_id, action.markdown);
+      return;
+    case "propose_create_card":
+      await ipc.srs.addCard(
+        action.video_id,
+        "assistant",
+        action.front,
+        action.back,
+        action.at_ms ?? null,
+      );
       return;
   }
 }
@@ -349,6 +366,18 @@ function describe(
         primary: action.topic,
         secondary: i18n.t("assistantActions.noteIntoVideo", { title: action.video_title }),
       };
+    case "propose_create_card":
+      return {
+        primary: action.front,
+        secondary: action.back,
+        context:
+          action.at_ms != null
+            ? i18n.t("assistantActions.cardSource", {
+                title: action.video_title,
+                time: formatMs(action.at_ms),
+              })
+            : i18n.t("assistantActions.cardVideo", { title: action.video_title }),
+      };
   }
 }
 
@@ -387,6 +416,11 @@ const META: Record<
     icon: <NotebookPen className="h-3.5 w-3.5" />,
     titleKey: "assistantActions.noteTitle",
     confirmKey: "assistantActions.noteConfirm",
+  },
+  propose_create_card: {
+    icon: <Layers className="h-3.5 w-3.5" />,
+    titleKey: "assistantActions.cardTitle",
+    confirmKey: "assistantActions.cardConfirm",
   },
 };
 
@@ -692,7 +726,7 @@ function ProposalGroup({
         {batch && <span className="text-[var(--text-muted)]">{t("assistantActions.items", { count: chosen.length })}</span>}
       </div>
 
-      <ul className="mb-2 space-y-1">
+      <ul className={`mb-2 ${chosen[0]?.action.kind === "propose_create_card" ? "space-y-2" : "space-y-1"}`}>
         {chosen.map(({ action, i }) => {
           const resolvedTitle =
             action.kind === "propose_import" ? importTitles[action.url] : undefined;
@@ -712,6 +746,17 @@ function ProposalGroup({
             action.kind === "propose_rename" || action.kind === "propose_rename_course";
           return (
             <li key={i} className="flex items-start gap-1.5">
+              {action.kind === "propose_create_card" ? (
+                // 复习卡按卡片自己的读法排：先题面，再答案，出处垫底。改名那套「旧 → 新」的
+                // 上下顺序放在这里会变成先看答案再看题。
+                <div className="min-w-0 flex-1">
+                  <p className="break-words font-medium text-[var(--text-strong)]">{primary}</p>
+                  <p className="break-words text-[var(--text-normal)]">{secondary}</p>
+                  {context && (
+                    <p className="break-words ca-t-2xs text-[var(--text-faint)]">{context}</p>
+                  )}
+                </div>
+              ) : (
               <div className="min-w-0 flex-1">
                 {context && (
                   <p className="break-all text-[var(--text-muted)]">{context}</p>
@@ -725,6 +770,7 @@ function ProposalGroup({
                 )}
                 <p className="break-all text-[var(--text-strong)]">{shownPrimary}</p>
               </div>
+              )}
               {completed.has(i) && (
                 <span className="flex flex-none items-center gap-1 text-[var(--status-ok)]">
                   <Check className="h-3.5 w-3.5" aria-hidden="true" />

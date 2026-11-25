@@ -94,7 +94,7 @@ impl ToolOutcome {
 /// 这里只验证所有工具都共有、且不需要理解 JSON Schema 的边界：名称必须在本次注册表里，
 /// 参数必须是合法 JSON 对象。required 字段、枚举、资源 id 等业务约束仍交给具体工具解析，
 /// 避免在通用层复制一套不完整的 schema validator。
-fn preflight_tool_call(specs: &[ToolSpec], call: &ToolCall) -> Result<(), ToolOutcome> {
+pub fn preflight_tool_call(specs: &[ToolSpec], call: &ToolCall) -> Result<(), ToolOutcome> {
     if !specs.iter().any(|spec| spec.name == call.name) {
         return Err(ToolOutcome::failed(format!(
             "没有名为 {} 的工具。请只使用本次提供的工具，不要编造工具名",
@@ -130,7 +130,8 @@ pub trait ToolBox {
     ///
     /// 默认 false 保守安全：只有声明了只读的调用才会进并发批次，
     /// 写操作永远串行，模型依赖上一笔副作用时行为不变。
-    fn is_read_only(&self, _name: &str) -> bool {
+    /// 拿整个调用而不只是名字：转调型工具（目录里的工具经一个入口执行）要看参数才知道内层是谁。
+    fn is_read_only(&self, _call: &ToolCall) -> bool {
         false
     }
 
@@ -591,7 +592,7 @@ pub async fn run_with_prefix<T: ToolBox>(
         // 事件仍按调用序号成对发出，前端看到的顺序不受并发影响。
         let mut index = 0;
         while index < response.tool_calls.len() {
-            if !tools.is_read_only(&response.tool_calls[index].name) {
+            if !tools.is_read_only(&response.tool_calls[index]) {
                 // 非只读调用单独成批：绝不与其他调用并发，保持原串行语义。
                 run_batch(
                     tools,
@@ -607,7 +608,7 @@ pub async fn run_with_prefix<T: ToolBox>(
             }
             let batch_start = index;
             while index < response.tool_calls.len()
-                && tools.is_read_only(&response.tool_calls[index].name)
+                && tools.is_read_only(&response.tool_calls[index])
             {
                 index += 1;
             }
@@ -1797,8 +1798,8 @@ mod tests {
                 .collect()
         }
 
-        fn is_read_only(&self, name: &str) -> bool {
-            name != "write"
+        fn is_read_only(&self, call: &ToolCall) -> bool {
+            call.name != "write"
         }
 
         async fn run_unchecked(&self, call: &ToolCall) -> ToolOutcome {

@@ -1489,9 +1489,20 @@
     "get_video_chapters": "Read key chapters",
     "get_video_notes": "Read notes",
     "match_slides": "Match slides by image",
-    "compact_history": "conversation compaction"
+    "compact_history": "conversation compaction",
+    "get_video_material": "Read video material",
+    "list_mistakes": "View mistakes",
+    "list_clips": "View clips",
+    "create_card": "Prepare review card",
+    "get_video_comments": "Read comments",
+    "more_tools": "Look up more tools",
+    "call_more_tool": "Use a catalog tool"
   },
   "assistantActions": {
+    "cardTitle": "Make a review card",
+    "cardConfirm": "Add to review",
+    "cardSource": "From \"{{title}}\" at {{time}}",
+    "cardVideo": "On \"{{title}}\"",
     "renameTitle": "Rename",
     "renameConfirm": "Confirm rename",
     "deleteTitle": "Delete video",

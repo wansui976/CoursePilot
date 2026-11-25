@@ -36,6 +36,8 @@ https://claude.ai/artifact/Ki5ntSjcqdaysZd46WpzWc
 - 普通问答讲完课程内容后，模型在末尾附 ```` ```followups ```` 块（系统提示第 9 条，引导模式不附），界面拆出来画成「接着问」胶囊，只挂在最新一轮；正文、复制、存笔记都不含原文（`followups.ts`、`visibleAnswer`）。
 - 对话超限要先压缩较早几轮时，显示成一次工具调用「整理较早的对话」（`compact_history`），不让用户对着空白等。
 - 空状态：看过 30 秒以上，第一条建议是「刚才 mm:ss 讲了什么」；提示句不拼范围名（上面已经写着在看什么）。
+- 工具目录（渐进式披露，`pipeline/assistant/specs.rs`）：每次请求只报常驻工具（`CORE_TOOLS`）和两个入口 `more_tools`（查某组完整说明）、`call_more_tool`（转调目录里的工具）；其余按组（`TOOL_GROUPS`：复习与错题 / 课程与视频管理 / 设置与外观 / 网上内容）收进系统提示末尾的「更多工具」目录，每个工具一行签名 + 一句话。工具列表和目录都由常量生成、逐字节不变，中途绝不增删工具（会打断前缀缓存）。转调的工具照样过 preflight、按内层 effect 判只读并发和动作策略，界面上显示内层工具名（`visible_tool_name`）。新工具：先定 effect（`TOOL_POLICIES`），再决定常驻还是进哪一组，测试会查「恰好在一处」。
+- 视频资料合成一个 `get_video_material(part: summary|chapters|notes|quiz)`；`list_mistakes` 读错题本、`list_clips` 读用户摘录、`create_card` 出复习卡确认卡（`propose_create_card`，后端不写库，前端点确认才调 `srs.addCard`，卡种 `assistant`，一轮最多 5 张，不进中断恢复检查点）。批量复习卡按「题面 → 答案 → 出处」排。
 - 回答底下：存笔记用笔记本图标；用量只写「5.4k tokens」，完整数字在悬停提示里。输入框底部附图按钮排在标签组里（点按区靠 `.ca-hit-expand` 扩，外观 24px），模型标签只写模型名，保证常见宽度下三个标签一行放得下、发送钮贴右下。
 
 ## 移动端与不同屏幕比例

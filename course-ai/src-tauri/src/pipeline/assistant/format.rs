@@ -77,7 +77,7 @@ pub(super) fn format_transcript_window(
     if segments.is_empty() && pages.is_empty() {
         return format!(
             "《{title}》在 {} 附近没有字幕或课件文字，可能还没转写。\
-             可以请用户先生成字幕，或改用 get_video_summary 看整体内容。",
+             可以请用户先生成字幕，或改用 get_video_material（part=summary）看整体内容。",
             mmss(at_ms)
         );
     }
@@ -303,4 +303,55 @@ pub(super) fn videos_summary(videos: &[Video]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// 测验题铺成文字：题干、选项、答案、解析和出处时间。字段缺了就跳过，旧题库也能读。
+pub(super) fn format_quiz(questions: &[serde_json::Value]) -> String {
+    let text_of = |value: &serde_json::Value| -> String {
+        match value {
+            serde_json::Value::String(text) => text.trim().to_string(),
+            serde_json::Value::Bool(true) => "对".to_string(),
+            serde_json::Value::Bool(false) => "错".to_string(),
+            serde_json::Value::Array(items) => items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .join("、"),
+            other => other.to_string(),
+        }
+    };
+    questions
+        .iter()
+        .enumerate()
+        .map(|(index, question)| {
+            let mut block = format!(
+                "第 {} 题：{}",
+                index + 1,
+                question["stem"].as_str().unwrap_or("").trim()
+            );
+            if let Some(options) = question["options"].as_array() {
+                for (i, option) in options.iter().enumerate() {
+                    let letter = (b'A' + (i as u8).min(25)) as char;
+                    block.push_str(&format!(
+                        "\n  {letter}. {}",
+                        option.as_str().unwrap_or("").trim()
+                    ));
+                }
+            }
+            if !question["answer"].is_null() {
+                block.push_str(&format!("\n  答案：{}", text_of(&question["answer"])));
+            }
+            if let Some(explanation) = question["explanation"]
+                .as_str()
+                .filter(|t| !t.trim().is_empty())
+            {
+                block.push_str(&format!("\n  解析：{}", explanation.trim()));
+            }
+            if let Some(ms) = question["ref_ms"].as_i64() {
+                block.push_str(&format!("\n  出处：[{}]", crate::pipeline::rag::mmss(ms)));
+            }
+            block
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }

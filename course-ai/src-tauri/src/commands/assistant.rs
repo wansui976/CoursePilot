@@ -8,7 +8,9 @@ use crate::error::{AppError, AppResult};
 use crate::llm::agent::{self, AgentEvent, AgentStopReason, ToolExecutionStatus};
 use crate::llm::profiles::AiTask;
 use crate::llm::ChatMessage;
-use crate::pipeline::assistant::{AssistantAction, AssistantContext, AssistantTools};
+use crate::pipeline::assistant::{
+    tool_catalog, visible_tool_name, AssistantAction, AssistantContext, AssistantTools,
+};
 use futures_util::FutureExt;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -28,7 +30,7 @@ const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮
 1. 涉及具体课程或视频时，**先用工具查真实 id**，不要凭印象或猜测填 id。\
    用户说「这个视频」时指的是他正在看的那个，上下文里给了；对话里可能有好几条「（界面状态：…）」，\
    以离当前提问最近的那条为准，更早的只说明当时在看什么。\
-2. 改名、删除、改设置、导入视频这几件事，你调用工具后**只是生成了一张待确认的卡片**，\
+2. 改名、删除、改设置、导入视频、做复习卡这几件事，你调用工具后**只是生成了一张待确认的卡片**，\
    并没有真的做。所以要说「已经帮你准备好，确认一下就生效」，\
    绝对不要说「已经改好了/已经删了」。\
 3. open_video、seek_to、resume_learning 只会生成界面里的**待点击导航按钮**，工具调用本身不会打开或跳转。\
@@ -767,11 +769,14 @@ pub async fn cmd_assistant_ask(
 }
 
 /// 系统提示：引导模式在通用规矩之后追加引导规矩（通用的那几条照样要守）。
+///
+/// 「更多工具」目录接在通用规矩后面：它由常量生成、逐字节不变，照样命中前缀缓存。
 fn system_prompt(socratic: bool) -> String {
+    let catalog = tool_catalog();
     if socratic {
-        format!("{ASSISTANT_SYSTEM}{SOCRATIC_RULES}")
+        format!("{ASSISTANT_SYSTEM}\n\n{catalog}{SOCRATIC_RULES}")
     } else {
-        ASSISTANT_SYSTEM.to_string()
+        format!("{ASSISTANT_SYSTEM}\n\n{catalog}")
     }
 }
 
@@ -808,23 +813,26 @@ fn relay_agent_event(
         AgentEvent::Content(delta) => emit(AssistantEvent::Token {
             delta: delta.to_string(),
         }),
+        // 经目录入口转调的，界面上显示内层工具：用户关心的是「查了错题本」，不是「调了个入口」。
         AgentEvent::ToolStarted(call) => {
-            tools_used.push(call.name.clone());
+            let name = visible_tool_name(call);
+            tools_used.push(name.clone());
             emit(AssistantEvent::Tool {
                 call_id: call.id.clone(),
-                name: call.name.clone(),
+                name,
             });
         }
         AgentEvent::ToolFinished { call, status } => {
+            let name = visible_tool_name(call);
             tracing::debug!(
                 request_id = %request_id,
-                tool = %call.name,
+                tool = %name,
                 status = status.as_str(),
                 "assistant tool finished"
             );
             emit(AssistantEvent::ToolFinished {
                 call_id: call.id.clone(),
-                name: call.name.clone(),
+                name,
                 status,
                 canceled: status == ToolExecutionStatus::Canceled,
             })
@@ -917,7 +925,13 @@ mod tests {
     #[test]
     fn socratic_mode_appends_guidance_rules_and_the_structured_block_format() {
         let normal = system_prompt(false);
-        assert_eq!(normal, ASSISTANT_SYSTEM);
+        assert!(normal.starts_with(ASSISTANT_SYSTEM));
+        assert!(normal.contains("【更多工具】"), "目录接在通用规矩后面");
+        assert_eq!(
+            normal,
+            system_prompt(false),
+            "系统提示逐字节稳定，才命得中缓存"
+        );
         let guided = system_prompt(true);
         assert!(guided.starts_with(ASSISTANT_SYSTEM), "通用规矩照样要守");
         assert!(guided.contains("不要直接给出最终答案"));
