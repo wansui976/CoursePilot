@@ -13,6 +13,8 @@ export default tseslint.config(
     ignores: [
       "dist",
       "src-tauri/target",
+      // 打包用的第三方程序（yt-dlp 目录版里带着 JS 文件）
+      "src-tauri/binaries",
       "node_modules",
       "*.config.js",
       "*.config.ts",
