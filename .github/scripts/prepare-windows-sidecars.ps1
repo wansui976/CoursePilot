@@ -37,8 +37,18 @@ Download-File "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ff
 Expand-Archive -Path $ffmpegZip -DestinationPath $ffmpegOut -Force
 Copy-FirstMatch $ffmpegOut "ffmpeg.exe" (Join-Path $binaryDir "ffmpeg-$target.exe")
 
-# yt-dlp
-Download-File "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" (Join-Path $binaryDir "yt-dlp-$target.exe")
+# yt-dlp：官方的「目录版」（yt-dlp_win.zip，yt-dlp.exe + _internal\ 库目录），作为资源整个
+# 放进安装目录的 yt-dlp-dist\（tauri.windows.conf.json）。单文件版 yt-dlp.exe 每次启动都把自己
+# 解压到新的临时目录，再被杀毒扫一遍；虚拟机里实测单文件版每次约 3 秒，目录版 0.4 秒。
+$ytdlpZip = Join-Path $tempDir "yt-dlp_win.zip"
+$ytdlpDist = Join-Path $binaryDir "yt-dlp-dist"
+Download-File "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_win.zip" $ytdlpZip
+if (Test-Path $ytdlpDist) { Remove-Item -Recurse -Force $ytdlpDist }
+Expand-Archive -Path $ytdlpZip -DestinationPath $ytdlpDist -Force
+if (-not (Test-Path (Join-Path $ytdlpDist "yt-dlp.exe"))) {
+  throw "yt-dlp_win.zip did not contain yt-dlp.exe at its top level"
+}
+& (Join-Path $ytdlpDist "yt-dlp.exe") --version
 
 # llama-server（本地识别 Qwen3-ASR 用的引擎，llama.cpp）：官方的 Windows Vulkan 预编译包。
 # Vulkan 在 NVIDIA、AMD、Intel 显卡上都能用，显卡驱动自带运行库，用户不用装 CUDA。

@@ -33,11 +33,12 @@ pub const TESSERACT: BinarySpec = BinarySpec {
 /// yt-dlp 官方的单文件版（PyInstaller onefile）每次启动都把自己解压到一个新的临时目录，
 /// macOS 每次都要重新扫一遍解压出来的库：光 `--version` 就要二十多秒，一个视频探测、
 /// 下视频、下字幕各跑一次就是一分多钟。目录版（yt-dlp_macos.zip）只在第一次被扫，
-/// 之后启动 0.2 秒。Mac 安装包把它放在 Resources/yt-dlp-dist/。
+/// 之后启动 0.2 秒。Mac 安装包把它放在 Resources/yt-dlp-dist/。Windows 上单文件版每次约
+/// 3 秒（解压 + 杀毒扫描），目录版 0.4 秒，放在安装目录的 yt-dlp-dist\。
 pub const YTDLP: BinarySpec = BinarySpec {
     name: "yt-dlp",
     candidates_on_path: &["yt-dlp", "youtube-dl"],
-    onedir: &["yt-dlp-dist/yt-dlp_macos"],
+    onedir: &["yt-dlp-dist/yt-dlp_macos", "yt-dlp-dist/yt-dlp.exe"],
 };
 
 pub fn resolve(spec: &BinarySpec, sidecar_dir: Option<&PathBuf>) -> AppResult<PathBuf> {
@@ -251,6 +252,19 @@ mod tests {
             config.pointer("/bundle/resources/binaries~1*.dll"),
             Some(&serde_json::Value::String(String::new()))
         );
+        // yt-dlp 同样用目录版（见 YTDLP），不再附带单文件版。
+        assert_eq!(
+            config.pointer("/bundle/resources/binaries~1yt-dlp-dist~1"),
+            Some(&serde_json::Value::String("yt-dlp-dist/".into()))
+        );
+        let external_bin = config
+            .pointer("/bundle/externalBin")
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert!(!external_bin
+            .iter()
+            .any(|value| value.as_str() == Some("binaries/yt-dlp")));
+        assert!(YTDLP.onedir.contains(&"yt-dlp-dist/yt-dlp.exe"));
     }
 
     #[test]

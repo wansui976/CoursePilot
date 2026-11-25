@@ -2,13 +2,13 @@
   "bundle": {
     "externalBin": [
       "binaries/ffmpeg",
-      "binaries/yt-dlp",
       "binaries/llama-server",
       "binaries/tesseract"
     ],
     "resources": {
       "binaries/*.dll": "",
-      "binaries/tessdata/*": "binaries/tessdata/"
+      "binaries/tessdata/*": "binaries/tessdata/",
+      "binaries/yt-dlp-dist/": "yt-dlp-dist/"
     }
   }
 }
