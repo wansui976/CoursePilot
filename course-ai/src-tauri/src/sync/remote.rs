@@ -70,6 +70,10 @@ const MIN_INTERVAL: Duration = Duration::from_secs(180);
 const MAX_INTERVAL: Duration = Duration::from_secs(1800);
 const LOCAL_CHECK: Duration = Duration::from_secs(60);
 const LOCAL_DEBOUNCE: Duration = Duration::from_secs(30);
+/// 后台两轮同步之间至少隔多久（「立即同步」按钮不受限）。
+const MIN_GAP: Duration = Duration::from_secs(60);
+/// 网盘回了限流（429 / 503）之后，后台先歇多久再试。坚果云免费版按 30 分钟计次数。
+const RATE_LIMIT_COOLDOWN: Duration = Duration::from_secs(15 * 60);
 /// 和服务器对时多久做一次（钟不会几分钟就歪）。
 const CLOCK_CHECK_EVERY: Duration = Duration::from_secs(3600);
 
@@ -733,6 +737,8 @@ pub async fn upload_pass(
     keep_going: &(dyn Fn() -> bool + Send + Sync),
 ) -> AppResult<usize> {
     let dav = config.client()?;
+    let key = media_key(config);
+    let confirmed = uploaded_set(db, &key).await;
     let videos: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT id, title, file_path FROM videos WHERE deleted_at IS NULL AND file_path <> '' ORDER BY created_at",
     )
@@ -756,7 +762,7 @@ pub async fn upload_pass(
             continue;
         }
         let fingerprint = crate::sync::media::ensure_fingerprint(db, &video_id, &file_path).await?;
-        if present.contains(&fingerprint) && UPLOADED.lock().unwrap().contains(&fingerprint) {
+        if present.contains(&fingerprint) && confirmed.contains(&fingerprint) {
             continue;
         }
         // 局域网下载到的可能是电脑转好的副本（指纹还是原片的那一份）。真要上传前，
@@ -774,7 +780,10 @@ pub async fn upload_pass(
             .is_some()
         {
             // 网盘上已经有这个视频的一份原件：不用再把本机的副本传一份占额度。
-            UPLOADED.lock().unwrap().insert(fingerprint);
+            remember_uploaded(db, &key, |set| {
+                set.insert(fingerprint);
+            })
+            .await;
             continue;
         } else {
             actual
@@ -788,13 +797,16 @@ pub async fn upload_pass(
             keep_going,
         )
         .await?;
-        UPLOADED.lock().unwrap().insert(fingerprint);
+        remember_uploaded(db, &key, |set| {
+            set.insert(fingerprint);
+        })
+        .await;
         if done {
             uploaded += 1;
         }
     }
     if keep_going() {
-        if let Err(error) = collect_media_garbage(db, &dav, &present).await {
+        if let Err(error) = collect_media_garbage(db, &dav, &present, &key).await {
             tracing::warn!(%error, "清理网盘上没人用的视频文件失败，下次再试");
         }
     }
@@ -811,6 +823,7 @@ async fn collect_media_garbage(
     db: &Db,
     dav: &WebDav,
     present: &std::collections::HashSet<String>,
+    key: &str,
 ) -> AppResult<usize> {
     let now = chrono::Utc::now().timestamp_millis();
     let last_success: i64 = get_setting(db, SETTING_LAST_SUCCESS)
@@ -844,7 +857,10 @@ async fn collect_media_garbage(
             dav.delete(&format!("{}{name}/", crate::sync::media::MEDIA_DIR))
                 .await?;
             orphans.remove(name);
-            UPLOADED.lock().unwrap().remove(name);
+            remember_uploaded(db, key, |set| {
+                set.remove(name);
+            })
+            .await;
             removed += 1;
         }
     }
@@ -852,9 +868,48 @@ async fn collect_media_garbage(
     Ok(removed)
 }
 
-/// 已经确认在网盘上的视频（本次运行内的缓存，省得每一轮都去问一遍清单）。
-static UPLOADED: Mutex<std::collections::BTreeSet<String>> =
-    Mutex::new(std::collections::BTreeSet::new());
+/// 已经确认在网盘上的视频（按网盘区分），省得每一轮都去问一遍清单。
+///
+/// 以前只记在内存里：每次启动应用（手机上切走再回来常常就是重新启动），上传任务都要把
+/// 每个视频的清单重新 GET 一遍——一百个视频就是一百个请求，坚果云这类按次数限流的网盘
+/// 一下就被打满。现在存进设置，启动时读回来。网盘上这个视频的文件夹不见了（被清理、换了网盘）
+/// 时 `present` 里就没有它，照样会重新核对。
+static UPLOADED: Mutex<Option<(String, std::collections::BTreeSet<String>)>> = Mutex::new(None);
+const SETTING_MEDIA_UPLOADED: &str = "remote_sync_media_uploaded";
+
+fn media_key(config: &RemoteConfig) -> String {
+    format!("{}\0{}\0{}", config.url, config.folder, config.user)
+}
+
+/// 确认过的集合（只认同一个网盘的）；这个进程里还没读过就从设置里读。
+async fn uploaded_set(db: &Db, key: &str) -> std::collections::BTreeSet<String> {
+    if let Some((cached_key, set)) = UPLOADED.lock().unwrap().as_ref() {
+        if cached_key == key {
+            return set.clone();
+        }
+    }
+    let stored: Option<(String, std::collections::BTreeSet<String>)> =
+        get_setting(db, SETTING_MEDIA_UPLOADED)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|value| serde_json::from_str(&value).ok());
+    let set = stored
+        .filter(|(stored_key, _)| stored_key == key)
+        .map(|(_, set)| set)
+        .unwrap_or_default();
+    *UPLOADED.lock().unwrap() = Some((key.to_string(), set.clone()));
+    set
+}
+
+async fn remember_uploaded(db: &Db, key: &str, change: impl FnOnce(&mut std::collections::BTreeSet<String>)) {
+    let mut set = uploaded_set(db, key).await;
+    change(&mut set);
+    *UPLOADED.lock().unwrap() = Some((key.to_string(), set.clone()));
+    if let Ok(value) = serde_json::to_string(&(key, &set)) {
+        let _ = set_setting(db, SETTING_MEDIA_UPLOADED, &value).await;
+    }
+}
 
 /// 网盘上有没有这个视频的文件（有的话多大）。
 pub async fn remote_media_size(
@@ -1003,7 +1058,16 @@ pub fn init(app: tauri::AppHandle, db: Db) {
         tokio::time::sleep(Duration::from_secs(8)).await;
         let mut interval = MIN_INTERVAL;
         loop {
-            let busy = match engine.run_if_enabled().await {
+            let result = engine.run_if_enabled().await;
+            let finished = std::time::Instant::now();
+            if matches!(&result, Err(error) if crate::sync::webdav::is_rate_limited(error)) {
+                // 网盘限流了：歇一阵再来。这期间本机的改动、回到前台都不叫醒它（再撞只会被限得更久）；
+                // 「立即同步」按钮不走这里，照常能用。
+                interval = MAX_INTERVAL;
+                tokio::time::sleep(RATE_LIMIT_COOLDOWN).await;
+                continue;
+            }
+            let busy = match result {
                 Ok(Some(report)) => report.pushed > 0 || report.pulled > 0 || report.applied > 0,
                 // 没开同步、或者出错：照常放慢，别在出错时反复打服务器。
                 _ => false,
@@ -1016,6 +1080,10 @@ pub fn init(app: tauri::AppHandle, db: Db) {
                 _ = engine.wake.notified() => interval = MIN_INTERVAL,
                 _ = tokio::time::sleep(interval) => {}
                 _ = engine.local_change(baseline) => interval = MIN_INTERVAL,
+            }
+            // 两轮之间至少隔这么久：连着改东西、手机上来回切前后台时，不会一分钟打好几轮。
+            if let Some(rest) = MIN_GAP.checked_sub(finished.elapsed()) {
+                tokio::time::sleep(rest).await;
             }
         }
     });
@@ -1797,6 +1865,21 @@ mod tests {
                 .unwrap(),
             0
         );
+        // 重启应用（内存里的缓存没了）：确认过的视频记在设置里，不再逐个去 GET 清单——
+        // 以前每次启动都要把每个视频问一遍，视频一多就被坚果云限流。
+        *UPLOADED.lock().unwrap() = None;
+        store.lock().unwrap().requests.clear();
+        assert_eq!(
+            upload_pass(&pc.db, &config, &report, &|| true)
+                .await
+                .unwrap(),
+            0
+        );
+        let requests = store.lock().unwrap().requests.clone();
+        assert!(
+            requests.iter().all(|request| !request.starts_with("GET ")),
+            "重启后不再逐个核对已上传的视频：{requests:?}"
+        );
 
         // 指纹随视频条目同步到手机，手机按它下载。
         pc.sync(&config).await.unwrap();
@@ -2262,7 +2345,7 @@ mod tests {
 
         // 第一次看到没人引用：只记下来，不删。
         assert_eq!(
-            collect_media_garbage(&pc.db, &dav, &present).await.unwrap(),
+            collect_media_garbage(&pc.db, &dav, &present, "test").await.unwrap(),
             0
         );
         assert!(exists(&orphan));
@@ -2276,7 +2359,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            collect_media_garbage(&pc.db, &dav, &present).await.unwrap(),
+            collect_media_garbage(&pc.db, &dav, &present, "test").await.unwrap(),
             1
         );
         assert!(!exists(&orphan));
@@ -2298,7 +2381,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            collect_media_garbage(&pc.db, &dav, &present).await.unwrap(),
+            collect_media_garbage(&pc.db, &dav, &present, "test").await.unwrap(),
             0
         );
         assert!(exists(&used));

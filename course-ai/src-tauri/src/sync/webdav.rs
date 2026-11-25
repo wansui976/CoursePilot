@@ -369,6 +369,14 @@ fn network_error(error: reqwest::Error) -> AppError {
     AppError::Other(format!("连不上同步服务器：{error}"))
 }
 
+/// 限流时的说明。后台同步认这句话来决定先歇一阵（见 `remote::RATE_LIMIT_COOLDOWN`）。
+const RATE_LIMITED: &str = "网盘限流了（请求太频繁），过一刻钟会自动再试";
+
+/// 这个错误是不是网盘限流（429 / 503）。
+pub fn is_rate_limited(error: &AppError) -> bool {
+    error.to_string().contains(RATE_LIMITED)
+}
+
 fn check(status: StatusCode, action: &str) -> AppResult<()> {
     if status.is_success() || status == StatusCode::MULTI_STATUS {
         return Ok(());
@@ -379,9 +387,7 @@ fn check(status: StatusCode, action: &str) -> AppResult<()> {
         }
         StatusCode::FORBIDDEN => "服务器拒绝了（没有这个文件夹的权限）".to_string(),
         StatusCode::NOT_FOUND => "地址不对（找不到这个 WebDAV 路径）".to_string(),
-        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => {
-            "服务器限流了，稍后会自动重试".to_string()
-        }
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => RATE_LIMITED.to_string(),
         StatusCode::INSUFFICIENT_STORAGE => "网盘空间不够了".to_string(),
         other => format!("HTTP {other}"),
     };
