@@ -639,8 +639,9 @@ describe("TranscriptPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "搜索文稿" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "搜索文稿" }), { target: { value: "加速度" } });
     await waitFor(() => expect(screen.getAllByText("加速度", { selector: "mark" }).length).toBe(1));
+    // KaTeX 是按需异步加载的：这个文件里只有这一条用到公式，机器忙时高亮先出来、公式后到。
+    await waitFor(() => expect(container.querySelector(".katex")).not.toBeNull());
     expect(container.textContent).not.toContain("\\(F=ma\\)");
-    expect(container.querySelector(".katex")).not.toBeNull();
   });
 
   it("marks transcript search as a system-back layer and restores trigger focus on Escape", async () => {
