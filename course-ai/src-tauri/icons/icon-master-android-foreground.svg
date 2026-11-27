@@ -1,0 +1,42 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">  <defs>
+    <linearGradient id="boardShade" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#1f2c25"/>
+      <stop offset="1" stop-color="#141d18"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a3727"/>
+      <stop offset="0.18" stop-color="#3a2b1f"/>
+      <stop offset="1" stop-color="#2a1f16"/>
+    </linearGradient>
+    <filter id="chalk" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="7" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -4 3.3" result="holes"/>
+      <feComposite in="SourceGraphic" in2="holes" operator="in"/>
+    </filter>
+    <filter id="smudge" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="28"/>
+    </filter>
+    <clipPath id="tile"><rect width="824" height="824" rx="0"/></clipPath>
+  </defs>
+  
+  <rect width="1024" height="1024" fill="url(#boardShade)"/>
+  <g transform="translate(171 171) scale(0.8277)">
+    
+    <!-- 擦过的粉笔痕 -->
+    <g filter="url(#smudge)" fill="#eef2ec" opacity="0.07">
+      <ellipse cx="250" cy="200" rx="230" ry="70" transform="rotate(-8 250 200)"/>
+      <ellipse cx="600" cy="560" rx="200" ry="56" transform="rotate(-6 600 560)"/>
+    </g>
+    <!-- 粉笔画的播放键 -->
+    <path filter="url(#chalk)" d="M300 168 C 296 270, 298 372, 302 474 C 398 420, 494 368, 586 318 C 492 268, 396 218, 300 168 Z"
+      fill="#eef2ec" fill-opacity="0.10" stroke="#eef2ec" stroke-width="48" stroke-linejoin="round" stroke-linecap="round"/>
+    <!-- 荧光笔划的一道 -->
+    <path d="M222 556 C 340 549, 480 543, 610 538 C 616 554, 620 572, 630 590 C 500 594, 360 600, 214 608 C 222 592, 218 572, 222 556 Z" fill="#ffd60a" opacity="0.9"/>
+    <path d="M222 556 C 226 572, 222 590, 214 608 L 236 607 C 242 590, 244 572, 240 555 Z" fill="#ffd60a"/>
+    <!-- 木槽 -->
+    <rect x="-300" y="704" width="1424" height="420" fill="url(#wood)"/>
+    <rect x="-300" y="704" width="1424" height="6" fill="#000" opacity="0.35"/>
+    <!-- 一截粉笔 -->
+    <rect x="540" y="690" width="132" height="24" rx="10" fill="#eef2ec"/>
+    <rect x="540" y="708" width="132" height="6" rx="3" fill="#000" opacity="0.18"/>
+  </g></svg>
