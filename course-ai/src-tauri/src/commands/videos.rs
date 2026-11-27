@@ -1976,6 +1976,11 @@ mod tests {
     #[tokio::test]
     async fn batch_import_from_a_read_only_folder_keeps_data_in_the_app_dir() {
         use std::os::unix::fs::PermissionsExt;
+        // root 不受目录权限限制（容器、CI 里常以 root 跑），「只读文件夹」在那里造不出来。
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("以 root 运行，跳过只读文件夹的测试");
+            return;
+        }
         let dir = tempdir().unwrap();
         let db = Db::connect_and_migrate(&dir.path().join("test.db"))
             .await

@@ -271,6 +271,11 @@ mod tests {
     #[test]
     fn sibling_data_root_is_not_writable_in_a_read_only_folder() {
         use std::os::unix::fs::PermissionsExt;
+        // root 不受目录权限限制（容器、CI 里常以 root 跑），「只读文件夹」在那里造不出来。
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("以 root 运行，跳过只读文件夹的测试");
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let writable = dir.path().join("ok").join("v.mp4");
         assert!(sibling_data_root_writable(&writable));
