@@ -165,6 +165,15 @@ jobs:
           find target -type d \( -path '*/build/sherpa-onnx-sys-*' -o -path '*/build/sherpa-onnx-sys' \) -prune -exec rm -rf {} + 2>/dev/null || true
           rm -rf target/sherpa-onnx-prebuilt
           cargo test --lib
+      - name: Retrieval regression (检索评测)
+        # 问答检索的回归闸门：固定评测集（tests/fixtures/retrieval）对照 baseline.json，
+        # 召回、「没讲到」判对、排序 MRR、噪声任一比基线差就失败，评测表写进本次运行的摘要页。
+        # 上一步全量单测已经编好，这一步只跑这几条，几秒钟；全量单测失败时也照样跑，好看到数字。
+        if: ${{ !cancelled() }}
+        working-directory: course-ai/src-tauri
+        env:
+          RETRIEVAL_EVAL_SUMMARY: "1"
+        run: cargo test --lib retrieval_eval -- --nocapture
       - name: Restore dav1d (AV1 decoder for on-device transcode)
         # 静态库不入库（见 .gitignore），每次按脚本编；按脚本内容缓存，脚本不变就直接复用。
         uses: actions/cache@v4
