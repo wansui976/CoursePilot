@@ -1,0 +1,69 @@
+html, body { margin: 0; padding: 0; background: #000; }
+body { overflow: hidden; }
+:root {
+  /* 机器上没有苹方 / 宋体，中文落到随片打包的思源（Noto）。 */
+  --font-display: "Newsreader Variable", "Noto Serif SC", serif;
+  --font-reading: "Newsreader Variable", "Noto Serif SC", serif;
+  --font-app: "Instrument Sans Variable", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono Variable", monospace;
+  --wall: #0b0e0d;
+}
+#stage {
+  position: relative;
+  overflow: hidden;
+  background: var(--wall);
+  font-family: var(--font-app);
+  color: var(--text-strong);
+}
+.abs { position: absolute; left: 0; top: 0; }
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.layer { position: absolute; inset: 0; pointer-events: none; }
+
+/* 黑板：一面平板，下沿是木槽。翻过来是复习卡。 */
+.board3d { position: absolute; transform-style: preserve-3d; }
+.face { position: absolute; inset: 0; backface-visibility: hidden; }
+.face.back { transform: rotateY(180deg); }
+.board-surface {
+  position: absolute; inset: 0;
+  background-color: var(--board);
+  background-size: 100% 100%;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 10px #1f2a24, inset 0 0 0 12px #121915, 0 30px 80px rgba(0,0,0,0.55);
+}
+.ledge {
+  position: absolute; left: -2%; width: 104%; height: 34px;
+  background: linear-gradient(#4a3828, var(--wood) 35%, var(--wood-dark));
+  border-radius: 3px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+/* 复习卡（照 App 里的卡片：纸色、发丝线、衬线题面）。 */
+.card {
+  position: absolute; inset: 0;
+  background: var(--surface-card);
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 40px 120px rgba(16, 24, 20, 0.18), 0 8px 24px rgba(16, 24, 20, 0.08);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+}
+.card .q {
+  font-family: var(--font-display);
+  font-weight: 500;
+  color: var(--text-strong);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+.card .rule { height: 1px; background: var(--border-subtle); }
+.card .hint { font-family: var(--font-app); color: var(--text-faint); }
+
+.subs {
+  position: absolute; left: 0; right: 0; display: flex; justify-content: center;
+  pointer-events: none;
+}
+.subs span {
+  font-family: var(--font-app); font-weight: 500; color: #fff;
+  background: rgba(10, 14, 12, 0.62);
+  padding: 0.28em 0.7em; border-radius: 8px;
+  white-space: pre-line; text-align: center; line-height: 1.45;
+}

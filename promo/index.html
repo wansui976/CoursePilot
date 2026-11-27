@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>CoursePilot 宣传片</title>
+<link rel="stylesheet" href="../course-ai/src/styles/tokens.css" />
+<link rel="stylesheet" href="node_modules/@fontsource/noto-serif-sc/500.css" />
+<link rel="stylesheet" href="node_modules/@fontsource/noto-serif-sc/700.css" />
+<link rel="stylesheet" href="node_modules/@fontsource/noto-sans-sc/400.css" />
+<link rel="stylesheet" href="node_modules/@fontsource/noto-sans-sc/500.css" />
+<link rel="stylesheet" href="node_modules/@fontsource-variable/newsreader/index.css" />
+<link rel="stylesheet" href="node_modules/@fontsource-variable/instrument-sans/index.css" />
+<link rel="stylesheet" href="node_modules/@fontsource-variable/jetbrains-mono/index.css" />
+<link rel="stylesheet" href="film.css" />
+</head>
+<body>
+<div id="stage"></div>
+<script type="module">
+  import { build } from './film.js';
+  const q = new URLSearchParams(location.search);
+  const portrait = q.get('aspect') === '9x16';
+  const W = portrait ? 1080 : 1920;
+  const H = portrait ? 1920 : 1080;
+  const stage = document.getElementById('stage');
+  stage.style.width = W + 'px';
+  stage.style.height = H + 'px';
+  window.__film = { ready: false };
+  build(stage, { W, H, portrait, subs: q.get('subs') === '1' }).then((film) => {
+    window.__film = { ...film, ready: true };
+    // 预览：?t=秒 停在某一帧；?play=1 实时播放（只用来看，不用来渲染）。
+    const t = parseFloat(q.get('t') || '0');
+    film.seek(t);
+    if (q.get('play') === '1') {
+      const t0 = performance.now() - t * 1000;
+      const tick = () => {
+        const now = (performance.now() - t0) / 1000;
+        film.seek(now % film.duration);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+  }).catch((e) => {
+    window.__film = { error: String(e && e.stack || e) };
+    console.error(e);
+  });
+</script>
+</body>
+</html>
