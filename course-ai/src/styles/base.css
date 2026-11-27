@@ -39,6 +39,11 @@
 /* 表单控件统一聚焦态：柔和主色描边 + 细 ring,替代各处不一致的 focus 写法;
    也兜底那些只写了 outline-none、本来键盘聚焦时看不到焦点的输入框(a11y)。
    优先于上面的通用焦点环（同样未分层但选择器更贴合 input）。 */
+/* 对话框打开时的「起点」：只是把焦点放进对话框（tabIndex=-1，Tab 走不到它），不画框。 */
+.ca-focus-start:focus-visible {
+  outline: none;
+}
+
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {

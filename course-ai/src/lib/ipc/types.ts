@@ -662,3 +662,17 @@ export interface ConceptMastery {
   reviewed: number;
   retention: number | null;
 }
+
+/** 首次使用向导的花费估算：一小时课的 token 与每个候选模型的花费。 */
+export interface LectureEstimate {
+  tokens: {
+    promptTokens: number;
+    cachedTokens: number;
+    completionTokens: number;
+    /** true：按自己最近处理过的课算；false：粗估。 */
+    fromHistory: boolean;
+    videos: number;
+  };
+  /** 与请求的模型一一对应；查不到价格为 null。 */
+  costPerHourUsd: (number | null)[];
+}

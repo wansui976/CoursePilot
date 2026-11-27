@@ -36,7 +36,9 @@ const { mockIpc, confirmMock } = vi.hoisted(() => ({
       reorder: vi.fn(),
       search: vi.fn(),
     },
+    whisper: { list: vi.fn(async () => []), download: vi.fn() },
     pipeline: {
+      asrReady: vi.fn(async () => false),
       process: vi.fn(),
       dismiss: vi.fn(),
       jobs: vi.fn(),
@@ -45,6 +47,9 @@ const { mockIpc, confirmMock } = vi.hoisted(() => ({
     },
     ai: {
       generate: vi.fn(),
+      getProfiles: vi.fn(),
+      detectOllama: vi.fn(),
+      lectureEstimate: vi.fn(),
     },
     slides: {
       extract: vi.fn(),
@@ -63,6 +68,7 @@ const settingsExitRequestMock = vi.hoisted(() =>
 
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), confirm: confirmMock }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => undefined) }));
 vi.mock("@/features/library/ImportVideoDialog", () => ({
   ImportVideoButton: ({ onCreateFolder }: { onCreateFolder?: () => void }) => (
     <>
@@ -162,6 +168,8 @@ describe("Home", () => {
     useAssistantUi.setState({ open: false, side: "right", width: 380 });
     useJobs.getState().resetVideo(video.id);
     mockIpc.courses.list.mockResolvedValue([course, otherCourse]);
+    // 已经配过大模型：首次使用向导不出现（它自己的用例单独测）。
+    mockIpc.ai.getProfiles.mockResolvedValue([{ id: "p1" }]);
     mockIpc.videos.list.mockImplementation(async (courseId: string) =>
       courseId === course.id ? [video] : [],
     );
@@ -293,6 +301,21 @@ describe("Home", () => {
 
     fireEvent.click(within(courses).getByRole("button", { name: "打开课程「数学课程」" }));
     expect(await screen.findByRole("heading", { name: "数学课程", level: 1 })).toBeInTheDocument();
+  });
+
+  it("opens the setup wizard once on a fresh install, before the library tour", async () => {
+    mockIpc.courses.list.mockResolvedValue([]);
+    mockIpc.ai.getProfiles.mockResolvedValue([]);
+    mockIpc.ai.detectOllama.mockResolvedValue(null);
+    mockIpc.ai.lectureEstimate.mockResolvedValue({
+      tokens: { promptTokens: 1, cachedTokens: 0, completionTokens: 1, fromHistory: false, videos: 0 },
+      costPerHourUsd: [0.06, 0.1],
+    });
+    await renderHome();
+    const dialog = await screen.findByRole("dialog", { name: "开始之前" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "完成" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "开始之前" })).toBeNull());
+    expect(localStorage.getItem("course-ai-setup-wizard-done")).toBe("1");
   });
 
   it("keeps the add-course empty state when there are no courses", async () => {

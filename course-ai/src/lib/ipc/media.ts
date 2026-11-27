@@ -13,6 +13,7 @@ import type {
   Job,
   LlmProfile,
   ModelList,
+  ProviderKind,
   TranscriptSearch,
   RagAnswer,
   Screenshot,
@@ -28,6 +29,7 @@ import type {
   SlidesOcrProgress,
   SlidesOcrEvent,
   SlidesOcrOutcome,
+  LectureEstimate,
   TranslateProgress,
   TranslationRow,
 } from "./types";
@@ -106,6 +108,13 @@ export const ai = {
     invoke("cmd_set_api_key", { profileId, apiKey }),
   hasApiKey: (profileId: string): Promise<boolean> =>
     invoke("cmd_has_api_key", { profileId }),
+  /**
+   * 首次使用向导：一小时课大概要多少 token，以及每个候选模型一小时课花多少钱（美元，查不到价格为 null）。
+   * 有两讲以上的用量记录就按自己的算，否则是粗估。
+   */
+  lectureEstimate: (
+    models: { kind: ProviderKind; baseUrl: string; model: string }[],
+  ): Promise<LectureEstimate> => invoke("cmd_setup_lecture_estimate", { models }),
   /** 本机默认地址上的 Ollama：在跑就给出已装的模型名（可能为空），没在跑为 null。 */
   detectOllama: (): Promise<string[] | null> => invoke("cmd_detect_ollama"),
   /** 按协议拉取模型列表（带内置目录元数据与 24h 缓存）；`apiKey` 用于还没保存的草稿。 */

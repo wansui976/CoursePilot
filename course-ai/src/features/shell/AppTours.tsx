@@ -4,7 +4,7 @@ import { toggleShortcutLabel } from "@/features/assistant/assistantPanelModel";
 import { isMobile } from "@/lib/platform";
 import { coarsePointer } from "@/lib/useContainerWidth";
 import { keyLabel, useShortcuts } from "@/stores/shortcuts";
-import { Tour } from "@/ui/Tour";
+import { Tour, type TourStep } from "@/ui/Tour";
 import { richText } from "./tourText";
 
 const LINKS = {
@@ -25,12 +25,15 @@ const LINKS = {
  */
 export function AppTours({
   library,
+  setupDone = false,
   course,
   courseFeatures,
   workbench,
   navigate,
 }: {
   library: boolean;
+  /** 看过首次使用向导：大模型和识别已经在那里配过（或跳过），课程库引导只讲建课程。 */
+  setupDone?: boolean;
   course: boolean;
   /** 课程页上已经有视频：介绍拍题找讲解、知识点。 */
   courseFeatures: boolean;
@@ -45,6 +48,43 @@ export function AppTours({
   const touch = coarsePointer();
   const mobile = isMobile();
   const assistantKey = toggleShortcutLabel();
+  // 课程库引导的前几步：带着去设置里配大模型、配语音识别。
+  const setupSteps: TourStep[] = [
+    {
+      anchor: "settings",
+      placement: "right",
+      title: t("tour.library.settings.title"),
+      body: t("tour.library.settings.body"),
+      onNext: () => navigate({ view: "settings", settingsCategory: "llm" }),
+    },
+    {
+      anchor: "llm-add",
+      awaitAnchor: true,
+      wide: true,
+      placement: "left",
+      title: t("tour.library.llm.title"),
+      body: t("tour.library.llm.body"),
+      items: [
+        richText(t("tour.library.llm.step1"), LINKS.deepseek),
+        richText(t("tour.library.llm.step2")),
+        richText(t("tour.library.llm.step3")),
+      ],
+      onNext: () => navigate({ view: "settings", settingsCategory: "asr" }),
+    },
+    {
+      anchor: "asr-backend",
+      awaitAnchor: true,
+      wide: true,
+      placement: "left",
+      title: t("tour.library.asr.title"),
+      body: mobile ? t("tour.library.asr.bodyMobile") : t("tour.library.asr.body"),
+      items: [
+        richText(t("tour.library.asr.volc"), LINKS.volcengine),
+        richText(t("tour.library.asr.aliyun"), LINKS.bailian),
+      ],
+      onNext: () => navigate({ view: "library", courseId: null, videoId: null }),
+    },
+  ];
 
   return (
     <>
@@ -52,40 +92,7 @@ export function AppTours({
         id="library"
         enabled={library}
         steps={[
-          {
-            anchor: "settings",
-            placement: "right",
-            title: t("tour.library.settings.title"),
-            body: t("tour.library.settings.body"),
-            onNext: () => navigate({ view: "settings", settingsCategory: "llm" }),
-          },
-          {
-            anchor: "llm-add",
-            awaitAnchor: true,
-            wide: true,
-            placement: "left",
-            title: t("tour.library.llm.title"),
-            body: t("tour.library.llm.body"),
-            items: [
-              richText(t("tour.library.llm.step1"), LINKS.deepseek),
-              richText(t("tour.library.llm.step2")),
-              richText(t("tour.library.llm.step3")),
-            ],
-            onNext: () => navigate({ view: "settings", settingsCategory: "asr" }),
-          },
-          {
-            anchor: "asr-backend",
-            awaitAnchor: true,
-            wide: true,
-            placement: "left",
-            title: t("tour.library.asr.title"),
-            body: mobile ? t("tour.library.asr.bodyMobile") : t("tour.library.asr.body"),
-            items: [
-              richText(t("tour.library.asr.volc"), LINKS.volcengine),
-              richText(t("tour.library.asr.aliyun"), LINKS.bailian),
-            ],
-            onNext: () => navigate({ view: "library", courseId: null, videoId: null }),
-          },
+          ...(setupDone ? [] : setupSteps),
           {
             anchor: "add-course",
             awaitAnchor: true,

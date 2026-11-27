@@ -62,6 +62,25 @@ const ALL = ["desktop", "phone", "tablet"];
 export const scenes = [
   { name: "home", devices: ALL, run: async ({ shot }) => shot() },
   {
+    // 第一次打开、还没配大模型：首次使用向导（本机识别 + 大模型，标着一小时课的花费）。
+    name: "setup",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-setup", "1");
+        localStorage.setItem("__shot-empty", "1");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.getByRole("dialog", { name: "开始之前" }).waitFor();
+      await page.getByText("一小时课约").first().waitFor();
+      await shot();
+      await page.evaluate(() => {
+        localStorage.removeItem("__shot-setup");
+        localStorage.removeItem("__shot-empty");
+      });
+    },
+  },
+  {
     // 课程多于 4 门：主页课程叠成牌堆；再翻一张看「甩回牌底」后的样子。
     name: "home-deck",
     devices: ["desktop", "tablet"],

@@ -18,7 +18,7 @@ import {
   useContainerWidth,
   useIsPortrait,
 } from "@/lib/useContainerWidth";
-import type { DueCard } from "@/lib/ipc";
+import { ipc, type DueCard } from "@/lib/ipc";
 import type { AssistantAction, Video } from "@/lib/types";
 import {
   buildAssistantContext,
@@ -37,6 +37,8 @@ import { usePlayer } from "@/stores/player";
 import { selectDownloadCount, useDownloads } from "@/stores/downloads";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { AppTours } from "@/features/shell/AppTours";
+import { SetupWizard } from "@/features/shell/SetupWizard";
+import { setupWizardSeen } from "@/lib/setupWizard";
 import { accentVars, useTheme } from "@/stores/theme";
 import { transitionToLibrary, transitionToVideo } from "@/lib/viewTransition";
 import { studyTargetFor, type TaskMeta } from "@/lib/backgroundTasks";
@@ -206,6 +208,24 @@ export function Home() {
 
   const { data: videos = [], isSuccess: videosLoaded } = useQuery(queries.videos(selectedCourseId));
   const { data: courses = [], isSuccess: coursesLoaded } = useQuery(queries.courses());
+
+  // 首次使用向导：课程库空着、这台设备还没配过大模型、也没看过向导时出现一次。
+  // 先于新手引导：向导开着时引导不出；看过向导，引导就不再带着去配大模型和识别。
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupSeen, setSetupSeen] = useState(() => setupWizardSeen());
+  useEffect(() => {
+    if (setupSeen || !coursesLoaded || courses.length > 0) return;
+    let alive = true;
+    ipc.ai
+      .getProfiles()
+      .then((profiles) => {
+        if (alive && profiles.length === 0) setSetupOpen(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [setupSeen, coursesLoaded, courses.length]);
   // 新课程的黑板封面：后台请 AI 判断学科（没配模型时什么都不做，封面按关键词猜）。
   useAutoClassifyCovers(courses.map((course) => course.id));
   const recorrection = useRecorrection({ selectedCourseId, selectedVideoId, videos });
@@ -778,8 +798,27 @@ export function Home() {
         }
       />
       {/* 新手引导：课程库空着、课程里还没视频、课程页有了视频、第一次进工作台，各出现一次。 */}
+      <SetupWizard
+        open={setupOpen}
+        onClose={() => {
+          setSetupOpen(false);
+          setSetupSeen(true);
+        }}
+        onOpenSettings={(category) => {
+          setSetupOpen(false);
+          setSetupSeen(true);
+          openSettingsCategory(category);
+        }}
+      />
       <AppTours
-        library={mainView === "library" && !selectedCourseId && coursesLoaded && courses.length === 0}
+        library={
+          mainView === "library" &&
+          !selectedCourseId &&
+          coursesLoaded &&
+          courses.length === 0 &&
+          !setupOpen
+        }
+        setupDone={setupSeen}
         course={
           mainView === "library" &&
           !!selectedCourseId &&

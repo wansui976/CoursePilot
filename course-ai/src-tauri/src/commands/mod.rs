@@ -23,6 +23,7 @@ pub mod review_book;
 pub mod search;
 pub mod semantic;
 pub mod settings;
+pub mod setup;
 pub mod silence;
 pub mod slides;
 pub mod srs;

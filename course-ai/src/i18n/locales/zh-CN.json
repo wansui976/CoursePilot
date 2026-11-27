@@ -2720,5 +2720,44 @@
       "custom": "AI 画的图",
       "generic": "通用黑板"
     }
+  },
+  "setupWizard": {
+    "title": "开始之前",
+    "description": "先把语音识别和大模型配好，导入的课就能自动出字幕、笔记和练习题。都可以跳过，以后在设置里改。",
+    "done": "完成",
+    "checking": "正在检查…",
+    "stepDone": "已配好",
+    "asr": {
+      "title": "语音识别",
+      "localOffer": "这台设备能在本机识别：免费、不联网，中文课识别得准。要先下载 SenseVoice（{{size}}）。",
+      "readyLocalOffer": "语音识别已经能用。也可以换成本机识别：免费、不联网，要下载 SenseVoice（{{size}}）。",
+      "download": "下载并使用（{{size}}）",
+      "useInstalled": "使用本机识别",
+      "downloading": "正在下载 {{percent}}%",
+      "preparing": "正在准备…",
+      "applied": "已改用本机识别（SenseVoice）。",
+      "cloud": "用云端识别…",
+      "noLocal": "这台设备的内存不够跑本机识别。可以用阿里云或火山引擎的云端识别，要在设置里填 Key。",
+      "ready": "语音识别已经能用。",
+      "openSettings": "去设置识别…",
+      "meteredConfirm": "现在用的是移动数据，下载 SenseVoice 要用掉 {{size}} 流量。继续下载吗？",
+      "installedOffer": "SenseVoice 已经下载好了：在本机识别，免费、不联网，中文课识别得准。"
+    },
+    "llm": {
+      "title": "大模型",
+      "intro": "生成章节、摘要、笔记和练习题要用大模型。下面几家都便宜，填上自己的 API Key 就能用。",
+      "recommended": "推荐",
+      "perHour": "一小时课约 {{cost}}",
+      "free": "本机运行，不花钱",
+      "noPrice": "查不到价格",
+      "basisHistory": "按你最近处理过的 {{count}} 讲估算，只算处理时自动生成的部分，问答另算。",
+      "basisRough": "粗估：一小时课约 {{input}} 输入、{{output}} 输出 token，DeepSeek 按高峰价。",
+      "keyLabel": "{{name}} 的 API Key",
+      "getKey": "去哪里拿 Key",
+      "save": "检查并保存",
+      "checking": "正在检查…",
+      "other": "用别的服务商…",
+      "saved": "已保存，所有 AI 任务都用 {{model}}。"
+    }
   }
 }
