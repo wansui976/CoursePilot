@@ -1,4 +1,3 @@
-/* global process */
 import { createRequire } from 'module'; import fs from 'fs'; const { chromium } = createRequire(import.meta.url)('playwright');
 const [,, src, out, size='1024'] = process.argv; const s=+size;
 const b = await chromium.launch(); const p = await b.newPage({viewport:{width:s,height:s}});
