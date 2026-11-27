@@ -50,6 +50,12 @@ afterEach(() => {
 });
 
 function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
+  return render(<Controls {...renderControlsProps(props)} />);
+}
+
+function renderControlsProps(
+  props: Partial<Parameters<typeof Controls>[0]> = {},
+): Parameters<typeof Controls>[0] {
   const base = {
     playing: false,
     rate: 1,
@@ -80,7 +86,7 @@ function renderControls(props: Partial<Parameters<typeof Controls>[0]> = {}) {
     onMuteToggle: vi.fn(),
     onFullscreenToggle: vi.fn(),
   };
-  return render(<Controls {...base} {...props} />);
+  return { ...base, ...props };
 }
 
 describe("Controls speed button", () => {
@@ -540,5 +546,35 @@ describe("Controls caption settings", () => {
 
     expect(useCaptionPrefs.getState()).toMatchObject({ size: "large", background: "none" });
     expect(localStorage.getItem("course-ai-caption-size")).toBe("large");
+  });
+});
+
+describe("Controls picture in picture", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+    usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
+  });
+
+  it("hides the button where the WebView can't do picture in picture", () => {
+    renderControls({ pipAvailable: false, onPipToggle: vi.fn() });
+    expect(screen.queryByRole("button", { name: "画中画" })).toBeNull();
+  });
+
+  it("toggles picture in picture and reflects the state", () => {
+    const onPipToggle = vi.fn();
+    const { rerender } = renderControls({ pipAvailable: true, onPipToggle });
+    const button = screen.getByRole("button", { name: "画中画" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(button);
+    expect(onPipToggle).toHaveBeenCalledTimes(1);
+    rerender(
+      <Controls
+        {...renderControlsProps({ pipAvailable: true, pip: true, onPipToggle })}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "退出画中画" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

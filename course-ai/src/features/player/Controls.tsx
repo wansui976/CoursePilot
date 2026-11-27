@@ -24,6 +24,7 @@ import {
   MessageSquareText,
   Minimize,
   Pause,
+  PictureInPicture2,
   Play,
   Settings,
   SkipBack,
@@ -271,6 +272,8 @@ export function Controls({
   cropOn,
   cropInsets,
   fullscreen,
+  pipAvailable = false,
+  pip = false,
   danmakuAvailable,
   danmakuOn,
   translationAvailable = false,
@@ -286,6 +289,7 @@ export function Controls({
   onVolume,
   onMuteToggle,
   onFullscreenToggle,
+  onPipToggle,
 }: {
   playing: boolean;
   /** 常态实际播放速度；智能倍速开启时可能高于用户选择的基础倍速。 */
@@ -305,6 +309,9 @@ export function Controls({
   cropOn: boolean;
   cropInsets: Insets;
   fullscreen: boolean;
+  /** WebView 能把视频弹成画中画小窗才出这个按钮（Android 没有）。 */
+  pipAvailable?: boolean;
+  pip?: boolean;
   /** 有弹幕数据（B 站视频且抓到了）才出弹幕开关。 */
   danmakuAvailable: boolean;
   danmakuOn: boolean;
@@ -323,6 +330,7 @@ export function Controls({
   onVolume: (volume: number) => void;
   onMuteToggle: () => void;
   onFullscreenToggle: () => void;
+  onPipToggle?: () => void;
 }) {
   const { t } = useTranslation();
   // 只让这个小组件订阅进度（每秒约 4 次重渲染），不波及整个播放器。
@@ -845,6 +853,19 @@ export function Controls({
               )
             : settingsMenu)}
       </div>
+
+      {pipAvailable && onPipToggle && (
+        <button
+          type="button"
+          onClick={onPipToggle}
+          aria-label={pip ? t("videoPlayer.exitPip") : t("videoPlayer.pip")}
+          aria-pressed={pip}
+          title={pip ? t("videoPlayer.exitPip") : t("videoPlayer.pip")}
+          className={iconButtonClass}
+        >
+          <PictureInPicture2 className="h-5 w-5" />
+        </button>
+      )}
 
       <button
         type="button"

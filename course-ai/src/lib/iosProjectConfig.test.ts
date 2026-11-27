@@ -20,4 +20,14 @@ describe("iOS project config", () => {
     expect(project).toContain("NSAppTransportSecurity:");
     expect(project).toContain("NSAllowsLocalNetworking: true");
   });
+
+  it("declares background audio so picture in picture keeps playing on the home screen", () => {
+    const project = readAppleProjectConfig();
+    expect(project).toMatch(/UIBackgroundModes:\n\s+- audio\n/);
+    const plist = readFileSync(
+      resolve(projectRoot, "src-tauri/gen/apple/course-ai_iOS/Info.plist"),
+      "utf8",
+    );
+    expect(plist).toMatch(/<key>UIBackgroundModes<\/key>\s*<array>\s*<string>audio<\/string>/);
+  });
 });

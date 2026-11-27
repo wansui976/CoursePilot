@@ -11,6 +11,7 @@ export type ShortcutAction =
   | "volumeDown"
   | "mute"
   | "fullscreen"
+  | "pictureInPicture"
   | "captions"
   | "takeNote";
 
@@ -30,6 +31,7 @@ export const SHORTCUT_ACTIONS: {
   { action: "volumeDown", i18nKey: "settings.shortcuts.volumeDown" },
   { action: "mute", i18nKey: "settings.shortcuts.mute" },
   { action: "fullscreen", i18nKey: "settings.shortcuts.fullscreen" },
+  { action: "pictureInPicture", i18nKey: "settings.shortcuts.pictureInPicture", i18nHint: "settings.shortcuts.pictureInPictureHint" },
   { action: "captions", i18nKey: "settings.shortcuts.captions" },
   { action: "takeNote", i18nKey: "settings.shortcuts.takeNote", i18nHint: "settings.shortcuts.takeNoteHint" },
 ];
@@ -44,6 +46,7 @@ export const DEFAULT_BINDINGS: ShortcutBindings = {
   volumeDown: "ArrowDown",
   mute: "m",
   fullscreen: "f",
+  pictureInPicture: "p",
   captions: "c",
   takeNote: "n",
 };
