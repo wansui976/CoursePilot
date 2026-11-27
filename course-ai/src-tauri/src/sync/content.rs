@@ -30,8 +30,33 @@ const VIDEO_TYPES: &[(&str, Option<&str>)] = &[
 ];
 
 pub const COVER: &str = "Cover";
-/// 字幕译文：一个视频所有目标语言的译文合成一条。
+/// 字幕译文：每个视频的每种目标语言一条，记录 id 是 `视频id:语言`（如 `v1:zh`）。
+///
+/// 0.4.3 发出去的是旧格式：id 就是视频 id、一条里装着这个视频所有语言。那样两台设备把同一个
+/// 视频翻成不同语言时，后同步的一台会把另一台的译文整条盖掉；翻到一半同步出去的半截也会盖掉
+/// 对端完整的译文。现在按语言各管各的。旧格式的记录照样能收：按语言逐个合并，只覆盖本机比它旧的。
 pub const TRANSLATION: &str = "Translation";
+
+/// 新格式的译文记录 id 拆成（视频, 语言）；旧格式（只有视频 id）返回 None。
+fn translation_key(id: &str) -> Option<(&str, &str)> {
+    let (video, lang) = id.rsplit_once(':')?;
+    let lang_ok = !lang.is_empty()
+        && lang.len() <= 20
+        && lang
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    (!video.is_empty() && lang_ok).then_some((video, lang))
+}
+
+/// 记录挂在哪个视频 / 课程上。
+fn owner_id<'a>(record_type: &str, id: &'a str) -> &'a str {
+    if record_type == TRANSLATION {
+        if let Some((video, _)) = translation_key(id) {
+            return video;
+        }
+    }
+    id
+}
 /// 封面比这还大就不同步（正常的封面几十 KB，这么大多半是出了什么问题）。
 const COVER_MAX_BYTES: u64 = 1024 * 1024;
 
@@ -50,10 +75,14 @@ pub fn is_content(record_type: &str) -> bool {
         || VIDEO_TYPES.iter().any(|(name, _)| *name == record_type)
 }
 
-/// 首次开启同步时要排进出件箱的内容记录：（记录类型, 表, 键列）。
+/// 首次开启同步时要排进出件箱的内容记录：（记录类型, 表, 键列或键的 SQL 表达式）。
 const SNAPSHOT_SOURCES: &[(&str, &str, &str)] = &[
     ("Transcript", "transcripts", "video_id"),
-    (TRANSLATION, "transcript_translations", "video_id"),
+    (
+        TRANSLATION,
+        "transcript_translations",
+        "video_id || ':' || lang",
+    ),
     ("Chapters", "chapters", "video_id"),
     ("Summary", "summaries", "video_id"),
     ("Quiz", "quizzes", "video_id"),
@@ -267,10 +296,18 @@ pub async fn payload(
             json!({"videoID": id, "segments": segments})
         }
         TRANSLATION => {
+            // 新格式只装这一种语言；旧格式（本机升级前排进出件箱、还没发出去的）装全部语言。
+            let (video, lang) = match translation_key(id) {
+                Some((video, lang)) => (video, Some(lang)),
+                None => (id, None),
+            };
             let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-                "SELECT segment_idx,lang,source_text,text FROM transcript_translations WHERE video_id=? ORDER BY lang, segment_idx",
+                "SELECT segment_idx,lang,source_text,text FROM transcript_translations
+                 WHERE video_id=? AND (? IS NULL OR lang=?) ORDER BY lang, segment_idx",
             )
-            .bind(id)
+            .bind(video)
+            .bind(lang)
+            .bind(lang)
             .fetch_all(&mut **tx)
             .await?;
             if rows.is_empty() {
@@ -281,7 +318,7 @@ pub async fn payload(
                 .into_iter()
                 .map(|(idx, lang, source, text)| json!([idx, lang, source, text]))
                 .collect();
-            json!({"videoID": id, "rows": rows})
+            json!({"videoID": video, "rows": rows})
         }
         "Chapters" => {
             let rows: Vec<(String, Option<String>, i64, i64, i64)> = sqlx::query_as(
@@ -474,10 +511,16 @@ pub async fn save(
         if envelope.record_type == COURSE_KNOWLEDGE || envelope.record_type == COURSE_COVER {
             exists(tx, "courses", id).await?
         } else {
-            exists(tx, "videos", id).await?
+            exists(tx, "videos", owner_id(&envelope.record_type, id)).await?
         };
     if !owner_ready {
         return Ok(ContentOutcome::Parked);
+    }
+    // 旧格式的整条译文：按语言逐个比先后、逐个合并，不能整条后写胜（见 TRANSLATION）。
+    if envelope.record_type == TRANSLATION && translation_key(id).is_none() {
+        merge_legacy_translations(tx, envelope, Some(payload)).await?;
+        set_stamp(tx, envelope).await?;
+        return Ok(ContentOutcome::Applied);
     }
     if !remote_wins(tx, envelope).await? {
         return Ok(ContentOutcome::Skipped);
@@ -542,34 +585,10 @@ pub async fn save(
                 .await?;
         }
         TRANSLATION => {
-            sqlx::query("DELETE FROM transcript_translations WHERE video_id=?")
-                .bind(id)
-                .execute(&mut **tx)
-                .await?;
-            for row in payload
-                .get("rows")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                let (Some(idx), Some(lang)) = (
-                    row.get(0).and_then(Value::as_i64),
-                    row.get(1).and_then(Value::as_str),
-                ) else {
-                    continue;
-                };
-                sqlx::query(
-                    "INSERT INTO transcript_translations(video_id,segment_idx,lang,source_text,text) VALUES (?,?,?,?,?)
-                     ON CONFLICT(video_id,segment_idx,lang) DO UPDATE SET source_text=excluded.source_text, text=excluded.text",
-                )
-                .bind(id)
-                .bind(idx)
-                .bind(lang)
-                .bind(row.get(2).and_then(Value::as_str).unwrap_or_default())
-                .bind(row.get(3).and_then(Value::as_str).unwrap_or_default())
-                .execute(&mut **tx)
-                .await?;
-            }
+            let Some((video, lang)) = translation_key(id) else {
+                return Ok(ContentOutcome::Skipped);
+            };
+            replace_translation(tx, video, lang, payload).await?;
         }
         "Chapters" => {
             sqlx::query("DELETE FROM chapters WHERE video_id=?")
@@ -703,6 +722,106 @@ pub async fn save(
     Ok(ContentOutcome::Applied)
 }
 
+/// 用对端的内容整个换掉本机某视频某语言的译文。只收这个语言的行。
+async fn replace_translation(
+    tx: &mut Transaction<'_, Sqlite>,
+    video: &str,
+    lang: &str,
+    payload: &Value,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM transcript_translations WHERE video_id=? AND lang=?")
+        .bind(video)
+        .bind(lang)
+        .execute(&mut **tx)
+        .await?;
+    for row in payload
+        .get("rows")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let (Some(idx), Some(row_lang)) = (
+            row.get(0).and_then(Value::as_i64),
+            row.get(1).and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if row_lang != lang {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO transcript_translations(video_id,segment_idx,lang,source_text,text) VALUES (?,?,?,?,?)
+             ON CONFLICT(video_id,segment_idx,lang) DO UPDATE SET source_text=excluded.source_text, text=excluded.text",
+        )
+        .bind(video)
+        .bind(idx)
+        .bind(lang)
+        .bind(row.get(2).and_then(Value::as_str).unwrap_or_default())
+        .bind(row.get(3).and_then(Value::as_str).unwrap_or_default())
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// 收旧格式（0.4.3）的整条译文：逐个语言和本机这个语言的戳比，对端更新才换掉这个语言，
+/// 并把这个语言的戳记成对端的。`payload` 为 None 是旧格式的删除：本机比它旧的语言删掉。
+/// 旧格式里没有的语言一律不动——它不知道别的设备后来翻了什么。
+async fn merge_legacy_translations(
+    tx: &mut Transaction<'_, Sqlite>,
+    envelope: &SyncEnvelope,
+    payload: Option<&Value>,
+) -> AppResult<()> {
+    let video = envelope.record_id.as_str();
+    let mut langs: Vec<String> = match payload {
+        Some(payload) => payload
+            .get("rows")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|row| row.get(1).and_then(Value::as_str).map(str::to_string))
+            .collect(),
+        None => {
+            sqlx::query_scalar("SELECT DISTINCT lang FROM transcript_translations WHERE video_id=?")
+                .bind(video)
+                .fetch_all(&mut **tx)
+                .await?
+        }
+    };
+    langs.sort();
+    langs.dedup();
+    for lang in langs {
+        let key = format!("{video}:{lang}");
+        let (local_ms, local_device) = local_stamp(tx, TRANSLATION, &key).await?;
+        if (envelope.updated_at, envelope.version.device.as_str())
+            <= (local_ms, local_device.as_str())
+        {
+            continue;
+        }
+        match payload {
+            Some(payload) => replace_translation(tx, video, &lang, payload).await?,
+            None => {
+                sqlx::query("DELETE FROM transcript_translations WHERE video_id=? AND lang=?")
+                    .bind(video)
+                    .bind(&lang)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+        }
+        sqlx::query(
+            "INSERT INTO sync_content_stamps(record_type,record_id,updated_at,device) VALUES (?,?,?,?)
+             ON CONFLICT(record_type,record_id) DO UPDATE SET updated_at=excluded.updated_at, device=excluded.device",
+        )
+        .bind(TRANSLATION)
+        .bind(&key)
+        .bind(envelope.updated_at)
+        .bind(&envelope.version.device)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// 合并一条删除信封：对端更新地删掉了（比如清空重来），本地没有更晚的版本就跟着删。
 pub async fn delete(
     tx: &mut Transaction<'_, Sqlite>,
@@ -719,12 +838,17 @@ pub async fn delete(
                 .execute(&mut **tx)
                 .await?;
         }
-        TRANSLATION => {
-            sqlx::query("DELETE FROM transcript_translations WHERE video_id=?")
-                .bind(id)
-                .execute(&mut **tx)
-                .await?;
-        }
+        TRANSLATION => match translation_key(id) {
+            Some((video, lang)) => {
+                sqlx::query("DELETE FROM transcript_translations WHERE video_id=? AND lang=?")
+                    .bind(video)
+                    .bind(lang)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+            // 旧格式的删除：只删本机比它旧的语言。
+            None => merge_legacy_translations(tx, envelope, None).await?,
+        },
         "Chapters" => {
             sqlx::query("DELETE FROM chapters WHERE video_id=?")
                 .bind(id)
@@ -760,4 +884,113 @@ pub async fn delete(
     }
     set_stamp(tx, envelope).await?;
     Ok(ContentOutcome::Applied)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sync::envelope::{SyncEnvelope, SyncOperation, SyncVersion};
+
+    #[test]
+    fn translation_ids_split_into_video_and_language() {
+        assert_eq!(translation_key("v1:zh"), Some(("v1", "zh")));
+        assert_eq!(translation_key("v1:zh-Hans"), Some(("v1", "zh-Hans")));
+        assert_eq!(translation_key("v1"), None, "0.4.3 的旧格式只有视频 id");
+        assert_eq!(translation_key("v1:"), None);
+        assert_eq!(owner_id(TRANSLATION, "v1:zh"), "v1");
+        assert_eq!(owner_id("Summary", "v1"), "v1");
+    }
+
+    /// 0.4.3 发出去的整条译文：只覆盖本机比它旧的语言，它没有的语言不动。
+    #[tokio::test]
+    async fn a_legacy_whole_video_record_only_replaces_older_languages() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::Db::connect_and_migrate(&dir.path().join("t.db"))
+            .await
+            .unwrap();
+        let course = crate::commands::courses::create_course(
+            &db,
+            "c".into(),
+            dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let path = dir.path().join("a.mp4");
+        std::fs::write(&path, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&db, &course.id, path, None)
+            .await
+            .unwrap();
+        let mut tx = db.begin_write().await.unwrap();
+        sqlx::query("UPDATE sync_apply_guard SET applying=1 WHERE singleton=1")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let envelope = |id: String, at: i64, rows: Value| {
+            SyncEnvelope::new(
+                TRANSLATION.into(),
+                id,
+                SyncOperation::Save,
+                SyncVersion {
+                    counter: at,
+                    device: "pc".into(),
+                },
+                at,
+                json!({ "rows": rows }),
+            )
+        };
+        // 本机：中文是新格式、时间 200 的；英文是新格式、时间 50 的。
+        save(
+            &mut tx,
+            &envelope(
+                format!("{}:zh", video.id),
+                200,
+                json!([[0, "zh", "a", "新中文"]]),
+            ),
+        )
+        .await
+        .unwrap();
+        save(
+            &mut tx,
+            &envelope(
+                format!("{}:en", video.id),
+                50,
+                json!([[0, "en", "a", "old en"]]),
+            ),
+        )
+        .await
+        .unwrap();
+        // 旧格式（时间 100）带着中文和英文：中文本机更新，不动；英文本机更旧，换掉。日文本机没有，收下。
+        save(
+            &mut tx,
+            &envelope(
+                video.id.clone(),
+                100,
+                json!([
+                    [0, "zh", "a", "旧中文"],
+                    [0, "en", "a", "new en"],
+                    [0, "ja", "a", "日本語"]
+                ]),
+            ),
+        )
+        .await
+        .unwrap();
+        let text = |lang: &'static str| {
+            let id = video.id.clone();
+            let pool = db.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT text FROM transcript_translations WHERE video_id=? AND lang=?",
+                )
+                .bind(id)
+                .bind(lang)
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        tx.commit().await.unwrap();
+        assert_eq!(text("zh").await.as_deref(), Some("新中文"));
+        assert_eq!(text("en").await.as_deref(), Some("new en"));
+        assert_eq!(text("ja").await.as_deref(), Some("日本語"));
+    }
 }

@@ -902,7 +902,11 @@ async fn uploaded_set(db: &Db, key: &str) -> std::collections::BTreeSet<String> 
     set
 }
 
-async fn remember_uploaded(db: &Db, key: &str, change: impl FnOnce(&mut std::collections::BTreeSet<String>)) {
+async fn remember_uploaded(
+    db: &Db,
+    key: &str,
+    change: impl FnOnce(&mut std::collections::BTreeSet<String>),
+) {
     let mut set = uploaded_set(db, key).await;
     change(&mut set);
     *UPLOADED.lock().unwrap() = Some((key.to_string(), set.clone()));
@@ -1683,6 +1687,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_devices_translating_one_video_into_different_languages_keep_both() {
+        let (url, _store) = test_server::start().await;
+        let config = config(&url);
+        let pc = Device::new("pc").await;
+        let phone = Device::new("phone").await;
+        let course = crate::commands::courses::create_course(
+            &pc.db,
+            "英语听力".into(),
+            pc.dir.path().to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        let file = pc.dir.path().join("01.mp4");
+        std::fs::write(&file, b"x").unwrap();
+        let video = crate::commands::videos::add_local_video(&pc.db, &course.id, file, None)
+            .await
+            .unwrap();
+        for i in 0..2 {
+            sqlx::query("INSERT INTO transcripts(video_id,segment_idx,start_ms,end_ms,text,words_json) VALUES (?,?,?,?,?,?)")
+                .bind(&video.id).bind(i).bind(i * 1000).bind(i * 1000 + 900).bind(format!("line {i}")).bind(Some("[]"))
+                .execute(&pc.db.pool).await.unwrap();
+        }
+        pc.sync(&config).await.unwrap();
+        phone.sync(&config).await.unwrap();
+
+        // 两边各自翻成不同语言，谁都还没同步。以前一个视频只有一条记录，后同步的一台会把另一台的整条盖掉。
+        let translate = |db: Db, lang: &'static str, text: &'static str| {
+            let id = video.id.clone();
+            async move {
+                for i in 0..2 {
+                    sqlx::query("INSERT INTO transcript_translations(video_id,segment_idx,lang,source_text,text) VALUES (?,?,?,?,?)")
+                        .bind(&id).bind(i).bind(lang).bind(format!("line {i}")).bind(format!("{text}{i}"))
+                        .execute(&db.pool).await.unwrap();
+                }
+            }
+        };
+        translate(pc.db.clone(), "zh", "中文").await;
+        translate(phone.db.clone(), "ja", "日本語").await;
+        pc.sync(&config).await.unwrap();
+        phone.sync(&config).await.unwrap();
+        pc.sync(&config).await.unwrap();
+
+        for device in [&pc, &phone] {
+            for (lang, first) in [("zh", "中文0"), ("ja", "日本語0")] {
+                let rows =
+                    crate::pipeline::translate::current_translations(&device.db, &video.id, lang)
+                        .await
+                        .unwrap();
+                assert_eq!(
+                    rows.first().map(|row| row.text.as_str()),
+                    Some(first),
+                    "两种语言的译文两台设备上都在（{lang}）"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn transcripts_and_generated_content_follow_the_video_to_the_phone() {
         let (url, _store) = test_server::start().await;
         let config = config(&url);
@@ -1746,11 +1808,15 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(segments, ["第0句", "第1句", "第2句"]);
-        let translated = crate::pipeline::translate::current_translations(&phone.db, &video.id, "zh")
-            .await
-            .unwrap();
+        let translated =
+            crate::pipeline::translate::current_translations(&phone.db, &video.id, "zh")
+                .await
+                .unwrap();
         assert_eq!(
-            translated.into_iter().map(|row| row.text).collect::<Vec<_>>(),
+            translated
+                .into_iter()
+                .map(|row| row.text)
+                .collect::<Vec<_>>(),
             ["译文0", "译文1", "译文2"],
             "电脑上翻好的译文到了手机上，原文对得上就显示"
         );
@@ -2392,7 +2458,9 @@ mod tests {
 
         // 第一次看到没人引用：只记下来，不删。
         assert_eq!(
-            collect_media_garbage(&pc.db, &dav, &present, "test").await.unwrap(),
+            collect_media_garbage(&pc.db, &dav, &present, "test")
+                .await
+                .unwrap(),
             0
         );
         assert!(exists(&orphan));
@@ -2406,7 +2474,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            collect_media_garbage(&pc.db, &dav, &present, "test").await.unwrap(),
+            collect_media_garbage(&pc.db, &dav, &present, "test")
+                .await
+                .unwrap(),
             1
         );
         assert!(!exists(&orphan));
@@ -2428,7 +2498,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            collect_media_garbage(&pc.db, &dav, &present, "test").await.unwrap(),
+            collect_media_garbage(&pc.db, &dav, &present, "test")
+                .await
+                .unwrap(),
             0
         );
         assert!(exists(&used));

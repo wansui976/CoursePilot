@@ -62,6 +62,10 @@ https://claude.ai/artifact/Ki5ntSjcqdaysZd46WpzWc
 - 数据线导入（`CableImportDialog`，只有手机 / 平板）：iOS 是 App「文稿」（Finder / Apple 设备文件共享）；Android 是 App 媒体目录里的「导入」文件夹（`Android/media/<包名>/导入`，USB 文件传输能看到、不需要存储权限）。对话框开着每 3 秒重看一次文件夹；几秒内刚改过的标「正在拷贝」不能勾；加进课程失败时把已挪走的文件放回原文件夹（`return_cable_file`）。新增 mobile-files 命令要同时写进 `build.rs` 的命令表，否则 ACL 会拒掉。
 - 改了界面就用 `pnpm shots --device ratios --audit` 拍一遍（SE、SE 横屏、折叠屏外屏 344、Pro Max、折叠屏展开、iPhone/iPad 横屏）。审计会报整页横向溢出、伸出屏幕的元素和触屏上小于 28px 的点按目标。
 
+## 多设备同步
+
+- 字幕译文按「视频 + 语言」各一条同步记录（`Translation`，record_id = `视频id:语言`），各自后写胜：两台设备把同一个视频翻成不同语言互不覆盖。0.4.3 发过的旧格式（id 只有视频、一条装全部语言）照样能收：按语言逐个和本机戳比，只换掉本机更旧的语言，它没有的语言不动（`merge_legacy_translations`）。旧版本收到新格式会因为找不到视频先暂存，升级后再应用。
+
 ## 检查
 
 在 `course-ai/` 下：
