@@ -315,6 +315,12 @@ export const exporting = {
     invoke("cmd_export_notes_print", { videoId, contentHtml, open }),
   quiz: (videoId: string): Promise<string> =>
     invoke("cmd_export_quiz", { videoId }),
+  /**
+   * Anki 牌组（.apkg）：复习卡 + 还没生成卡的练习题，填空卡转成 Anki 填空题，卡背带出处和课件图。
+   * `dest` 是桌面端存储对话框选的路径；不给时（手机）写进应用数据目录，再交给系统分享。
+   */
+  ankiDeck: (scope: "course" | "video", id: string, dest?: string): Promise<string> =>
+    invoke("cmd_export_anki_deck", { scope, id, dest: dest ?? null }),
   mindmap: (videoId: string): Promise<string> =>
     invoke("cmd_export_mindmap", { videoId }),
   /** 讲义 HTML：每页课件配讲解要点。`open` 时桌面端导出后直接用浏览器打开（自动弹打印框）。 */

@@ -269,7 +269,12 @@
       "blue": "蓝色",
       "purple": "紫色",
       "pink": "粉色"
-    }
+    },
+    "exportAnki": "导出到 Anki…",
+    "ankiExported": "已导出「{{file}}」。在 Anki 里选「文件 → 导入」打开它，复习卡会按视频分进各自的牌组。",
+    "ankiEmpty": "这门课还没有复习卡或练习题，先在视频里出题或划几张填空卡再导出。",
+    "ankiFailed": "导出到 Anki 失败：{{error}}",
+    "ankiFilterName": "Anki 牌组"
   },
   "folders": {
     "newFolder": "新建文件夹",

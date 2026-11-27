@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod anki_export;
 pub mod app;
 pub mod assistant;
 pub mod backup;

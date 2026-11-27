@@ -270,7 +270,12 @@
       "blue": "Blue",
       "purple": "Purple",
       "pink": "Pink"
-    }
+    },
+    "exportAnki": "Export to Anki…",
+    "ankiExported": "Exported “{{file}}”. In Anki, choose File → Import to open it; cards are sorted into one deck per video.",
+    "ankiEmpty": "This course has no review cards or quiz questions yet. Generate a quiz or make some cloze cards first.",
+    "ankiFailed": "Export to Anki failed: {{error}}",
+    "ankiFilterName": "Anki deck"
   },
   "folders": {
     "newFolder": "New folder",

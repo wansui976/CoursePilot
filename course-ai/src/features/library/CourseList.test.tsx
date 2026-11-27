@@ -17,11 +17,21 @@ const { mockIpc } = vi.hoisted(() => ({
       setColor: vi.fn(),
     },
     folders: { list: vi.fn() },
+    export: { ankiDeck: vi.fn() },
   },
 }));
 vi.mock("@/lib/ipc", () => ({ ipc: mockIpc }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: vi.fn(), message: vi.fn() }));
-vi.mock("@/lib/mobileFiles", () => ({ isIOS: () => false, pickDirectoryPath: vi.fn() }));
+const { mockDialog, mockFiles } = vi.hoisted(() => ({
+  mockDialog: { confirm: vi.fn(), message: vi.fn(), save: vi.fn() },
+  mockFiles: { mobile: false, shareFile: vi.fn() },
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => mockDialog);
+vi.mock("@/lib/mobileFiles", () => ({
+  isIOS: () => false,
+  isMobile: () => mockFiles.mobile,
+  pickDirectoryPath: vi.fn(),
+  shareFile: mockFiles.shareFile,
+}));
 
 const courses = [
   { id: "c1", name: "申论课程", root_path: "/a", cover_image: null, created_at: 1, updated_at: 1, video_count: 3, sort_order: 0, color: null },
@@ -49,6 +59,68 @@ describe("CourseList", () => {
     mockIpc.courses.setColor.mockReset().mockResolvedValue(undefined);
     mockIpc.folders.list.mockReset().mockResolvedValue([]);
     window.localStorage.removeItem("course-ai-sidebar-expanded");
+    mockIpc.export.ankiDeck.mockReset();
+    mockDialog.save.mockReset();
+    mockDialog.message.mockReset();
+    mockFiles.mobile = false;
+    mockFiles.shareFile.mockReset();
+  });
+
+  it("exports the course to an Anki deck at the path picked on desktop", async () => {
+    mockDialog.save.mockResolvedValue("/Users/me/申论课程.apkg");
+    mockIpc.export.ankiDeck.mockResolvedValue("/Users/me/申论课程.apkg");
+    renderList();
+    fireEvent.click((await screen.findAllByRole("button", { name: "课程操作" }))[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "导出到 Anki…" }));
+    await waitFor(() =>
+      expect(mockIpc.export.ankiDeck).toHaveBeenCalledWith(
+        "course",
+        "c1",
+        "/Users/me/申论课程.apkg",
+      ),
+    );
+    expect(mockDialog.save.mock.calls[0][0].defaultPath).toBe("申论课程.apkg");
+    await waitFor(() =>
+      expect(mockDialog.message).toHaveBeenCalledWith(
+        expect.stringContaining("申论课程.apkg"),
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("does nothing when the save dialog is cancelled", async () => {
+    mockDialog.save.mockResolvedValue(null);
+    renderList();
+    fireEvent.click((await screen.findAllByRole("button", { name: "课程操作" }))[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "导出到 Anki…" }));
+    await waitFor(() => expect(mockDialog.save).toHaveBeenCalled());
+    expect(mockIpc.export.ankiDeck).not.toHaveBeenCalled();
+  });
+
+  it("shares the deck on phones and explains an empty course", async () => {
+    mockFiles.mobile = true;
+    mockIpc.export.ankiDeck.mockResolvedValueOnce("/data/exports/anki/申论课程.apkg");
+    renderList();
+    fireEvent.click((await screen.findAllByRole("button", { name: "课程操作" }))[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "导出到 Anki…" }));
+    await waitFor(() =>
+      expect(mockFiles.shareFile).toHaveBeenCalledWith(
+        "/data/exports/anki/申论课程.apkg",
+        "application/apkg",
+      ),
+    );
+    expect(mockIpc.export.ankiDeck).toHaveBeenCalledWith("course", "c1");
+    expect(mockDialog.save).not.toHaveBeenCalled();
+
+    mockIpc.export.ankiDeck.mockRejectedValueOnce("not found: no cards to export");
+    fireEvent.click((await screen.findAllByRole("button", { name: "课程操作" }))[0]);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "导出到 Anki…" }));
+    await waitFor(() =>
+      expect(mockDialog.message).toHaveBeenCalledWith(
+        expect.stringContaining("还没有复习卡或练习题"),
+        { kind: "info" },
+      ),
+    );
   });
 
   it("marks the selected course with aria-current=page and leaves others unset", async () => {
