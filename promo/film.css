@@ -67,3 +67,142 @@ body { overflow: hidden; }
   padding: 0.28em 0.7em; border-radius: 8px;
   white-space: pre-line; text-align: center; line-height: 1.45;
 }
+
+/* ================= 后面各场景的组件（照 App 的「纸」主题） ================= */
+:root { --accent: #1d6b52; --shadow-pop: 0 24px 60px rgba(16,24,20,0.16), 0 4px 14px rgba(16,24,20,0.08); }
+.scene { overflow: visible; }
+.scene * { box-sizing: border-box; }
+.abs-fill { position: absolute; inset: 0; }
+.serif { font-family: var(--font-display); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.sans { font-family: var(--font-app); }
+.paper-card { background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 12px; }
+.lift { box-shadow: var(--shadow-pop); }
+.ts { font-family: var(--font-mono); color: var(--accent-text); background: var(--accent-weak); border-radius: 4px; padding: 0 0.3em; }
+
+/* 复习卡 */
+.rc { position: absolute; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 12px;
+  box-shadow: 0 30px 80px rgba(16,24,20,0.14), 0 6px 18px rgba(16,24,20,0.06);
+  transform-style: preserve-3d; }
+.rc .side { position: absolute; inset: 0; backface-visibility: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; border-radius: 12px; overflow: hidden; background: var(--surface-card); }
+.rc .side.b { transform: rotateY(180deg); }
+.rc .q { font-family: var(--font-display); font-weight: 500; color: var(--text-strong); line-height: 1.35; }
+.rc .a { font-family: var(--font-reading); color: var(--text-normal); line-height: 1.6; }
+.rc .a b { color: var(--text-strong); font-weight: 700; }
+.rc .rule { height: 1px; background: var(--border-subtle); }
+.rc .links { font-family: var(--font-app); color: var(--accent-text); display: flex; gap: 1.4em; }
+.rc .links span.muted { color: var(--text-muted); }
+.rates { display: flex; gap: 0.6em; }
+.rate { position: relative; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-card); display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--font-app); line-height: 1.35; }
+.rate .n { font-weight: 600; }
+.rate .d { color: var(--text-muted); }
+.rate .k { position: absolute; right: 0.5em; top: 0.4em; font-family: var(--font-mono); font-size: 0.7em; color: var(--text-muted); background: var(--surface-card-hover); border-radius: 4px; padding: 0 0.35em; }
+.rate.again .n { color: var(--status-err); }
+.rate.hard .n { color: var(--status-warn); }
+.rate.good .n, .rate.easy .n { color: var(--accent-text); }
+.rate.on { background: var(--accent); border-color: var(--accent); }
+.rate.on .n, .rate.on .d { color: var(--on-accent); }
+.rate.on .k { background: rgba(255,255,255,0.18); color: #fff; }
+.rate.press-again { background: var(--status-err-bg); border-color: var(--status-err); }
+.stamp { position: absolute; font-family: var(--font-app); font-weight: 600; border: 3px solid currentColor; border-radius: 8px; padding: 0.15em 0.6em; letter-spacing: 0.08em; }
+.stamp.forget { color: var(--status-err); }
+.stamp.remember { color: var(--accent-text); }
+.wrong-edge { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--status-err); border-radius: 12px 0 0 12px; }
+
+/* 错题本 */
+.wb { position: absolute; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 8px 12px 12px 8px; box-shadow: 0 18px 50px rgba(16,24,20,0.14); overflow: hidden; }
+.wb .spine { position: absolute; left: 0; top: 0; bottom: 0; background: var(--status-err); }
+.wb .title { position: absolute; font-family: var(--font-display); font-weight: 600; color: var(--text-strong); }
+.wb .count { position: absolute; font-family: var(--font-display); color: var(--text-strong); }
+.wb .sub { position: absolute; font-family: var(--font-app); color: var(--text-muted); }
+
+/* 收集册 */
+.coll { position: absolute; background: var(--surface-app); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+.sec-title { display: flex; align-items: center; gap: 0.6em; font-family: var(--font-display); font-weight: 600; color: var(--text-strong); }
+.sec-title::after { content: ""; flex: 1; height: 1px; background: var(--border-subtle); }
+.stat { font-family: var(--font-display); color: var(--text-strong); line-height: 1; }
+.stat small { display: block; font-family: var(--font-app); color: var(--text-muted); font-size: 0.28em; margin-top: 0.5em; letter-spacing: 0.02em; }
+.mb { position: absolute; background: var(--board); border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05); overflow: hidden; }
+.mb .nm { position: absolute; font-family: var(--font-display); font-weight: 500; color: var(--chalk); }
+.mb .bar { position: absolute; height: 4px; background: rgba(238,242,236,0.14); border-radius: 2px; overflow: hidden; }
+.mb .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--chalk); border-radius: 2px; }
+.mb .tag { position: absolute; font-family: var(--font-app); color: var(--chalk); border: 1px solid rgba(238,242,236,0.6); border-radius: 4px; padding: 0 0.4em; }
+.mb .ledge2 { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: linear-gradient(var(--wood), var(--wood-dark)); }
+
+/* 课桌 */
+.desk { position: absolute; background: var(--surface-app); }
+.widget { position: absolute; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+.widget .wt { position: absolute; font-family: var(--font-app); color: var(--text-muted); }
+.widget .big { position: absolute; font-family: var(--font-display); color: var(--text-strong); line-height: 1; }
+.win { position: absolute; border-radius: 8px; overflow: hidden; border: 6px solid #e9e6df; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06); }
+.win .sky, .win .layer2 { position: absolute; inset: 0; }
+.win .mull-v, .win .mull-h { position: absolute; background: #e9e6df; }
+.sticky { position: absolute; background: #fbf4d9; border-radius: 4px; font-family: var(--font-reading); color: var(--text-normal); padding: 0.9em 1em; box-shadow: 0 1px 0 rgba(0,0,0,0.04); }
+.sticky .tape { position: absolute; left: 50%; top: -10px; width: 70px; height: 20px; margin-left: -35px; background: rgba(255,255,255,0.6); border: 1px solid rgba(0,0,0,0.05); transform: rotate(-3deg); }
+.sticky li { margin: 0.25em 0; }
+.lec { position: absolute; border-radius: 8px; overflow: hidden; background: var(--board); }
+.lec .play { position: absolute; border-radius: 50%; background: rgba(13,16,15,0.55); border: 1px solid rgba(255,255,255,0.25); }
+.lec .play::after { content: ""; position: absolute; left: 40%; top: 30%; border-left: 0.9em solid #fff; border-top: 0.55em solid transparent; border-bottom: 0.55em solid transparent; }
+.prog { position: absolute; height: 4px; background: rgba(255,255,255,0.22); border-radius: 2px; }
+.prog i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-text); border-radius: 2px; }
+.prog b { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--video-accent); }
+.deckcard { position: absolute; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+.deckcard .cov { position: absolute; left: 0; right: 0; top: 0; background: var(--board); overflow: hidden; }
+.deckcard .cov .ledge3 { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; background: linear-gradient(var(--wood), var(--wood-dark)); }
+.deckcard .ttl { position: absolute; font-family: var(--font-display); font-weight: 600; color: var(--text-strong); white-space: nowrap; }
+.deckcard .meta { position: absolute; font-family: var(--font-app); color: var(--text-muted); white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; gap: 0.4em; font-family: var(--font-app); color: var(--text-normal); background: var(--surface-card-hover); border-radius: 6px; padding: 0.15em 0.55em; white-space: nowrap; }
+
+/* 笔记 */
+.note { position: absolute; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+.note .sheet { position: absolute; inset: 0; }
+.note h1 { font-family: var(--font-display); font-weight: 600; color: var(--text-strong); margin: 0; }
+.note h2 { font-family: var(--font-display); font-weight: 600; color: var(--text-strong); margin: 0; }
+.note p { font-family: var(--font-reading); color: var(--text-normal); margin: 0; }
+.note .bar { position: absolute; left: 0; right: 0; top: 0; border-bottom: 1px solid var(--border-subtle); background: var(--surface-panel); display: flex; align-items: center; justify-content: space-between; font-family: var(--font-app); color: var(--text-muted); }
+.note .bar .ops { display: flex; gap: 1.1em; }
+.note .bar .ops .on { color: var(--accent-text); }
+.idx { position: absolute; background: #f4f1ea; border: 1px solid #e2ddd2; border-left: none; border-radius: 0 8px 8px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--font-display); color: var(--text-muted); line-height: 1.05; box-shadow: inset 6px 0 8px -6px rgba(0,0,0,0.25); }
+.idx.cur { background: var(--accent-weak); color: var(--accent-text); border-color: var(--accent-weak-2); }
+.pencil-note { position: absolute; font-family: var(--font-reading); color: var(--pencil); font-style: italic; }
+.wavy { text-decoration: underline wavy var(--pencil); text-underline-offset: 0.28em; text-decoration-thickness: 1.5px; }
+.crumb { position: absolute; background: #d8d3ca; border-radius: 2px; }
+
+/* 设备 */
+.dev { position: absolute; background: #1b1f1d; box-shadow: 0 30px 70px rgba(16,24,20,0.18); }
+.dev .scr { position: absolute; overflow: hidden; background: var(--surface-app); }
+.dev-base { position: absolute; background: linear-gradient(#d9dcd8, #b9bdb8); border-radius: 0 0 18px 18px; }
+.dev-stand { position: absolute; background: linear-gradient(#cfd2ce, #a9ada8); }
+.dev-label { position: absolute; font-family: var(--font-app); color: var(--text-muted); text-align: center; white-space: nowrap; }
+.cloud { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--font-app); color: var(--text-normal); }
+.packet { position: absolute; border-radius: 6px; background: var(--surface-card); border: 1px solid var(--border-subtle); box-shadow: 0 6px 16px rgba(16,24,20,0.12); font-family: var(--font-app); color: var(--text-normal); display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+.badge { position: absolute; font-family: var(--font-app); font-weight: 600; color: var(--accent-text); background: var(--accent-weak); border-radius: 999px; padding: 0.25em 0.9em; white-space: nowrap; }
+
+/* 对话框、搜索、复习资料 */
+.dlg { position: absolute; background: var(--surface-panel); border: 1px solid var(--border-subtle); border-radius: 12px; box-shadow: 0 40px 100px rgba(16,24,20,0.2), 0 8px 24px rgba(16,24,20,0.08); overflow: hidden; }
+.dlg .hd { position: absolute; left: 0; right: 0; top: 0; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: center; font-family: var(--font-display); font-weight: 600; color: var(--text-strong); }
+.dlg .ft { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; font-family: var(--font-app); color: var(--text-muted); }
+.drv { position: absolute; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-card); font-family: var(--font-app); color: var(--text-strong); display: flex; flex-direction: column; justify-content: center; }
+.drv small { color: var(--text-muted); }
+.drv.sel { background: var(--surface-card-active); border-color: var(--accent-weak-2); }
+.frow { position: absolute; display: flex; align-items: center; font-family: var(--font-app); color: var(--text-normal); border-bottom: 1px solid var(--border-faint); }
+.cbx { flex: none; border: 1.5px solid var(--border-control); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #fff; }
+.cbx.on { background: var(--accent); border-color: var(--accent); }
+.seg { display: flex; border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; }
+.seg span { padding: 0.2em 0.8em; }
+.seg span.on { background: var(--surface-card-active); color: var(--text-strong); }
+.btn-primary { background: var(--accent); color: var(--on-accent); border-radius: 6px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.search { position: absolute; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-input); display: flex; align-items: center; font-family: var(--font-app); color: var(--text-strong); }
+.search .caret { display: inline-block; width: 2px; background: var(--text-strong); margin-left: 2px; }
+.tline { position: absolute; display: flex; font-family: var(--font-reading); color: var(--text-normal); }
+.tline .tm { flex: none; font-family: var(--font-mono); color: var(--text-faint); }
+.tline .tx { flex: 1; }
+.hl { background: var(--accent-weak); border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.hl-tm { color: var(--accent-text) !important; }
+.book { position: absolute; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; }
+.book .toc { position: absolute; left: 0; top: 0; bottom: 0; border-right: 1px solid var(--border-subtle); background: var(--surface-rail); font-family: var(--font-app); color: var(--text-muted); }
+.book .toc div.on { color: var(--text-strong); background: var(--surface-card-hover); border-radius: 6px; }
+.book .pt { position: absolute; font-family: var(--font-reading); color: var(--text-normal); display: flex; gap: 0.6em; }
+.book .pt::before { content: "·"; color: var(--text-faint); }
+.big-num { position: absolute; font-family: var(--font-mono); font-weight: 600; color: var(--text-strong); white-space: nowrap; letter-spacing: -0.02em; }
+.speedline { position: absolute; height: 3px; border-radius: 2px; background: var(--border-strong); }

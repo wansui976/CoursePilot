@@ -2,6 +2,9 @@
 import { clamp, lerp, prog, ease, spring, wobble, rng, noise1, svg, el, cue, events } from './lib/core.js';
 import { loadHanzi, loadLineFont, grainCanvas, ChalkWriter, Dust } from './lib/chalk.js';
 import { Clawd } from './lib/clawd.js';
+import { Scene, camLerp } from './lib/scene.js';
+import { clawdAt, cueTrack } from './lib/track.js';
+import { buildReview } from './scenes/review.js';
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -149,6 +152,9 @@ export async function build(stage, A) {
   // ---------- Clawd ----------
   const clawdSVG = svg('svg', { width: 8000, height: 8000, viewBox: '-4000 -4000 8000 8000', style: 'position:absolute;left:-4000px;top:-4000px;overflow:visible' }, world);
   const ledgeTop = BH / 2 - 8;
+  // 后面各场景的容器放在 Clawd 下面一层。
+  const scenesLayer = el('div', { class: 'abs' });
+  world.insertBefore(scenesLayer, clawdSVG);
   const cdefs = svg('defs', {}, clawdSVG);
   const cclip = svg('clipPath', { id: 'aboveLedge', clipPathUnits: 'userSpaceOnUse' }, cdefs);
   const cclipRect = svg('rect', { x: -4000, y: -4000, width: 8000, height: 4000 + ledgeTop }, cclip);
@@ -221,7 +227,15 @@ export async function build(stage, A) {
 
   function seek(t) {
     // 镜头
-    const c = camera(t);
+    let c = camera(t);
+    if (t >= 18.6) {
+      const k = sceneCamera(t);
+      const hx = noise1(t * 0.6, 1) * 3.2, hy = noise1(t * 0.6, 2) * 2.4, hr = noise1(t * 0.5, 3) * 0.12;
+      c = { z: k.z, cx: k.x + hx / k.z, cy: k.y + hy / k.z, r: (k.r || 0) + hr };
+    }
+    board3d.style.display = t < 18.6 ? '' : 'none';
+    for (const sc of scenes) sc.show(t);
+    for (const u of updaters) u(t);
     world.style.transform = `translate(${W / 2}px, ${H / 2}px) scale(${c.z}) rotate(${c.r}deg) translate(${-c.cx}px, ${-c.cy}px)`;
 
     // 板面的一道反光，慢慢扫过去。
@@ -331,6 +345,7 @@ export async function build(stage, A) {
 
   function updateClawd(t) {
     if (t < POP) { clawd.update({ opacity: 0 }); return; }
+    if (t >= 18.6) { cclipRect.setAttribute('height', 8000); clawd.update(sceneClawd(t)); return; }
     let x = CX0, y = ledgeTop, squash = 0, tilt = 0, blink = 0, look = 0, wave = 0, step = 0, scale = 1, shadow = 1;
     // 从槽后面冒出来
     const up = spring(t - POP, 1.5, 0.45);
@@ -368,7 +383,52 @@ export async function build(stage, A) {
     clawd.update({ x, y, squash, tilt, blink, look, wave, waveFlip, step, scale, shadow });
   }
 
-  const duration = A.until || 19.0;
+  // ================= 后面的场景 =================
+  const zCard = (W / BW) * (portrait ? 0.78 : 0.7);
+  const R = new Scene(scenesLayer, { cx: 0, cy: portrait ? -120 : -60, s: 1 / zCard, W, H, name: 'review' }).live(18.6, 37.8);
+  const scenes = [R];
+  const camKeys = [];
+  const tracks = [];
+  const ctx = {
+    A, W, H, portrait, BW, BH, R, cue, css, script, plain,
+    layer: scenesLayer,
+    cam: (t, c, e) => camKeys.push({ t, ...c, e }),
+    track: (scene, keys, t0, t1) => { tracks.push({ scene, keys, t0, t1 }); cueTrack(keys.slice(1), cue); },
+    clawdLanding: () => R.l(CX1, CY1),
+    deskSlot: () => ({ x: 1500, y: 700, w: 340, h: 280 }),
+  };
+  const updaters = [buildReview(ctx).update];
+  camKeys.sort((a, b) => a.t - b.t);
+
+  function sceneCamera(t) {
+    if (t <= camKeys[0].t) return camKeys[0];
+    for (let i = 1; i < camKeys.length; i++) {
+      if (t <= camKeys[i].t) {
+        const a = camKeys[i - 1], b = camKeys[i];
+        const k = (b.e || ease.camera)(clamp((t - a.t) / (b.t - a.t)));
+        return camLerp(a, b, k);
+      }
+    }
+    return camKeys[camKeys.length - 1];
+  }
+
+  function sceneClawd(t) {
+    for (const tr of tracks) {
+      if (t < tr.t0 || t > tr.t1) continue;
+      const st = clawdAt(t, tr.keys);
+      if (!st) continue;
+      const p = tr.scene.w(st.x, st.y);
+      return { ...st, x: p.x, y: p.y, scale: (st.u * tr.scene.s) / 9, opacity: st.hide ? 0 : 1 };
+    }
+    return { opacity: 0 };
+  }
+
+  // 用到的字都先加载好。
+  const usedText = stage.innerText + narration.map((l) => l.sub).join('');
+  await Promise.all(['500', '600', '700'].map((w) => document.fonts.load(`${w} 40px "Noto Serif SC"`, usedText)).concat(['400', '500', '600'].map((w) => document.fonts.load(`${w} 40px "Noto Sans SC"`, usedText))));
+  await document.fonts.ready;
+
+  const duration = A.until || 120.0;
   return { duration, seek, events, narration, marks: { mainEnd: mainRes.t1, attrEnd: attr.t1, logoEnd: LOGO_DONE } };
 }
 
