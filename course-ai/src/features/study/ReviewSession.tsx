@@ -407,6 +407,7 @@ export function ReviewSession({
               data-tossing={tossing ? "" : undefined}
               data-filing={flight ? "" : undefined}
               data-dragging={swipe.dx !== 0 ? "" : undefined}
+              data-ring={mistakes ? "" : undefined}
               style={
                 flight
                   ? ({ "--fly-x": `${flight.x}px`, "--fly-y": `${flight.y}px` } as React.CSSProperties)
@@ -416,6 +417,13 @@ export function ReviewSession({
               }
               {...swipe.handlers}
             >
+              {/* 错题模式：卡片左上角打孔、穿着活页环，和错题本那串卡一样。 */}
+              {mistakes && (
+                <>
+                  <span className="ca-ring-hole" aria-hidden="true" />
+                  <span className="ca-ring" aria-hidden="true" />
+                </>
+              )}
               {revealed && (
                 <>
                   <span className="ca-stamp left" style={{ opacity: swipe.leftStamp }} aria-hidden="true">

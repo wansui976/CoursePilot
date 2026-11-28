@@ -2700,7 +2700,9 @@
     "missed": "Missed {{count}}×",
     "streakLabel": "Streak",
     "streak": "{{count}} of {{total}} correct in a row",
-    "review": "Review mistakes only"
+    "review": "Review mistakes only",
+    "flip": "Flip to the next card ({{index}} of {{total}})",
+    "allWon": "Every mistake won back"
   },
   "collection": {
     "tab": "Collection",

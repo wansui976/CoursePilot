@@ -1820,52 +1820,148 @@ button.ca-time:hover {
   color: var(--text-muted);
 }
 
-.ca-mistakes-pile {
+/* 抽认卡环：卡片左上角打孔，一只金属活页环从孔里穿过、露在卡片上沿外面。
+   后面的卡绕着环（孔的位置）一张比一张多转一点，像一串卡自然张开。 */
+.ca-ring-deck {
+  --hole-x: 22px;
+  --hole-y: 20px;
   position: relative;
   width: 280px;
   max-width: 100%;
+  margin-top: 12px;
   isolation: isolate;
 }
 
-.ca-mistakes-pile .mc {
+.ca-ring-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  width: 100%;
   min-height: 140px;
-  padding: 14px 16px 12px 18px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 14px 16px 12px 44px;
+  border: 0;
   border-radius: var(--r-md);
   background: var(--surface-panel);
   box-shadow:
     0 0 0 1px var(--border-subtle),
-    inset 3px 0 0 var(--status-err),
     0 8px 18px -12px rgb(16 24 20 / 0.45);
+  text-align: left;
+  color: inherit;
+  transform-origin: var(--hole-x) var(--hole-y);
 }
 
-/* 底下两张只露出一点边，叠成一小摞。 */
-.ca-mistakes-pile .mc:nth-child(2),
-.ca-mistakes-pile .mc:nth-child(3) {
+.ca-ring-card[data-depth] {
   position: absolute;
   inset: 0;
   z-index: -1;
 }
 
-.ca-mistakes-pile .mc:nth-child(2) {
-  transform: translate(8px, 8px) rotate(2deg);
+.ca-ring-card[data-depth="1"] {
+  transform: rotate(4deg);
 }
 
-.ca-mistakes-pile .mc:nth-child(3) {
-  transform: translate(14px, 14px) rotate(4deg);
+.ca-ring-card[data-depth="2"] {
+  transform: rotate(8deg);
   z-index: -2;
 }
 
-.ca-mistakes-pile .lbl {
+.ca-ring-card--top {
+  cursor: pointer;
+  transition: transform 0.18s var(--ease);
+}
+
+.ca-ring-card--top:disabled {
+  cursor: default;
+}
+
+.ca-ring-card--top:not(:disabled):hover {
+  transform: rotate(-1.5deg);
+}
+
+.ca-ring-card--top:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 翻一张：绕环往下转开、淡出，下一张露出来；转完它排到最后。 */
+.ca-ring-card[data-flipping] {
+  animation: ca-ring-flip 0.34s var(--ease-in) forwards;
+}
+
+@keyframes ca-ring-flip {
+  to {
+    transform: rotate(-70deg);
+    opacity: 0;
+  }
+}
+
+/* 打的孔：一个小圆，孔边一道细红，表示这是答错过的卡。 */
+.ca-ring-hole {
+  position: absolute;
+  left: calc(var(--hole-x) - 5px);
+  top: calc(var(--hole-y) - 5px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--surface-app);
+  box-shadow:
+    inset 0 1px 2px rgb(16 24 20 / 0.3),
+    0 0 0 1.5px var(--status-err);
+}
+
+/* 活页环：一个直径 30px 的圆环，最低点正好落在孔里。卡片上沿以上的部分整圈看得见；
+   卡面上只看得见左半圈（从孔里穿出来、绕到前面的那段），右半圈在卡片后面。
+   用两道遮罩相加：上面 10px（卡片上沿以上）全露 + 左半边全露。 */
+.ca-ring {
+  position: absolute;
+  left: calc(var(--hole-x) - 15px);
+  top: calc(var(--hole-y) - 30px);
+  z-index: 2;
+  width: 30px;
+  height: 30px;
+  border: 3px solid color-mix(in srgb, var(--pencil) 70%, #fff);
+  border-radius: 50%;
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 0.45),
+    1px 1px 2px rgb(16 24 20 / 0.3);
+  pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 10px, transparent 10px),
+    linear-gradient(to right, #000 15px, transparent 15px);
+  mask-image:
+    linear-gradient(to bottom, #000 10px, transparent 10px),
+    linear-gradient(to right, #000 15px, transparent 15px);
+}
+
+.ca-ring-deck[data-empty] {
+  min-height: 72px;
+}
+
+/* 空环：卡都取下了，整圈露出来。 */
+.ca-ring-deck[data-empty] .ca-ring {
+  top: 6px;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.ca-ring-empty {
+  margin: 0;
+  padding: 6px 0 0 44px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.ca-ring-card .lbl {
   font-size: 11px;
   font-weight: 600;
   color: var(--status-err);
 }
 
-.ca-mistakes-pile .q {
+.ca-ring-card .q {
   margin: 0;
   font-family: var(--font-display);
   font-size: 15px;
@@ -1874,7 +1970,7 @@ button.ca-time:hover {
   color: var(--text-strong);
 }
 
-.ca-mistakes-pile .streak {
+.ca-ring-card .streak {
   margin-top: auto;
   display: flex;
   align-items: center;
@@ -1883,15 +1979,23 @@ button.ca-time:hover {
   color: var(--text-muted);
 }
 
-.ca-mistakes-pile .streak i {
+.ca-ring-card .streak i {
   width: 14px;
   height: 4px;
   border-radius: 2px;
   background: var(--border-subtle);
 }
 
-.ca-mistakes-pile .streak i.on {
+.ca-ring-card .streak i.on {
   background: var(--status-ok);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ca-ring-card--top,
+  .ca-ring-card[data-flipping] {
+    transition: none;
+    animation: none;
+  }
 }
 
 /* ===================== 知识点收集册 ===================== */
@@ -3092,4 +3196,10 @@ button[data-tour="assistant"][data-tucked] {
   .ca-pencil-body {
     transform: translate(20px, 12px);
   }
+}
+
+/* 错题复习：卡片也打孔、穿环。 */
+.ca-review-card[data-ring] {
+  --hole-x: 30px;
+  --hole-y: 28px;
 }

@@ -2684,7 +2684,9 @@
     "missed": "答错 {{count}} 次",
     "streakLabel": "连对",
     "streak": "已连对 {{count}} 次，共需 {{total}} 次",
-    "review": "只复习错题"
+    "review": "只复习错题",
+    "flip": "翻到下一张（{{index}} / {{total}}）",
+    "allWon": "错题都赢回来了"
   },
   "collection": {
     "tab": "收集册",
