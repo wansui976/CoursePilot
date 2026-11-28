@@ -61,7 +61,10 @@ targets:
           - _http._tcp
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # audio：画中画小窗回到主屏后接着放（系统要求声明「音频、AirPlay 与画中画」后台模式）。
+        # 没进小窗的视频切走时由播放器自己暂停（见 features/player/index.tsx）。
         UIBackgroundModes:
+          - audio
           - remote-notification
         # 处理视频、下载模型时锁屏或切走接着跑（iOS 26 的 BGContinuedProcessingTask，见 KeepAlive.swift）。
         BGTaskSchedulerPermittedIdentifiers:

@@ -59,8 +59,48 @@ async function dumpShareImages(page, out, prefix) {
 
 const ALL = ["desktop", "phone", "tablet"];
 
+/** 找到页面上内容最长的那个滚动区，往下逐屏截（最多 5 屏）：整页截图截不到内层滚动区。 */
+async function scrollShots(page, shot) {
+  for (let i = 1; i <= 5; i++) {
+    const moved = await page.evaluate(() => {
+      let best = null;
+      for (const el of document.querySelectorAll("*")) {
+        const overflow = getComputedStyle(el).overflowY;
+        if (overflow !== "auto" && overflow !== "scroll") continue;
+        const extra = el.scrollHeight - el.clientHeight;
+        if (extra > 4 && (!best || extra > best.scrollHeight - best.clientHeight)) best = el;
+      }
+      if (!best) return false;
+      const before = best.scrollTop;
+      best.scrollTop = before + best.clientHeight * 0.85;
+      return best.scrollTop > before;
+    });
+    if (!moved) break;
+    await shot(`p${i + 1}`);
+  }
+}
+
 export const scenes = [
   { name: "home", devices: ALL, run: async ({ shot }) => shot() },
+  {
+    // 第一次打开、还没配大模型：首次使用向导（本机识别 + 大模型，标着一小时课的花费）。
+    name: "setup",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-setup", "1");
+        localStorage.setItem("__shot-empty", "1");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.getByRole("dialog", { name: "开始之前" }).waitFor();
+      await page.getByText("一小时课约").first().waitFor();
+      await shot();
+      await page.evaluate(() => {
+        localStorage.removeItem("__shot-setup");
+        localStorage.removeItem("__shot-empty");
+      });
+    },
+  },
   {
     // 课程多于 4 门：主页课程叠成牌堆；再翻一张看「甩回牌底」后的样子。
     name: "home-deck",
@@ -496,6 +536,39 @@ export const scenes = [
     },
   },
   {
+    // 迷你播放器：视频页里在放，切去别处时角落接着放；点它回来，从放到的地方接着放。
+    name: "mini-player",
+    devices: ["desktop", "phone"],
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      const player = page.locator("[data-video-player] video").first();
+      await player.evaluate((v) => {
+        v.currentTime = 95;
+        return v.play();
+      });
+      await page.waitForTimeout(800);
+      // 桌面走 rail 去设置；手机上工作台是整屏，点返回回到课程页。
+      const settings = page.getByRole("button", { name: "设置", exact: true }).first();
+      if (await settings.isVisible().catch(() => false)) await settings.click();
+      else await page.getByRole("button", { name: "返回", exact: true }).first().click();
+      const mini = page.getByRole("region", { name: "迷你播放器" });
+      await mini.waitFor();
+      await page.waitForTimeout(1200);
+      const miniAt = await mini.locator("video").evaluate((v) => ({ t: v.currentTime, paused: v.paused }));
+      if (miniAt.paused || miniAt.t < 95) throw new Error(`小窗没有接着放：${JSON.stringify(miniAt)}`);
+      await shot();
+      await mini.getByRole("button", { name: /^回到「/ }).click();
+      await page.locator("[data-video-player]").first().waitFor();
+      await page.waitForTimeout(1200);
+      const back = await page
+        .locator("[data-video-player] video")
+        .first()
+        .evaluate((v) => ({ t: v.currentTime, paused: v.paused }));
+      if (back.paused || back.t < miniAt.t) throw new Error(`回到视频页没有接着放：${JSON.stringify(back)}`);
+      if (await mini.count()) throw new Error("回到视频页后小窗没收起");
+    },
+  },
+  {
     name: "workbench",
     devices: ALL,
     run: async ({ page, shot }) => {
@@ -906,6 +979,8 @@ export const scenes = [
     run: async ({ page, shot }) => {
       await nav(page, "学习面板", "学习");
       await shot();
+      // 学习面板一屏放不下：往下逐屏截，看完整页。
+      await scrollShots(page, shot);
     },
   },
   {

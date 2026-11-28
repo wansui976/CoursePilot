@@ -10,11 +10,34 @@
 //! 全是纯函数，可单测。
 
 /// 疑问句里的常见填充词：任何课程的字幕/解释里都可能出现，计分时会淹没真正的关键词。
+///
 const STOP_TERMS: &[&str] = &[
     "什么", "怎么", "为什", "如何", "可以", "一下", "这个", "那个", "哪些", "请问", "帮我", "我想",
-    "the", "and", "what", "how", "why", "does", "is", "are", "of", "in", "to", "for", "this",
-    "that", "with", "about", "can",
+    "一个", "有什", "有哪", "the", "and", "what", "how", "why", "does", "is", "are", "of", "in",
+    "to", "for", "this", "that", "with", "about", "can",
 ];
+
+/// 问句里的泛用词：「X 的作用」「X 的原理」「X 和 Y 的区别」里真正要找的是 X。
+///
+/// 它们在哪门课里都有，可一旦在某节课里碰巧只出现一两次，稀有度权重反而把它抬得很高——
+/// 检索评测里「光合作用的原理是什么」就是这样被一节经济学课的「不起作用」召回的，
+/// 于是一个这节课根本没讲的问题拿到了带时间戳的「出处」。
+///
+/// 只在它是**问句的一部分**时丢（长串里的片段，或挨着「的」「是」这类虚词）。用户在搜索框里
+/// 用空格、标点单独打出来的「作用」是他要搜的词，照常保留。
+const GENERIC_TERMS: &[&str] = &[
+    "作用", "原理", "意思", "区别", "例子", "举个", "原因", "问题", "方法",
+];
+
+/// 虚词：在问句里只起语法作用，当成标点在这里断开。
+///
+/// 不断开的话，「用的」「的原」「理是」这种跨在虚词上的二字组也会拿去检索，
+/// 它们不是词，却能在任何讲稿里撞上（「实用的用处」「管制的原因」）。断开以后，
+/// 「酶的作用」里的「酶」也能作为单字留下来，而不是只剩「酶的」。
+const PARTICLES: &[char] = &['的', '了', '吗', '呢', '吧', '啊', '呀', '嘛', '是'];
+
+/// 在虚词处断开后剩下的单字里，代词和指示词哪儿都有，留着只会遍地命中。
+const STOP_CHARS: &[char] = &['我', '你', '他', '她', '它', '这', '那', '哪', '谁', '么'];
 
 /// 拉丁词按整词收；单字母（a/x）噪声太大，丢掉。
 fn push_word_term(word: &mut String, terms: &mut Vec<String>) {
@@ -26,12 +49,20 @@ fn push_word_term(word: &mut String, terms: &mut Vec<String>) {
 
 /// 中文没有空格可切，按相邻二字组合成词元。单字查询（如「熵」）保留原字，
 /// 否则这类问题会一个词元都没有。
-fn push_cjk_terms(run: &mut Vec<char>, terms: &mut Vec<String>) {
+///
+/// `standalone`：这一串两头都是空格、标点或句首句尾（不是虚词），也就是用户单独打出来的词。
+fn push_cjk_terms(run: &mut Vec<char>, terms: &mut Vec<String>, standalone: bool) {
     if run.len() == 1 {
-        terms.push(run[0].to_string());
+        if !STOP_CHARS.contains(&run[0]) {
+            terms.push(run[0].to_string());
+        }
     } else {
+        let explicit_word = standalone && run.len() == 2;
         for pair in run.windows(2) {
-            terms.push(pair.iter().collect());
+            let term: String = pair.iter().collect();
+            if explicit_word || !GENERIC_TERMS.contains(&term.as_str()) {
+                terms.push(term);
+            }
         }
     }
     run.clear();
@@ -42,18 +73,30 @@ pub fn query_terms(query: &str) -> Vec<String> {
     let mut terms: Vec<String> = Vec::new();
     let mut word = String::new();
     let mut run: Vec<char> = Vec::new();
+    // 当前这串中文是不是紧跟在虚词后面开始的；上一个断点是不是虚词。
+    let mut run_after_particle = false;
+    let mut last_break_particle = false;
     // 末尾补一个空格，让最后一段词/中文串也走到 flush 分支。
     for ch in query.to_lowercase().chars().chain(std::iter::once(' ')) {
         if ch.is_ascii_alphanumeric() {
-            push_cjk_terms(&mut run, &mut terms);
+            push_cjk_terms(&mut run, &mut terms, false);
             word.push(ch);
+            last_break_particle = false;
+        } else if PARTICLES.contains(&ch) {
+            push_word_term(&mut word, &mut terms);
+            push_cjk_terms(&mut run, &mut terms, false);
+            last_break_particle = true;
         } else if ch.is_alphanumeric() {
             // 非 ASCII 的字母（中日韩等）都按「无空格分词」处理。
             push_word_term(&mut word, &mut terms);
+            if run.is_empty() {
+                run_after_particle = last_break_particle;
+            }
             run.push(ch);
         } else {
             push_word_term(&mut word, &mut terms);
-            push_cjk_terms(&mut run, &mut terms);
+            push_cjk_terms(&mut run, &mut terms, !run_after_particle);
+            last_break_particle = false;
         }
     }
     terms.retain(|term| !STOP_TERMS.contains(&term.as_str()));
@@ -244,7 +287,8 @@ mod tests {
         let terms = query_terms("光合作用是什么");
         assert!(terms.contains(&"光合".to_string()));
         assert!(terms.contains(&"合作".to_string()));
-        assert!(terms.contains(&"作用".to_string()));
+        // 「作用」是问句里的泛用词，单独不拿去检索；「光合」「合作」已经足够认出这个术语。
+        assert!(!terms.contains(&"作用".to_string()));
         let hits = weights("光合作用是什么", &["这节课讲解光合作用的两个阶段"]);
         assert!(hits.score("这节课讲解光合作用的两个阶段") > 0.0);
         // 填充词不参与：否则任何一句含「什么」的字幕都算命中。
@@ -262,6 +306,28 @@ mod tests {
         // 单字查询保留原字，否则「熵」这类问题一个词元都没有。
         assert_eq!(query_terms("熵"), vec!["熵".to_string()]);
         assert!(query_terms("").is_empty());
+    }
+
+    #[test]
+    fn particles_split_the_question_instead_of_forming_bigrams() {
+        let terms = query_terms("光合作用的原理是什么");
+        // 跨在「的」「是」上的二字组不是词，不拿去检索。
+        for junk in ["用的", "的原", "理是", "是什"] {
+            assert!(
+                !terms.contains(&junk.to_string()),
+                "{junk} 不该是词元：{terms:?}"
+            );
+        }
+        assert!(terms.contains(&"光合".to_string()));
+        // 断开后的单字是内容就留下，代词指示词丢掉。
+        assert_eq!(query_terms("酶的作用"), vec!["酶".to_string()]);
+        assert!(!query_terms("我的问题怎么办").contains(&"我".to_string()));
+        // 单独打出来的泛用词是用户要搜的，照常保留。
+        assert_eq!(query_terms("作用"), vec!["作用".to_string()]);
+        assert!(query_terms("熵 作用").contains(&"作用".to_string()));
+        assert!(query_terms("熵，作用").contains(&"作用".to_string()));
+        // 挨着虚词的仍然是问句的一部分。
+        assert!(!query_terms("这个的作用").contains(&"作用".to_string()));
     }
 
     #[test]
@@ -299,18 +365,18 @@ mod tests {
         // 所以按「命中几个词元」计分时它们完全同分——只有稀有度能分出高下。
         let mut corpus = vec!["熵在这里定义"];
         for _ in 0..20 {
-            corpus.push("这个作用很重要");
+            corpus.push("这个能量很重要");
         }
-        let w = weights("熵 作用", &corpus);
+        let w = weights("熵 能量", &corpus);
 
         let rare = w.score("讲熵");
-        let common = w.score("讲作用");
+        let common = w.score("讲能量");
         assert!(
             rare > common,
             "只出现一处的词应当更有分量：rare={rare}, common={common}"
         );
         // 两个都命中的那句最高——权重是加起来的，没有谁被无视。
-        assert!(w.score("熵的作用") > rare);
+        assert!(w.score("熵的能量") > rare);
     }
 
     #[test]
@@ -342,10 +408,10 @@ mod tests {
     fn no_corpus_degrades_to_plain_term_counting() {
         // 一篇材料都没有时（空课程、还没转写的视频）权重退化成均匀，
         // 相当于回到原来的「数命中了几个词元」，不会除零也不会 NaN。
-        let w = TermWeights::builder(query_terms("光合作用")).finish();
-        let one = w.score("光合");
+        let w = TermWeights::builder(query_terms("贝叶斯定")).finish();
+        let one = w.score("贝叶");
         assert!(one.is_finite() && one > 0.0);
         // 三个词元全中 → 恰好是单个的三倍（均匀权重）。
-        assert!((w.score("光合作用") - one * 3.0).abs() < 1e-9);
+        assert!((w.score("贝叶斯定") - one * 3.0).abs() < 1e-9);
     }
 }

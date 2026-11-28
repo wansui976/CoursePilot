@@ -217,7 +217,12 @@
     "streamStalledLan": "这台设备上没有视频文件，正从电脑上边看边传，可电脑那边一直没有数据过来。确认电脑开着 CoursePilot 和「局域网直连播放」，两台设备在同一个 Wi‑Fi（或同一个 Tailscale 网络）里。",
     "streamStalledDrive": "这台设备上没有视频文件，正从网盘边看边传，可网盘那边一直没有数据过来。检查一下网络，或者先下载到本机再看。",
     "streamStalledDetail": "最近一次的错误：{{problem}}",
-    "streamReconnect": "重新连接"
+    "streamReconnect": "重新连接",
+    "pip": "画中画",
+    "exitPip": "退出画中画",
+    "pipPlaying": "正在画中画小窗里播放",
+    "pipReturn": "回到这里",
+    "pipFailed": "没能打开画中画，等视频开始播放后再试"
   },
   "morePanel": {
     "quiz": "练习",
@@ -269,7 +274,12 @@
       "blue": "蓝色",
       "purple": "紫色",
       "pink": "粉色"
-    }
+    },
+    "exportAnki": "导出到 Anki…",
+    "ankiExported": "已导出「{{file}}」。在 Anki 里选「文件 → 导入」打开它，复习卡会按视频分进各自的牌组。",
+    "ankiEmpty": "这门课还没有复习卡或练习题，先在视频里出题或划几张填空卡再导出。",
+    "ankiFailed": "导出到 Anki 失败：{{error}}",
+    "ankiFilterName": "Anki 牌组"
   },
   "folders": {
     "newFolder": "新建文件夹",
@@ -979,7 +989,9 @@
       "takeNote": "记一笔",
       "takeNoteHint": "暂停，在光标处插入当前时间，接着写",
       "swapped": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」换成了「{{previous}}」。",
-      "swappedUnset": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」现在没有快捷键。"
+      "swappedUnset": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」现在没有快捷键。",
+      "pictureInPicture": "画中画",
+      "pictureInPictureHint": "视频弹成系统小窗，切到别的窗口或 App 也能接着看"
     },
     "storage": {
       "title": "存储位置",
@@ -1244,6 +1256,11 @@
       "concurrencyHint": "同时最多处理几个视频，其余按点「开始处理」的先后排队。数越大总体越快，但电脑越卡。本地语音识别另外一次只跑一个视频（显卡和 CPU 都让给它），其余视频的课件、AI 步骤照常并行。",
       "videos": "{{count}} 个",
       "asrNotReady": "语音识别未配好"
+    },
+    "playback": {
+      "title": "播放",
+      "miniPlayer": "离开视频页时小窗接着放",
+      "miniPlayerHint": "正在放的视频切到设置、学习面板或课程库时，在角落接着放；点小窗回到视频，从放到的地方接着看。"
     }
   },
   "assistant": {
@@ -1804,7 +1821,8 @@
     "progressAriaValue": "已下载 {{percent}}%：{{message}}",
     "retry": "重试",
     "cookieExpired": "B 站登录凭证可能已失效（如 HTTP 412）：重新导入 cookies.txt 后再试。",
-    "reimportCookies": "重新导入 cookies 并重试"
+    "reimportCookies": "重新导入 cookies 并重试",
+    "cancelTask": "取消下载「{{title}}」"
   },
   "playlistImport": {
     "title": "导入播放列表 / 合集",
@@ -2106,7 +2124,10 @@
     "readingFocus": "专注阅读",
     "exitReadingFocus": "退出专注阅读（Esc）",
     "queueSubtitleMissing": "没拿到字幕，正在用语音识别生成文稿",
-    "queueAsrNotReady": "语音识别还没配好：导入的视频不会自动开始处理（带自带字幕的除外），配好后在课程里点「开始处理」。"
+    "queueAsrNotReady": "语音识别还没配好：导入的视频不会自动开始处理（带自带字幕的除外），配好后在课程里点「开始处理」。",
+    "queueProcessing": "正在处理",
+    "queueStep": "第 {{index}} 步，共 {{total}} 步",
+    "cancelTask": "取消处理「{{title}}」"
   },
   "time": {
     "justNow": "刚刚",
@@ -2708,5 +2729,50 @@
       "custom": "AI 画的图",
       "generic": "通用黑板"
     }
+  },
+  "setupWizard": {
+    "title": "开始之前",
+    "description": "先把语音识别和大模型配好，导入的课就能自动出字幕、笔记和练习题。都可以跳过，以后在设置里改。",
+    "done": "完成",
+    "checking": "正在检查…",
+    "stepDone": "已配好",
+    "asr": {
+      "title": "语音识别",
+      "localOffer": "这台设备能在本机识别：免费、不联网，中文课识别得准。要先下载 SenseVoice（{{size}}）。",
+      "readyLocalOffer": "语音识别已经能用。也可以换成本机识别：免费、不联网，要下载 SenseVoice（{{size}}）。",
+      "download": "下载并使用（{{size}}）",
+      "useInstalled": "使用本机识别",
+      "downloading": "正在下载 {{percent}}%",
+      "preparing": "正在准备…",
+      "applied": "已改用本机识别（SenseVoice）。",
+      "cloud": "用云端识别…",
+      "noLocal": "这台设备的内存不够跑本机识别。可以用阿里云或火山引擎的云端识别，要在设置里填 Key。",
+      "ready": "语音识别已经能用。",
+      "openSettings": "去设置识别…",
+      "meteredConfirm": "现在用的是移动数据，下载 SenseVoice 要用掉 {{size}} 流量。继续下载吗？",
+      "installedOffer": "SenseVoice 已经下载好了：在本机识别，免费、不联网，中文课识别得准。"
+    },
+    "llm": {
+      "title": "大模型",
+      "intro": "生成章节、摘要、笔记和练习题要用大模型。下面几家都便宜，填上自己的 API Key 就能用。",
+      "recommended": "推荐",
+      "perHour": "一小时课约 {{cost}}",
+      "free": "本机运行，不花钱",
+      "noPrice": "查不到价格",
+      "basisHistory": "按你最近处理过的 {{count}} 讲估算，只算处理时自动生成的部分，问答另算。",
+      "basisRough": "粗估：一小时课约 {{input}} 输入、{{output}} 输出 token，DeepSeek 按高峰价。",
+      "keyLabel": "{{name}} 的 API Key",
+      "getKey": "去哪里拿 Key",
+      "save": "检查并保存",
+      "checking": "正在检查…",
+      "other": "用别的服务商…",
+      "saved": "已保存，所有 AI 任务都用 {{model}}。"
+    }
+  },
+  "miniPlayer": {
+    "label": "迷你播放器",
+    "return": "回到「{{title}}」",
+    "close": "关闭迷你播放器",
+    "untitled": "正在播放的视频"
   }
 }

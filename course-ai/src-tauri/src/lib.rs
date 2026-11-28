@@ -1,3 +1,4 @@
+pub mod anki;
 pub mod backup;
 pub mod cloud_sync;
 pub mod commands;
@@ -26,6 +27,7 @@ use crate::commands::ai::{
     cmd_save_llm_profiles, cmd_save_notes, cmd_set_api_key, cmd_set_quiz_course_rules,
     cmd_stale_ai_artifacts,
 };
+use crate::commands::anki_export::cmd_export_anki_deck;
 use crate::commands::app::{
     cmd_check_update, cmd_exit_app, cmd_updater_check, cmd_updater_install,
 };
@@ -45,6 +47,7 @@ use crate::commands::courses::{
     cmd_rename_course, cmd_reorder_courses, cmd_set_course_color, AppState,
 };
 use crate::commands::danmaku::{cmd_get_comments, cmd_get_danmaku};
+use crate::commands::setup::cmd_setup_lecture_estimate;
 use crate::commands::export::{
     cmd_export_handout, cmd_export_mindmap, cmd_export_notes, cmd_export_notes_print,
     cmd_export_quiz, cmd_export_subtitles, cmd_save_share_image,
@@ -441,6 +444,8 @@ pub fn run() {
             cmd_export_notes,
             cmd_export_notes_print,
             cmd_export_quiz,
+            cmd_export_anki_deck,
+            cmd_setup_lecture_estimate,
             cmd_export_mindmap,
             cmd_export_handout,
             cmd_save_share_image,

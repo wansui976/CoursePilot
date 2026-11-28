@@ -80,10 +80,15 @@ export function ProcessingQueueView({
       : jobLoadState?.status === "loading" && !active
         ? t("home.queueJobsLoading")
         : stageMessage(active, t);
+    // 正常进行中才报步数；失败的那行要留给原因，加载中还没有阶段可数。
+    const position =
+      !jobLoadError && active && active.status !== "failed" ? queue.stagePositionFor(video.id) : null;
     return {
       video,
       percent: Math.floor(queue.pipelineProgressFor(video.id) * 100),
       message,
+      // 只登记了一个阶段（老数据、或还没初始化完）时「第 1 步，共 1 步」没有意义。
+      step: position && position.total > 1 ? t("home.queueStep", position) : null,
       note: video.subtitle_missing ? t("home.queueSubtitleMissing") : null,
       failed: active?.status === "failed",
       canCancel: active?.status === "running" || active?.status === "pending",

@@ -1,4 +1,8 @@
-import { confirm as confirmDialog, message as messageDialog } from "@tauri-apps/plugin-dialog";
+import {
+  confirm as confirmDialog,
+  message as messageDialog,
+  save as saveDialog,
+} from "@tauri-apps/plugin-dialog";
 import {
   closestCenter,
   DndContext,
@@ -12,7 +16,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
-import { FolderOpen, Image, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
+import { FileDown, FolderOpen, Image, MoreHorizontal, Pencil, Rss, Trash2 } from "lucide-react";
 import { CourseBoardCover } from "./CourseBoardCover";
 import { SubscriptionsDialog } from "./SubscriptionsDialog";
 import { CoverPickerDialog } from "./CoverPickerDialog";
@@ -43,7 +47,8 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { Menu, MenuItem, MenuSeparator } from "@/ui/menu";
 import { useOptionalShell } from "@/app/shell";
 import { Skeleton } from "@/ui/skeleton";
-import { isIOS, pickDirectoryPath } from "@/lib/mobileFiles";
+import { isIOS, isMobile, pickDirectoryPath, shareFile } from "@/lib/mobileFiles";
+import { humanizeError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 
 /** 课程「…」菜单里可聚焦的条目：普通项和颜色格。 */
@@ -406,6 +411,33 @@ export function CourseList({
     relink.mutate({ id, root: dir });
   }
 
+  // 导出 Anki 牌组：桌面端先选存哪儿，手机上写进应用目录再交给系统分享（存到文件 / 发给 AnkiDroid）。
+  async function handleExportAnki(course: Course) {
+    closeMenu();
+    const fileName = `${course.name.replace(/[\\/:*?"<>|]/g, "_").trim() || "CoursePilot"}.apkg`;
+    try {
+      if (isMobile()) {
+        const path = await ipc.export.ankiDeck("course", course.id);
+        await shareFile(path, "application/apkg");
+        return;
+      }
+      const dest = await saveDialog({
+        defaultPath: fileName,
+        filters: [{ name: t("courseList.ankiFilterName"), extensions: ["apkg"] }],
+      });
+      if (!dest) return;
+      const path = await ipc.export.ankiDeck("course", course.id, dest);
+      const file = path.split(/[\\/]/).pop() || fileName;
+      await messageDialog(t("courseList.ankiExported", { file }), { kind: "info" });
+    } catch (error) {
+      const raw = String(error instanceof Error ? error.message : error);
+      const text = raw.includes("no cards to export")
+        ? t("courseList.ankiEmpty")
+        : t("courseList.ankiFailed", { error: humanizeError(error) });
+      await messageDialog(text, { kind: raw.includes("no cards to export") ? "info" : "error" });
+    }
+  }
+
   function startSwipe(courseId: string, event: ReactPointerEvent<HTMLDivElement>) {
     if (!isIOS()) return;
     if (event.pointerType === "mouse") return;
@@ -467,6 +499,13 @@ export function CourseList({
         >
           <Rss aria-hidden="true" className={icon} />
           {t("courseList.subscriptions")}
+        </MenuItem>
+        <MenuItem
+          className="ca-touch-44 flex items-center gap-2"
+          onClick={() => void handleExportAnki(course)}
+        >
+          <FileDown aria-hidden="true" className={icon} />
+          {t("courseList.exportAnki")}
         </MenuItem>
         <MenuSeparator />
         <MenuItem

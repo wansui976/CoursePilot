@@ -91,6 +91,7 @@ function fakeQueue(): ProcessingQueue {
     retryFailedAll: vi.fn(),
     activeJobFor: () => undefined,
     pipelineProgressFor: () => 0,
+    stagePositionFor: () => null,
   } as unknown as ProcessingQueue;
 }
 
@@ -195,5 +196,46 @@ describe("ProcessingQueueView", () => {
 
     await waitFor(() => expect(pickBilibiliCookies).toHaveBeenCalled());
     expect(mockIpc.downloads.retry).not.toHaveBeenCalled();
+  });
+
+  it("把处理和下载分成两个有标题的小节，处理中写出走到第几步", async () => {
+    const video = {
+      id: "v7",
+      course_id: "c1",
+      title: "07 反向传播推导.mp4",
+    } as unknown as import("@/lib/types").Video;
+    const queue = {
+      ...fakeQueue(),
+      queuedVideos: [video],
+      activeJobFor: () => ({ stage: "asr", status: "running", progress: 0.4, message: null }),
+      pipelineProgressFor: () => 0.25,
+      stagePositionFor: () => ({ index: 3, total: 10 }),
+    } as unknown as ProcessingQueue;
+    useDownloads.setState({
+      byId: { d1: downloadJob({ title: "10 强化学习入门.mp4" }) },
+      order: ["d1"],
+    });
+    render(<ProcessingQueueView queue={queue} onBack={vi.fn()} onOpenVideo={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { name: "正在处理" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "正在下载" })).toBeInTheDocument();
+    expect(screen.getByText(/第 3 步，共 10 步/)).toBeInTheDocument();
+    // 下载标题和课程里一样去掉扩展名；两种取消都叫「取消」，读屏能听出取消的是哪一个。
+    expect(screen.getByText("10 强化学习入门")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消下载「10 强化学习入门」" }));
+    expect(mockIpc.downloads.cancel).toHaveBeenCalledWith("d1");
+    fireEvent.click(screen.getByRole("button", { name: "取消处理「07 反向传播推导」" }));
+    expect(mockIpc.pipeline.cancel).toHaveBeenCalledWith("v7");
+  });
+
+  it("只登记了一个阶段时不写「第 1 步，共 1 步」", () => {
+    const queue = {
+      ...fakeQueue(),
+      queuedVideos: [{ id: "v7", course_id: "c1", title: "07" }],
+      activeJobFor: () => ({ stage: "asr", status: "running", progress: 0.4, message: null }),
+      stagePositionFor: () => ({ index: 1, total: 1 }),
+    } as unknown as ProcessingQueue;
+    render(<ProcessingQueueView queue={queue} onBack={vi.fn()} onOpenVideo={vi.fn()} />);
+    expect(screen.queryByText(/第 1 步/)).toBeNull();
   });
 });

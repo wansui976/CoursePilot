@@ -18,7 +18,7 @@ import {
   useContainerWidth,
   useIsPortrait,
 } from "@/lib/useContainerWidth";
-import type { DueCard } from "@/lib/ipc";
+import { ipc, type DueCard } from "@/lib/ipc";
 import type { AssistantAction, Video } from "@/lib/types";
 import {
   buildAssistantContext,
@@ -37,6 +37,10 @@ import { usePlayer } from "@/stores/player";
 import { selectDownloadCount, useDownloads } from "@/stores/downloads";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { AppTours } from "@/features/shell/AppTours";
+import { SetupWizard } from "@/features/shell/SetupWizard";
+import { MiniPlayer } from "@/features/player/MiniPlayer";
+import { useMiniPlayer, type MiniPlayerSession } from "@/stores/miniPlayer";
+import { setupWizardSeen } from "@/lib/setupWizard";
 import { accentVars, useTheme } from "@/stores/theme";
 import { transitionToLibrary, transitionToVideo } from "@/lib/viewTransition";
 import { studyTargetFor, type TaskMeta } from "@/lib/backgroundTasks";
@@ -116,6 +120,9 @@ export function Home() {
   // 助手只有浮动一种形态，盖在内容上方，不占主区宽度；rail 按钮就是开/关。
   const assistantOpen = useAssistantUi((s) => s.open);
   const toggleAssistant = useAssistantUi((s) => s.toggle);
+  const assistantSide = useAssistantUi((s) => s.side);
+  const assistantWidth = useAssistantUi((s) => s.width);
+  const miniPlayerActive = useMiniPlayer((s) => s.session !== null);
   // 库内标题过滤（前端过滤，不落存储；切课程时清空）。
   const [videoQuery, setVideoQuery] = useState("");
   // 统一侧栏折叠状态：分视图记忆（课程库 / 工作台）。
@@ -206,6 +213,24 @@ export function Home() {
 
   const { data: videos = [], isSuccess: videosLoaded } = useQuery(queries.videos(selectedCourseId));
   const { data: courses = [], isSuccess: coursesLoaded } = useQuery(queries.courses());
+
+  // 首次使用向导：课程库空着、这台设备还没配过大模型、也没看过向导时出现一次。
+  // 先于新手引导：向导开着时引导不出；看过向导，引导就不再带着去配大模型和识别。
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupSeen, setSetupSeen] = useState(() => setupWizardSeen());
+  useEffect(() => {
+    if (setupSeen || !coursesLoaded || courses.length > 0) return;
+    let alive = true;
+    ipc.ai
+      .getProfiles()
+      .then((profiles) => {
+        if (alive && profiles.length === 0) setSetupOpen(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [setupSeen, coursesLoaded, courses.length]);
   // 新课程的黑板封面：后台请 AI 判断学科（没配模型时什么都不做，封面按关键词猜）。
   useAutoClassifyCovers(courses.map((course) => course.id));
   const recorrection = useRecorrection({ selectedCourseId, selectedVideoId, videos });
@@ -527,6 +552,24 @@ export function Home() {
     runAfterWorkspaceTransient(() => go({ view: "library" }));
   }
 
+  // 点迷你播放器：回到它在放的那个视频。工作台的播放器挂上后从小窗放到的地方接着放
+  // （接管逻辑在播放器里，面包屑、课程页重新打开同一个视频也走同一条）。
+  function returnFromMiniPlayer(session: MiniPlayerSession) {
+    useMiniPlayer.getState().update({ ms: session.ms, playing: session.playing });
+    if (session.videoId === selectedVideoId) {
+      returnToVideo();
+      return;
+    }
+    runAfterWorkspaceTransient(() => {
+      setKnowledgeReturn(null);
+      go({
+        view: "library",
+        ...(session.courseId ? { courseId: session.courseId } : {}),
+        videoId: session.videoId,
+      });
+    });
+  }
+
   // 窄屏底部 Tab 切换：课程回到当前课程层级；学习/队列/设置打开对应整页。
   function selectCompactTab(tab: CompactTab) {
     if (tab === "settings" && showSettings) return;
@@ -677,6 +720,9 @@ export function Home() {
       data-shell={isPhoneDevice ? "stacked" : "sidebar"}
       data-view={isWorkbenchView || (!isPhoneDevice && inVideoSession) ? "workbench" : "library"}
       data-sidebar={isPhoneDevice ? undefined : sidebarIsCollapsed ? "collapsed" : "expanded"}
+      data-mini-player={
+        miniPlayerActive && !isWorkbenchView ? (isPhoneDevice ? "bar" : "card") : undefined
+      }
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
@@ -778,8 +824,35 @@ export function Home() {
         }
       />
       {/* 新手引导：课程库空着、课程里还没视频、课程页有了视频、第一次进工作台，各出现一次。 */}
+      {/* 迷你播放器：离开视频页时正在放的视频在这里接着放；回到视频页由工作台接手。 */}
+      {!isWorkbenchView && (
+        <MiniPlayer
+          layout={isPhoneDevice ? "bar" : "card"}
+          onReturn={returnFromMiniPlayer}
+          rightInset={!isPhoneDevice && assistantOpen && assistantSide === "right" ? assistantWidth : 0}
+        />
+      )}
+      <SetupWizard
+        open={setupOpen}
+        onClose={() => {
+          setSetupOpen(false);
+          setSetupSeen(true);
+        }}
+        onOpenSettings={(category) => {
+          setSetupOpen(false);
+          setSetupSeen(true);
+          openSettingsCategory(category);
+        }}
+      />
       <AppTours
-        library={mainView === "library" && !selectedCourseId && coursesLoaded && courses.length === 0}
+        library={
+          mainView === "library" &&
+          !selectedCourseId &&
+          coursesLoaded &&
+          courses.length === 0 &&
+          !setupOpen
+        }
+        setupDone={setupSeen}
         course={
           mainView === "library" &&
           !!selectedCourseId &&

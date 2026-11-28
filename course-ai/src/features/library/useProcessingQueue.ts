@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipc } from "@/lib/ipc";
 import { qk } from "@/lib/queryKeys";
 import { humanizeError } from "@/lib/errors";
-import { currentStage, overallProgress } from "@/lib/pipelineProgress";
+import { currentStage, overallProgress, stagePosition } from "@/lib/pipelineProgress";
 import type { Video } from "@/lib/types";
 import { useJobs, type JobUpdate } from "@/stores/jobs";
 
@@ -391,6 +391,11 @@ export function useProcessingQueue({
     return overallProgress(jobsByVideo[videoId] ?? {});
   }
 
+  /** 走到第几步（「第 3 步，共 10 步」）。 */
+  function stagePositionFor(videoId: string) {
+    return stagePosition(jobsByVideo[videoId] ?? {});
+  }
+
   const forgetQueuedVideo = useCallback((videoId: string) => {
     setQueuedVideos((items) => items.filter((item) => item.id !== videoId));
   }, []);
@@ -410,6 +415,7 @@ export function useProcessingQueue({
     retryFailedAll,
     activeJobFor,
     pipelineProgressFor,
+    stagePositionFor,
     forgetQueuedVideo,
   };
 }

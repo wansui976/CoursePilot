@@ -26,6 +26,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Anki 牌组里笔记的查重校验和按 SHA-1 算（Anki 自己的定义）。
+sha1 = "0.10"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "macros", "chrono"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

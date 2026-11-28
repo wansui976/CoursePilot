@@ -72,7 +72,7 @@
 
 /* 有底部 Tab 时,窄屏「非工作台」主区底部留出 Tab 高度(含安全区) */
 .ca-app[data-shell="stacked"][data-view="library"] .ca-main {
-  padding-bottom: calc(var(--bottom-tab-h) + var(--safe-bottom));
+  padding-bottom: calc(var(--bottom-tab-h) + var(--safe-bottom) + var(--mini-player-offset, 0px));
 }
 
 /* 整屏课程列表(CourseSidebar variant="screen") */

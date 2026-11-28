@@ -67,6 +67,12 @@
   background: var(--grad-accent);
 }
 
+/* 墨色进度填充：学习面板、处理队列这类页面上的进度。绿色只留给这页的主操作
+   （设计规范：一屏里出现两处绿色，必有一处是错的）。 */
+.ca-fill-ink {
+  background: var(--text-normal);
+}
+
 /* 品牌渐变填充（图形面）：把签名品牌渐变 --grad-brand 作 background-image 铺上，
    仅供头像、图标、发送键等**不含正文**的图形承载面使用。绝不可用于消息气泡/大段文字
    底色——渐变在两段之间的明度跨度大，正文对比度无法在两段同时达标（见设计文档 §3.2
@@ -429,7 +435,7 @@
 .ca-tasks-floating {
   position: fixed;
   left: calc(1rem + var(--safe-left));
-  bottom: calc(var(--bottom-tab-h) + var(--safe-bottom) + 24px);
+  bottom: calc(var(--bottom-tab-h) + var(--safe-bottom) + 24px + var(--mini-player-offset, 0px));
   z-index: 40;
 }
 
@@ -521,3 +527,151 @@
   color: var(--status-ok);
 }
 
+
+/* 应用内迷你播放器：离开视频页时正在放的视频在这里接着放。
+   桌面是右下角一张小卡片（只给浮层用的阴影：它浮在内容上面）；
+   手机是底栏上方的一整条，画面缩成左边的小块。 */
+.ca-mini-player {
+  position: fixed;
+  z-index: 44;
+  overflow: hidden;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+}
+
+.ca-mini-player[data-layout="card"] {
+  right: 1rem;
+  bottom: 1rem;
+  width: 304px;
+}
+
+.ca-mini-player[data-layout="bar"] {
+  left: calc(0.75rem + var(--safe-left));
+  right: calc(0.75rem + var(--safe-right));
+  bottom: calc(var(--bottom-tab-h) + var(--safe-bottom) + 8px);
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.ca-app[data-mini-player="bar"] {
+  --mini-player-offset: 66px;
+}
+
+/* 横屏手机：屏幕矮，整条只占左半边，右边留给底栏里的助手入口。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  .ca-mini-player[data-layout="bar"] {
+    right: auto;
+    width: min(420px, 50vw);
+  }
+
+  /* 屏幕矮：画面缩小，整条只高 40 来像素。 */
+  .ca-mini-player[data-layout="bar"] .ca-mini-player-stage {
+    width: 72px;
+  }
+
+  .ca-mini-player[data-layout="bar"] .ca-mini-player-bar {
+    padding-block: 2px;
+  }
+
+  .ca-app[data-mini-player="bar"] {
+    --mini-player-offset: 50px;
+  }
+}
+
+.ca-mini-player-stage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-stage);
+}
+
+.ca-mini-player[data-layout="bar"] .ca-mini-player-stage {
+  flex: none;
+  width: 96px;
+}
+
+.ca-mini-player-stage {
+  position: relative;
+}
+
+.ca-mini-player-audio {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--chalk);
+  opacity: 0.7;
+}
+
+.ca-mini-player-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.ca-mini-player-bar {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 6px 12px;
+}
+
+.ca-mini-player-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-strong);
+}
+
+.ca-mini-player-btn {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
+}
+
+@media (hover: hover) {
+  .ca-mini-player-btn:hover {
+    background: var(--surface-card-hover);
+    color: var(--text-strong);
+  }
+}
+
+/* 进度细线：播放头用荧光笔色（设计规范里播放头就是 marker-strong）。 */
+.ca-mini-player-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+}
+
+.ca-mini-player-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--marker-strong);
+}
+
+/* 手机上有迷你播放条时：内容底边、助手浮球、后台任务胶囊都再让开一条的高度。 */
+
+@media not ((orientation: landscape) and (max-height: 500px)) {
+  .ca-app[data-mini-player="bar"] {
+    --fab-bottom: calc(var(--bottom-tab-h) + var(--safe-bottom) + 16px + var(--mini-player-offset));
+  }
+}

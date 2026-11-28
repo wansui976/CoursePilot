@@ -31,6 +31,8 @@ type KeyboardHandlers = {
   revealVolumeHint: (value: number) => void;
   setCaptionsOn: Dispatch<SetStateAction<boolean>>;
   toggleFullscreen: () => void;
+  /** 画中画开关；WebView 不支持时为空操作。 */
+  togglePip?: () => void;
 };
 
 /** 跳到上一句/下一句字幕的开头；该视频还没有字幕时回退到 ±10s 快退/快进。 */
@@ -162,6 +164,9 @@ export function usePlayerKeyboard(
           break;
         case "fullscreen":
           h.toggleFullscreen();
+          break;
+        case "pictureInPicture":
+          h.togglePip?.();
           break;
         case "captions":
           h.setCaptionsOn((v) => !v);

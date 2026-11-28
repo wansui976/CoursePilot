@@ -80,3 +80,22 @@ export type GestureHint = {
   kind: "brightness" | "volume" | "scrub" | "rate" | "rewind";
   value: number;
 };
+
+const MINI_PLAYER_KEY = "course-ai-mini-player";
+
+/** 离开视频页时正在放的视频由角落的小窗接着放（默认开）。 */
+export function loadMiniPlayerEnabled(): boolean {
+  try {
+    return localStorage.getItem(MINI_PLAYER_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function persistMiniPlayerEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(MINI_PLAYER_KEY, enabled ? "1" : "0");
+  } catch {
+    // 存不进去就只在这次会话里生效。
+  }
+}

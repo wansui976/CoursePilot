@@ -217,7 +217,12 @@
     "streamStalledLan": "This device has no copy of the video and is streaming it from the computer, but no data has arrived. Check that CoursePilot and LAN streaming are on there, and that both devices are on the same Wi‑Fi (or the same Tailscale network).",
     "streamStalledDrive": "This device has no copy of the video and is streaming it from the cloud drive, but no data has arrived. Check the network, or download it to this device first.",
     "streamStalledDetail": "Last error: {{problem}}",
-    "streamReconnect": "Reconnect"
+    "streamReconnect": "Reconnect",
+    "pip": "Picture in picture",
+    "exitPip": "Exit picture in picture",
+    "pipPlaying": "Playing in picture in picture",
+    "pipReturn": "Bring it back",
+    "pipFailed": "Couldn't open picture in picture. Try again once the video is playing."
   },
   "morePanel": {
     "quiz": "Quiz",
@@ -270,7 +275,12 @@
       "blue": "Blue",
       "purple": "Purple",
       "pink": "Pink"
-    }
+    },
+    "exportAnki": "Export to Anki…",
+    "ankiExported": "Exported “{{file}}”. In Anki, choose File → Import to open it; cards are sorted into one deck per video.",
+    "ankiEmpty": "This course has no review cards or quiz questions yet. Generate a quiz or make some cloze cards first.",
+    "ankiFailed": "Export to Anki failed: {{error}}",
+    "ankiFilterName": "Anki deck"
   },
   "folders": {
     "newFolder": "New folder",
@@ -981,7 +991,9 @@
       "takeNote": "Take a note",
       "takeNoteHint": "Pause and add the current time where your cursor is",
       "swapped": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" uses \"{{previous}}\" instead.",
-      "swappedUnset": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" has no shortcut now."
+      "swappedUnset": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" has no shortcut now.",
+      "pictureInPicture": "Picture in picture",
+      "pictureInPictureHint": "Pop the video into a floating window that stays while you switch apps"
     },
     "storage": {
       "title": "Storage Location",
@@ -1246,6 +1258,11 @@
       "concurrencyHint": "How many videos are processed at the same time; the rest wait in the order you started them. Higher is faster overall but makes the computer busier. Local speech recognition always runs one video at a time (it gets the GPU and CPU to itself); slides and AI steps of other videos keep going in parallel.",
       "videos": "{{count}}",
       "asrNotReady": "Speech recognition not set up"
+    },
+    "playback": {
+      "title": "Playback",
+      "miniPlayer": "Keep playing in a mini player",
+      "miniPlayerHint": "When you leave a playing video for Settings, Study or the library, it keeps playing in a corner. Tap it to go back and pick up where it is."
     }
   },
   "assistant": {
@@ -1809,7 +1826,8 @@
     "progressAriaValue": "{{percent}}% downloaded: {{message}}",
     "retry": "Retry",
     "cookieExpired": "Your Bilibili sign-in may have expired (e.g. HTTP 412). Import a fresh cookies.txt and try again.",
-    "reimportCookies": "Import cookies and retry"
+    "reimportCookies": "Import cookies and retry",
+    "cancelTask": "Cancel download “{{title}}”"
   },
   "playlistImport": {
     "title": "Import Playlist / Collection",
@@ -2118,7 +2136,10 @@
     "readingFocus": "Focus reading",
     "exitReadingFocus": "Exit focus reading (Esc)",
     "queueSubtitleMissing": "No subtitles; making the transcript with speech recognition",
-    "queueAsrNotReady": "Speech recognition isn't set up yet, so imported videos won't start processing on their own (except ones with built-in subtitles). Once it's set up, click “Start processing” in the course."
+    "queueAsrNotReady": "Speech recognition isn't set up yet, so imported videos won't start processing on their own (except ones with built-in subtitles). Once it's set up, click “Start processing” in the course.",
+    "queueProcessing": "Processing",
+    "queueStep": "step {{index}} of {{total}}",
+    "cancelTask": "Cancel processing “{{title}}”"
   },
   "time": {
     "justNow": "Just now",
@@ -2724,5 +2745,50 @@
       "custom": "Drawn by AI",
       "generic": "Plain board"
     }
+  },
+  "setupWizard": {
+    "title": "Before you start",
+    "description": "Set up speech recognition and an AI model so imported lectures get subtitles, notes and quizzes automatically. You can skip both and change them later in Settings.",
+    "done": "Done",
+    "checking": "Checking…",
+    "stepDone": "Set up",
+    "asr": {
+      "title": "Speech recognition",
+      "localOffer": "This device can transcribe on its own: free, offline and accurate for Chinese lectures. Download SenseVoice ({{size}}) first.",
+      "readyLocalOffer": "Speech recognition already works. You can also switch to on-device recognition: free and offline, after downloading SenseVoice ({{size}}).",
+      "download": "Download and use ({{size}})",
+      "useInstalled": "Use on-device recognition",
+      "downloading": "Downloading {{percent}}%",
+      "preparing": "Preparing…",
+      "applied": "Switched to on-device recognition (SenseVoice).",
+      "cloud": "Use a cloud service…",
+      "noLocal": "This device doesn't have enough memory for on-device recognition. Use Aliyun or Volcengine in the cloud; add their key in Settings.",
+      "ready": "Speech recognition already works.",
+      "openSettings": "Set up recognition…",
+      "meteredConfirm": "You're on mobile data. Downloading SenseVoice uses {{size}}. Continue?",
+      "installedOffer": "SenseVoice is already downloaded: on-device recognition, free, offline and accurate for Chinese lectures."
+    },
+    "llm": {
+      "title": "AI model",
+      "intro": "Chapters, summaries, notes and quizzes need an AI model. These are all inexpensive; add your own API key to use one.",
+      "recommended": "Recommended",
+      "perHour": "About {{cost}} per lecture hour",
+      "free": "Runs locally, free",
+      "noPrice": "No price listed",
+      "basisHistory": "Based on the {{count}} lectures you processed recently, counting only what's generated automatically. Questions are extra.",
+      "basisRough": "Rough estimate: about {{input}} input and {{output}} output tokens per lecture hour, DeepSeek at peak price.",
+      "keyLabel": "{{name}} API key",
+      "getKey": "Where to get a key",
+      "save": "Check and save",
+      "checking": "Checking…",
+      "other": "Use another provider…",
+      "saved": "Saved. All AI tasks now use {{model}}."
+    }
+  },
+  "miniPlayer": {
+    "label": "Mini player",
+    "return": "Back to “{{title}}”",
+    "close": "Close mini player",
+    "untitled": "Now playing"
   }
 }

@@ -80,6 +80,9 @@ export function installMockIpc({ theme, safeArea }) {
     }
     localStorage.setItem("course-ai-last-video:c1", "v3");
     // 新手引导默认记为看过，免得气泡挡住其他截图；只有 tour 场景打开它。
+    // 首次使用向导同理：只有 setup 场景让它出现。
+    if (localStorage.getItem("__shot-setup") === "1") localStorage.removeItem("course-ai-setup-wizard-done");
+    else localStorage.setItem("course-ai-setup-wizard-done", "1");
     if (localStorage.getItem("__shot-tours") === "1") localStorage.removeItem("course-ai-tours-seen");
     else localStorage.setItem("course-ai-tours-seen", JSON.stringify(["library", "course", "courseFeatures", "workbench"]));
   } catch {
@@ -709,7 +712,24 @@ export function installMockIpc({ theme, safeArea }) {
     },
     cmd_list_jobs: ({ videoId }) =>
       videoId === "v7"
-        ? [{ id: "j1", video_id: "v7", stage: "asr", status: "running", progress: 0.46, message: localStorage.getItem("__shot-local-asr") === "1" ? "本地识别中（sensevoice，zh）" : "语音识别中", created_at: now, updated_at: now }]
+        ? // 和后端一样，开始处理时十个阶段都登记好：前两步做完，识别跑到一半，后面排着。
+          ["crop", "audio", "asr", "slides", "slides_ocr", "chapters", "summary", "notes", "quiz", "mindmap"].map(
+            (stage, i) => ({
+              id: `j${i}`,
+              video_id: "v7",
+              stage,
+              status: i < 2 ? "done" : i === 2 ? "running" : "pending",
+              progress: i < 2 ? 1 : i === 2 ? 0.46 : 0,
+              message:
+                i === 2
+                  ? localStorage.getItem("__shot-local-asr") === "1"
+                    ? "本地识别中（sensevoice，zh）"
+                    : "语音识别中"
+                  : null,
+              created_at: now,
+              updated_at: now,
+            }),
+          )
         : [],
     cmd_list_transcripts: () => transcript,
     cmd_get_chapters: () => chapters,
@@ -786,9 +806,17 @@ export function installMockIpc({ theme, safeArea }) {
     },
     cmd_has_secret: () => false,
     cmd_has_api_key: () => false,
-    cmd_get_llm_profiles: () => [
-      { id: "p1", name: "DeepSeek", kind: "openai", base_url: "https://api.deepseek.com", model: "deepseek-flash" },
-    ],
+    // __shot-setup：第一次打开、还没配大模型，首次使用向导出现。
+    cmd_get_llm_profiles: () =>
+      localStorage.getItem("__shot-setup") === "1"
+        ? []
+        : [{ id: "p1", name: "DeepSeek", kind: "openai", base_url: "https://api.deepseek.com", model: "deepseek-flash" }],
+    cmd_asr_ready: () => localStorage.getItem("__shot-setup") !== "1",
+    cmd_detect_ollama: () => null,
+    cmd_setup_lecture_estimate: ({ models }) => ({
+      tokens: { promptTokens: 90_000, cachedTokens: 0, completionTokens: 28_000, fromHistory: false, videos: 0 },
+      costPerHourUsd: models.map((m) => (m.model.startsWith("deepseek") ? 0.0606 : 0.11)),
+    }),
     cmd_sync_status: () => ({ enabled: false, state: "idle" }),
     cmd_list_trash: () => [
       { ...videos[3], id: "t1", title: "旧版 04 逻辑回归.mp4", deleted_at: now - 2 * DAY, expires_at: now + 28 * DAY, course_name: "机器学习导论" },

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { AudioLines, Pause, Play } from "lucide-react";
+import { AudioLines, Pause, PictureInPicture2, Play } from "lucide-react";
 import type { GestureHint } from "./playerPrefs";
 
 /** 播放器舞台上的浮层：纯展示，状态都在 VideoPlayer。 */
@@ -20,6 +20,26 @@ export function AudioStage({ playing }: { playing: boolean }) {
         <i />
       </div>
       <span className="ca-audio-label">{t("videoPlayer.audioOnly")}</span>
+    </div>
+  );
+}
+
+/** 视频弹进画中画小窗后，原处留一块黑板色的底，写着在小窗里放，给一个「回到这里」。 */
+export function PipStage({ onReturn }: { onReturn: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[var(--surface-stage)] text-center">
+      <PictureInPicture2 aria-hidden="true" className="h-8 w-8 text-white/60" />
+      <p className="px-4 font-[family-name:var(--font-app)] text-sm text-white/75">
+        {t("videoPlayer.pipPlaying")}
+      </p>
+      <button
+        type="button"
+        onClick={onReturn}
+        className="ca-touch-44 rounded-md border border-white/25 px-3 py-1.5 text-sm text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+      >
+        {t("videoPlayer.pipReturn")}
+      </button>
     </div>
   );
 }
