@@ -31,6 +31,7 @@ import { MiniProgress, ProgressBar } from "./ProgressBar";
 import {
   APPLE_MAX_PLAYBACK_RATE,
   loadDanmakuEnabled,
+  loadMiniPlayerEnabled,
   loadPlaybackRate,
   persistDanmakuEnabled,
   persistPlaybackRate,
@@ -39,6 +40,7 @@ import {
 } from "./playerPrefs";
 import { applyVolume, canBoost, isBoosted, readCourseVolume, writeCourseVolume } from "./volume";
 import { setPip, usePictureInPicture } from "./pictureInPicture";
+import { useMiniPlayer } from "@/stores/miniPlayer";
 import { usePlayerKeyboard } from "./usePlayerKeyboard";
 import { useHighlights } from "./useHighlights";
 import { useIosGestures, type TapState } from "./useIosGestures";
@@ -81,9 +83,12 @@ export function VideoPlayer({
   onFullscreenChange,
   onTranscoded,
   remote,
+  title = "",
 }: {
   src: string;
   videoId: string;
+  /** 视频标题：离开视频页时交给迷你播放器显示。 */
+  title?: string;
   /** 所属课程：每门课记住自己的音量。 */
   courseId?: string | null;
   immersive?: boolean;
@@ -440,6 +445,49 @@ export function VideoPlayer({
     if (!pip.active && fullscreen) void setVideoFullscreen(false);
     setPip(video, !pip.active).catch(() => setPipError(true));
   };
+
+  // 迷你播放器：正在放的时候离开视频页（播放器被卸掉），交给角落的小窗接着放；
+  // 回到这个视频时（点小窗、点面包屑、从课程页重新打开都算）从小窗放到的地方接着放。
+  // 交接只看「卸掉那一刻在不在放」：暂停着离开就是不想听了。
+  const handoffRef = useRef({ playing, rate: effectiveRate, volume, muted, src, videoId, courseId, title });
+  useEffect(() => {
+    handoffRef.current = { playing, rate: effectiveRate, volume, muted, src, videoId, courseId, title };
+  });
+  const lastMsRef = useRef(0);
+  useEffect(
+    () =>
+      usePlayer.subscribe((state) => {
+        lastMsRef.current = state.currentMs;
+      }),
+    [],
+  );
+  useEffect(() => {
+    const mini = useMiniPlayer.getState();
+    const session = mini.session;
+    if (!session) return;
+    if (session.videoId === videoId) {
+      usePlayer.getState().requestOpenAt(videoId, session.ms, { autoplay: session.playing });
+    }
+    mini.close();
+  }, [videoId]);
+  useEffect(
+    () => () => {
+      const live = handoffRef.current;
+      if (!live.playing || !live.src || !loadMiniPlayerEnabled()) return;
+      useMiniPlayer.getState().open({
+        videoId: live.videoId,
+        courseId: live.courseId,
+        title: live.title,
+        src: live.src,
+        ms: lastMsRef.current,
+        playing: true,
+        rate: live.rate,
+        volume: Math.min(1, live.volume),
+        muted: live.muted,
+      });
+    },
+    [],
+  );
 
   // iPhone / iPad 为了让画中画小窗在回到主屏后继续放，App 声明了后台播放；代价是切走时
   // 视频也不再被系统停掉。没进小窗的视频在切走时照旧暂停，免得揣着手机还在出声。
@@ -847,6 +895,7 @@ export function VideoPlayer({
               if (pending && pending.videoId === videoId) {
                 video.currentTime = Math.max(0, pending.ms / 1000);
                 usePlayer.getState().clearPendingSeek();
+                if (pending.autoplay) void video.play().catch(() => undefined);
               } else {
                 // 重挂（转码完成）时播放器状态还在 store 里：先恢复当前进度，
                 // 别退回几秒前的 localStorage 断点。

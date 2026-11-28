@@ -5,6 +5,7 @@ import { VideoPlayer } from "./.";
 import i18n from "@/i18n";
 import { ipc } from "@/lib/ipc";
 import { usePlayer } from "@/stores/player";
+import { useMiniPlayer } from "@/stores/miniPlayer";
 
 const setFullscreen = vi.hoisted(() => vi.fn());
 const platform = vi.hoisted(() => ({ mobile: true }));
@@ -953,5 +954,76 @@ describe("VideoPlayer volume (#7)", () => {
     // 回到第一门课：沿用上次的 80%。
     renderPlayer(false, undefined, undefined, "course-a");
     expect(slider()).toHaveValue("0.8");
+  });
+});
+
+describe("VideoPlayer 迷你播放器交接", () => {
+  beforeEach(() => {
+    localStorage.removeItem("course-ai-mini-player");
+    useMiniPlayer.getState().close();
+    usePlayer.setState({ pendingSeek: null, currentMs: 0 });
+  });
+
+  it("正在放的时候离开视频页，交给迷你播放器接着放", () => {
+    const view = renderPlayer();
+    const video = screen.getByLabelText("课程视频播放器") as HTMLVideoElement;
+    fireEvent.play(video);
+    act(() => usePlayer.getState().setCurrentMs(95_000));
+    view.unmount();
+    expect(useMiniPlayer.getState().session).toMatchObject({
+      videoId: "video-1",
+      src: "http://127.0.0.1:1234/m/abc",
+      ms: 95_000,
+      playing: true,
+    });
+  });
+
+  it("暂停着离开，或者在设置里关掉了，就不出小窗", () => {
+    renderPlayer().unmount();
+    expect(useMiniPlayer.getState().session).toBeNull();
+
+    localStorage.setItem("course-ai-mini-player", "0");
+    const view = renderPlayer();
+    fireEvent.play(screen.getByLabelText("课程视频播放器"));
+    view.unmount();
+    expect(useMiniPlayer.getState().session).toBeNull();
+  });
+
+  it("回到同一个视频时从小窗放到的地方接着放，小窗收起", () => {
+    useMiniPlayer.getState().open({
+      videoId: "video-1",
+      courseId: null,
+      title: "梯度下降",
+      src: "http://127.0.0.1:1234/m/abc",
+      ms: 123_000,
+      playing: true,
+      rate: 1.5,
+      volume: 1,
+      muted: false,
+    });
+    renderPlayer();
+    expect(usePlayer.getState().pendingSeek).toEqual({
+      videoId: "video-1",
+      ms: 123_000,
+      autoplay: true,
+    });
+    expect(useMiniPlayer.getState().session).toBeNull();
+  });
+
+  it("打开的是别的视频：小窗收起，不改这个视频的进度", () => {
+    useMiniPlayer.getState().open({
+      videoId: "other",
+      courseId: null,
+      title: "",
+      src: "x",
+      ms: 5_000,
+      playing: true,
+      rate: 1,
+      volume: 1,
+      muted: false,
+    });
+    renderPlayer();
+    expect(usePlayer.getState().pendingSeek).toBeNull();
+    expect(useMiniPlayer.getState().session).toBeNull();
   });
 });

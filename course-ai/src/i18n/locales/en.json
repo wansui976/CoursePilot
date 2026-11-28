@@ -1258,6 +1258,11 @@
       "concurrencyHint": "How many videos are processed at the same time; the rest wait in the order you started them. Higher is faster overall but makes the computer busier. Local speech recognition always runs one video at a time (it gets the GPU and CPU to itself); slides and AI steps of other videos keep going in parallel.",
       "videos": "{{count}}",
       "asrNotReady": "Speech recognition not set up"
+    },
+    "playback": {
+      "title": "Playback",
+      "miniPlayer": "Keep playing in a mini player",
+      "miniPlayerHint": "When you leave a playing video for Settings, Study or the library, it keeps playing in a corner. Tap it to go back and pick up where it is."
     }
   },
   "assistant": {
@@ -2775,5 +2780,11 @@
       "other": "Use another provider…",
       "saved": "Saved. All AI tasks now use {{model}}."
     }
+  },
+  "miniPlayer": {
+    "label": "Mini player",
+    "return": "Back to “{{title}}”",
+    "close": "Close mini player",
+    "untitled": "Now playing"
   }
 }

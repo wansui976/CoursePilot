@@ -38,6 +38,8 @@ import { selectDownloadCount, useDownloads } from "@/stores/downloads";
 import { AssistantPanel } from "@/features/assistant/AssistantPanel";
 import { AppTours } from "@/features/shell/AppTours";
 import { SetupWizard } from "@/features/shell/SetupWizard";
+import { MiniPlayer } from "@/features/player/MiniPlayer";
+import { useMiniPlayer, type MiniPlayerSession } from "@/stores/miniPlayer";
 import { setupWizardSeen } from "@/lib/setupWizard";
 import { accentVars, useTheme } from "@/stores/theme";
 import { transitionToLibrary, transitionToVideo } from "@/lib/viewTransition";
@@ -118,6 +120,9 @@ export function Home() {
   // 助手只有浮动一种形态，盖在内容上方，不占主区宽度；rail 按钮就是开/关。
   const assistantOpen = useAssistantUi((s) => s.open);
   const toggleAssistant = useAssistantUi((s) => s.toggle);
+  const assistantSide = useAssistantUi((s) => s.side);
+  const assistantWidth = useAssistantUi((s) => s.width);
+  const miniPlayerActive = useMiniPlayer((s) => s.session !== null);
   // 库内标题过滤（前端过滤，不落存储；切课程时清空）。
   const [videoQuery, setVideoQuery] = useState("");
   // 统一侧栏折叠状态：分视图记忆（课程库 / 工作台）。
@@ -547,6 +552,24 @@ export function Home() {
     runAfterWorkspaceTransient(() => go({ view: "library" }));
   }
 
+  // 点迷你播放器：回到它在放的那个视频。工作台的播放器挂上后从小窗放到的地方接着放
+  // （接管逻辑在播放器里，面包屑、课程页重新打开同一个视频也走同一条）。
+  function returnFromMiniPlayer(session: MiniPlayerSession) {
+    useMiniPlayer.getState().update({ ms: session.ms, playing: session.playing });
+    if (session.videoId === selectedVideoId) {
+      returnToVideo();
+      return;
+    }
+    runAfterWorkspaceTransient(() => {
+      setKnowledgeReturn(null);
+      go({
+        view: "library",
+        ...(session.courseId ? { courseId: session.courseId } : {}),
+        videoId: session.videoId,
+      });
+    });
+  }
+
   // 窄屏底部 Tab 切换：课程回到当前课程层级；学习/队列/设置打开对应整页。
   function selectCompactTab(tab: CompactTab) {
     if (tab === "settings" && showSettings) return;
@@ -697,6 +720,9 @@ export function Home() {
       data-shell={isPhoneDevice ? "stacked" : "sidebar"}
       data-view={isWorkbenchView || (!isPhoneDevice && inVideoSession) ? "workbench" : "library"}
       data-sidebar={isPhoneDevice ? undefined : sidebarIsCollapsed ? "collapsed" : "expanded"}
+      data-mini-player={
+        miniPlayerActive && !isWorkbenchView ? (isPhoneDevice ? "bar" : "card") : undefined
+      }
       style={accentVars(accent, theme, customAccent) as CSSProperties}
       className="ca-app"
     >
@@ -798,6 +824,14 @@ export function Home() {
         }
       />
       {/* 新手引导：课程库空着、课程里还没视频、课程页有了视频、第一次进工作台，各出现一次。 */}
+      {/* 迷你播放器：离开视频页时正在放的视频在这里接着放；回到视频页由工作台接手。 */}
+      {!isWorkbenchView && (
+        <MiniPlayer
+          layout={isPhoneDevice ? "bar" : "card"}
+          onReturn={returnFromMiniPlayer}
+          rightInset={!isPhoneDevice && assistantOpen && assistantSide === "right" ? assistantWidth : 0}
+        />
+      )}
       <SetupWizard
         open={setupOpen}
         onClose={() => {

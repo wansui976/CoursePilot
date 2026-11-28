@@ -515,6 +515,39 @@ export const scenes = [
     },
   },
   {
+    // 迷你播放器：视频页里在放，切去别处时角落接着放；点它回来，从放到的地方接着放。
+    name: "mini-player",
+    devices: ["desktop", "phone"],
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      const player = page.locator("[data-video-player] video").first();
+      await player.evaluate((v) => {
+        v.currentTime = 95;
+        return v.play();
+      });
+      await page.waitForTimeout(800);
+      // 桌面走 rail 去设置；手机上工作台是整屏，点返回回到课程页。
+      const settings = page.getByRole("button", { name: "设置", exact: true }).first();
+      if (await settings.isVisible().catch(() => false)) await settings.click();
+      else await page.getByRole("button", { name: "返回", exact: true }).first().click();
+      const mini = page.getByRole("region", { name: "迷你播放器" });
+      await mini.waitFor();
+      await page.waitForTimeout(1200);
+      const miniAt = await mini.locator("video").evaluate((v) => ({ t: v.currentTime, paused: v.paused }));
+      if (miniAt.paused || miniAt.t < 95) throw new Error(`小窗没有接着放：${JSON.stringify(miniAt)}`);
+      await shot();
+      await mini.getByRole("button", { name: /^回到「/ }).click();
+      await page.locator("[data-video-player]").first().waitFor();
+      await page.waitForTimeout(1200);
+      const back = await page
+        .locator("[data-video-player] video")
+        .first()
+        .evaluate((v) => ({ t: v.currentTime, paused: v.paused }));
+      if (back.paused || back.t < miniAt.t) throw new Error(`回到视频页没有接着放：${JSON.stringify(back)}`);
+      if (await mini.count()) throw new Error("回到视频页后小窗没收起");
+    },
+  },
+  {
     name: "workbench",
     devices: ALL,
     run: async ({ page, shot }) => {

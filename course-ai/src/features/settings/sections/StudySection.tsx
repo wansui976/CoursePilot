@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Switch } from "@/ui/switch";
 import { ipc } from "@/lib/ipc";
 import { readReminderEnabled, writeReminderEnabled } from "@/lib/studyReminder";
+import { loadMiniPlayerEnabled, persistMiniPlayerEnabled } from "@/features/player/playerPrefs";
 import { FIELD, Group, Row, SavedBadge, Select, StackRow } from "@/features/settings/primitives";
 import { QUIZ_STYLES } from "@/lib/quizStyles";
 import type { QuizStyle } from "@/lib/types";
@@ -27,6 +28,7 @@ export function StudySection() {
     }
   }
   const [remindOn, setRemindOn] = useState(() => readReminderEnabled());
+  const [miniPlayerOn, setMiniPlayerOn] = useState(() => loadMiniPlayerEnabled());
   const [style, setStyle] = useState<QuizStyle>("recall");
   const [prompt, setPrompt] = useState("");
   const [savedPrompt, setSavedPrompt] = useState("");
@@ -82,6 +84,24 @@ export function StudySection() {
             aria-label={t("settings.studyReminder.label")}
             checked={remindOn}
             onCheckedChange={(next) => void toggleReminder(next)}
+          />
+        </Row>
+      </Group>
+      <Group header={t("settings.playback.title")}>
+        <Row
+          label={t("settings.playback.miniPlayer")}
+          hint={t("settings.playback.miniPlayerHint")}
+          htmlFor="mini-player"
+          layout="inline"
+        >
+          <Switch
+            id="mini-player"
+            aria-label={t("settings.playback.miniPlayer")}
+            checked={miniPlayerOn}
+            onCheckedChange={(next) => {
+              setMiniPlayerOn(next);
+              persistMiniPlayerEnabled(next);
+            }}
           />
         </Row>
       </Group>

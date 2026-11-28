@@ -176,6 +176,7 @@ export function VideoWorkbench({
                   <VideoPlayer
                     src={remoteStream.data.stream.src}
                     videoId={video.id}
+                    title={displayTitle(video.title)}
                     courseId={video.course_id}
                     immersive={isIOS()}
                     onFullscreenChange={onFullscreenChange}
@@ -204,6 +205,7 @@ export function VideoWorkbench({
                 <VideoPlayer
                   src={mediaSrc}
                   videoId={video.id}
+                  title={displayTitle(video.title)}
                   courseId={video.course_id}
                   immersive={isIOS()}
                   onFullscreenChange={onFullscreenChange}
