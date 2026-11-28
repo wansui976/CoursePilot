@@ -2721,7 +2721,7 @@ button[data-tour="assistant"][data-tucked] {
 
 /* 一本精装书：深色布面书脊（课程色压暗），左右两侧压暗出书脊的弧度；上下各一组烫印双线，
    书名逐字直立在中间，讲数在下，字是米白色。 */
-.ca-book {
+.ca-shelf-book {
   --cloth: color-mix(in oklab, var(--spine) 72%, #1b1410);
   --foil: color-mix(in srgb, #f4ead8 88%, var(--spine));
   position: relative;
@@ -2752,7 +2752,7 @@ button[data-tour="assistant"][data-tucked] {
   cursor: pointer;
 }
 
-.ca-book-band {
+.ca-shelf-book-band {
   flex: none;
   width: 72%;
   height: 5px;
@@ -2760,15 +2760,15 @@ button[data-tour="assistant"][data-tucked] {
   opacity: 0.7;
 }
 
-.ca-book-band:first-child {
+.ca-shelf-book-band:first-child {
   margin-bottom: 12px;
 }
 
-.ca-book-band:last-child {
+.ca-shelf-book-band:last-child {
   margin-top: 10px;
 }
 
-.ca-book-title {
+.ca-shelf-book-title {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -2782,7 +2782,7 @@ button[data-tour="assistant"][data-tucked] {
   letter-spacing: 0.02em;
 }
 
-.ca-book-count {
+.ca-shelf-book-count {
   flex: none;
   font-family: var(--font-display);
   font-size: 13px;
@@ -2791,7 +2791,7 @@ button[data-tour="assistant"][data-tucked] {
   line-height: 1;
 }
 
-.ca-book-count small {
+.ca-shelf-book-count small {
   display: block;
   margin-top: 2px;
   font-family: var(--font-app);
@@ -2800,17 +2800,17 @@ button[data-tour="assistant"][data-tucked] {
   opacity: 0.8;
 }
 
-.ca-book:hover {
+.ca-shelf-book:hover {
   transform: translateY(-10px);
 }
 
-.ca-book:focus-visible {
+.ca-shelf-book:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ca-book {
+  .ca-shelf-book {
     transition: none;
   }
 }

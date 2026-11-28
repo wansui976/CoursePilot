@@ -21,7 +21,7 @@ function spineColor(course: Course) {
   return course.color ?? COURSE_COLORS[stableIndex(course.name, COURSE_COLORS.length)];
 }
 
-/** 书脊上除了书名，上下布带、讲数和留白一共占多高（px），和 .ca-book 的样式一起改。 */
+/** 书脊上除了书名，上下布带、讲数和留白一共占多高（px），和 .ca-shelf-book 的样式一起改。 */
 const SPINE_CHROME = 92;
 /** 书名一个字占多高（14px 字 × 1.15 行高）。 */
 const SPINE_CHAR = 16.1;
@@ -57,23 +57,23 @@ export function CourseShelf({
           <li key={course.id} className="ca-shelf-slot">
             <button
               type="button"
-              className="ca-book"
+              className="ca-shelf-book"
               style={style}
               aria-label={t("library.shelfBook", { name: course.name, count: course.video_count })}
               title={course.name}
               onClick={() => onOpenCourse(course.id)}
             >
-              <span className="ca-book-band" aria-hidden="true" />
-              <span className="ca-book-title" aria-hidden="true">
+              <span className="ca-shelf-book-band" aria-hidden="true" />
+              <span className="ca-shelf-book-title" aria-hidden="true">
                 {shown.map((char, index) => (
                   <span key={index}>{char}</span>
                 ))}
               </span>
-              <span className="ca-book-count" aria-hidden="true">
+              <span className="ca-shelf-book-count" aria-hidden="true">
                 {course.video_count}
                 <small>{t("library.lectureUnit")}</small>
               </span>
-              <span className="ca-book-band" aria-hidden="true" />
+              <span className="ca-shelf-book-band" aria-hidden="true" />
             </button>
           </li>
         );
