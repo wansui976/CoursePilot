@@ -373,7 +373,7 @@ function auditLayout() {
   const fillTrack = (el) =>
     el.matches(
       'input[type="range"], .ca-slider, .course-video-progress, .course-video-volume, [data-allow-gradient], ' +
-        '.ca-mark, .ca-paper-sheet, .ca-paper-sheet *, .ca-desk-window-bars, .ca-notebook-page, .ca-shelf',
+        '.ca-mark, .ca-paper-sheet, .ca-paper-sheet *, .ca-desk-window-bars, .ca-notebook-page, .ca-shelf, .ca-book',
     );
   for (const el of document.querySelectorAll("body *")) {
     const rect = el.getBoundingClientRect();

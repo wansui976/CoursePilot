@@ -2624,71 +2624,110 @@ button[data-tour="assistant"][data-tucked] {
 
 /* ===================== 书架（课程库样式：书架） ===================== */
 
-/* 一层层搁板：每层书底下一块木板。书多了自动换到下一层：书位高 224px，层间 26px，一层一周期 250px；
-   搁板是这 26px 层间里最上面的 12px，用按 250px 重复的条纹画，正好垫在每层书底下；最后一层下面
-   靠 padding-bottom 让出搁板。色标位置只写固定像素（色标里写 calc(var()) 在部分 WebKit 上整条
-   渐变失效），改尺寸要几处一起改（.ca-shelf-slot 的高度、row-gap、条纹、padding-bottom）。 */
+/* 一只胡桃木书柜：左右侧板、顶板是边框，里面是更深的背板。书多了自动换到下一层，每层：
+   书位 240px（最高的书 220px，上面留出取书的空），下面一块 14px 的搁板（=row-gap），一层一周期 254px。
+   搁板和搁板投在背板上的阴影都用按 254px 重复的条纹画；最后一层的搁板靠 padding-bottom 让出来，
+   第一层顶上那道阴影正好是顶板投下的。色标位置只写固定像素（色标里写 calc(var()) 在部分 WebKit 上
+   整条渐变失效），改尺寸要几处一起改（.ca-shelf-slot 高度、row-gap、条纹、padding-bottom）。 */
 .ca-shelf {
+  --shelf-back: color-mix(in srgb, var(--wood-dark) 70%, #000);
+  --shelf-edge: color-mix(in srgb, var(--wood) 70%, #c9a47c);
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  column-gap: 3px;
-  row-gap: 26px;
+  column-gap: 2px;
+  row-gap: 14px;
+  width: fit-content;
+  min-width: min(100%, 360px);
+  max-width: 100%;
   margin: 0;
-  padding: 0 14px 12px;
+  padding: 0 12px 14px;
   list-style: none;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0 224px,
-    var(--wood) 224px 236px,
-    transparent 236px 250px
-  );
+  border: 12px solid var(--wood);
+  border-bottom-width: 10px;
+  border-radius: 4px 4px 2px 2px;
+  background-color: var(--shelf-back);
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 240px,
+      var(--shelf-edge) 240px 242px,
+      var(--wood) 242px 251px,
+      var(--wood-dark) 251px 254px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0.45) 0,
+      rgb(0 0 0 / 0) 16px,
+      transparent 16px 254px
+    );
+  box-shadow:
+    inset 10px 0 12px -10px rgb(0 0 0 / 0.6),
+    inset -10px 0 12px -10px rgb(0 0 0 / 0.6),
+    inset 0 1px 0 rgb(0 0 0 / 0.4),
+    0 1px 0 var(--wood-dark),
+    0 10px 18px -12px rgb(16 24 20 / 0.45);
+}
+
+/* 侧板、顶板正面一道浅木色倒角，看得出是板子不是描边。 */
+.ca-shelf {
+  border-color: var(--wood);
+  border-top-color: color-mix(in srgb, var(--wood) 85%, #c9a47c);
 }
 
 .ca-shelf-slot {
   display: flex;
   align-items: flex-end;
-  height: 224px;
+  height: 240px;
 }
 
-/* 一本书：布面书脊（课程色的淡底），上下两道课程色的布带，名字竖排在中间，讲数在下。 */
+/* 一本精装书：深色布面书脊（课程色压暗），左右两侧压暗出书脊的弧度；上下各一组烫印双线，
+   书名逐字直立在中间，讲数在下，字是米白色。 */
 .ca-book {
+  --cloth: color-mix(in oklab, var(--spine) 72%, #1b1410);
+  --foil: color-mix(in srgb, #f4ead8 88%, var(--spine));
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* 全局按钮样式带着两端对齐，会把空白塞进布带、书名、讲数之间，书名反被压扁。 */
+  /* 全局按钮样式带着两端对齐，会把空白塞进烫线、书名、讲数之间，书名反被压扁。 */
   justify-content: flex-start;
   gap: 0;
   width: var(--spine-w);
   height: var(--spine-h);
-  padding: 0;
-  border-radius: 3px 3px 1px 1px;
-  background: var(--spine-bg);
-  color: var(--spine-text);
-  box-shadow:
-    inset 2px 0 0 rgb(255 255 255 / 0.35),
-    inset -2px 0 0 rgb(16 24 20 / 0.08),
-    0 0 0 1px rgb(16 24 20 / 0.08);
+  padding: 12px 0 12px;
+  border-radius: 2px 2px 1px 1px;
+  background:
+    linear-gradient(
+      to right,
+      rgb(0 0 0 / 0.32),
+      rgb(255 255 255 / 0.1) 22%,
+      rgb(255 255 255 / 0.04) 50%,
+      rgb(0 0 0 / 0.08) 78%,
+      rgb(0 0 0 / 0.4)
+    ),
+    var(--cloth);
+  color: var(--foil);
+  box-shadow: 1px 0 0 rgb(0 0 0 / 0.35);
   transform-origin: 50% 100%;
-  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
+  transition: transform 0.18s var(--ease);
   cursor: pointer;
 }
 
 .ca-book-band {
   flex: none;
-  width: 100%;
-  height: 14px;
-  background: var(--spine);
+  width: 72%;
+  height: 5px;
+  border-block: 1.5px solid currentColor;
+  opacity: 0.7;
 }
 
 .ca-book-band:first-child {
-  margin-bottom: 14px;
-  border-radius: 3px 3px 0 0;
+  margin-bottom: 12px;
 }
 
 .ca-book-band:last-child {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .ca-book-title {
@@ -2699,16 +2738,17 @@ button[data-tour="assistant"][data-tucked] {
   min-height: 0;
   overflow: hidden;
   font-family: var(--font-display);
-  font-size: 15px;
-  line-height: 1.1;
-  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .ca-book-count {
   flex: none;
   font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   font-variant-numeric: lining-nums;
   line-height: 1;
 }
@@ -2718,23 +2758,17 @@ button[data-tour="assistant"][data-tucked] {
   margin-top: 2px;
   font-family: var(--font-app);
   font-size: 10px;
+  font-weight: 400;
+  opacity: 0.8;
 }
 
 .ca-book:hover {
-  transform: translateY(-8px) rotate(-1.5deg);
+  transform: translateY(-10px);
 }
 
 .ca-book:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
-}
-
-:root[data-theme="dark"] .ca-book,
-.ca-app[data-theme="dark"] .ca-book {
-  box-shadow:
-    inset 2px 0 0 rgb(255 255 255 / 0.06),
-    inset -2px 0 0 rgb(0 0 0 / 0.25),
-    0 0 0 1px rgb(0 0 0 / 0.3);
 }
 
 @media (prefers-reduced-motion: reduce) {

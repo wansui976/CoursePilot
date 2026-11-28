@@ -26,9 +26,9 @@ function spineColor(course: Course) {
 }
 
 /** 书脊上除了书名，上下布带、讲数和留白一共占多高（px），和 .ca-book 的样式一起改。 */
-const SPINE_CHROME = 104;
-/** 书名一个字占多高（15px 字 × 1.1 行高）。 */
-const SPINE_CHAR = 16.5;
+const SPINE_CHROME = 92;
+/** 书名一个字占多高（14px 字 × 1.15 行高）。 */
+const SPINE_CHAR = 16.1;
 
 /** 这本书的书脊写得下几个字：太长的课程名截断，末尾用竖排省略号「︙」，不会截在半个字上。 */
 function spineChars(height: number): number {
