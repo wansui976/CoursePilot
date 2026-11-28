@@ -10,7 +10,7 @@ import {
   useReadingFont,
 } from "@/stores/readingFont";
 import { DENSITIES, useDensity } from "@/stores/density";
-import { useHomeLayout, type HomeLayout } from "@/stores/homeLayout";
+import { useHomeLayout, type CourseLibraryStyle, type HomeLayout } from "@/stores/homeLayout";
 import { NOTE_PAPERS, useNotePaper, type NoteTabStyle } from "@/stores/notePaper";
 import { WeatherPlaceRow } from "./WeatherPlaceRow";
 import { PaperSwatch } from "./PaperSwatch";
@@ -116,6 +116,8 @@ export function AppearanceSection() {
   const homeLayout = useHomeLayout((s) => s.layout);
   const setHomeLayout = useHomeLayout((s) => s.setLayout);
   const deskWindow = useHomeLayout((s) => s.deskWindow);
+  const courseStyle = useHomeLayout((s) => s.courseStyle);
+  const setCourseStyle = useHomeLayout((s) => s.setCourseStyle);
   const notePaper = useNotePaper((s) => s.paper);
   const setNotePaper = useNotePaper((s) => s.setPaper);
   const noteTabStyle = useNotePaper((s) => s.tabStyle);
@@ -342,6 +344,17 @@ export function AppearanceSection() {
             ]}
             value={homeLayout}
             onChange={setHomeLayout}
+          />
+        </Row>
+        <Row label={t("settings.appearance.courseStyle")} hint={t("settings.appearance.courseStyleHint")} layout="inline">
+          <Segmented
+            label={t("settings.appearance.courseStyle")}
+            options={[
+              { key: "cards" as CourseLibraryStyle, label: t("settings.appearance.courseStyleCards") },
+              { key: "shelf" as CourseLibraryStyle, label: t("settings.appearance.courseStyleShelf") },
+            ]}
+            value={courseStyle}
+            onChange={setCourseStyle}
           />
         </Row>
         {homeLayout === "desk" && (

@@ -2621,3 +2621,124 @@ button[data-tour="assistant"][data-tucked] {
     inset: -2px;
   }
 }
+
+/* ===================== 书架（课程库样式：书架） ===================== */
+
+/* 一层层搁板：每层书底下一块木板。书多了自动换到下一层：书位高 224px，层间 26px，一层一周期 250px；
+   搁板是这 26px 层间里最上面的 12px，用按 250px 重复的条纹画，正好垫在每层书底下；最后一层下面
+   靠 padding-bottom 让出搁板。色标位置只写固定像素（色标里写 calc(var()) 在部分 WebKit 上整条
+   渐变失效），改尺寸要几处一起改（.ca-shelf-slot 的高度、row-gap、条纹、padding-bottom）。 */
+.ca-shelf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  column-gap: 3px;
+  row-gap: 26px;
+  margin: 0;
+  padding: 0 14px 12px;
+  list-style: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 224px,
+    var(--wood) 224px 236px,
+    transparent 236px 250px
+  );
+}
+
+.ca-shelf-slot {
+  display: flex;
+  align-items: flex-end;
+  height: 224px;
+}
+
+/* 一本书：布面书脊（课程色的淡底），上下两道课程色的布带，名字竖排在中间，讲数在下。 */
+.ca-book {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 全局按钮样式带着两端对齐，会把空白塞进布带、书名、讲数之间，书名反被压扁。 */
+  justify-content: flex-start;
+  gap: 0;
+  width: var(--spine-w);
+  height: var(--spine-h);
+  padding: 0;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--spine-bg);
+  color: var(--spine-text);
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / 0.35),
+    inset -2px 0 0 rgb(16 24 20 / 0.08),
+    0 0 0 1px rgb(16 24 20 / 0.08);
+  transform-origin: 50% 100%;
+  transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
+  cursor: pointer;
+}
+
+.ca-book-band {
+  flex: none;
+  width: 100%;
+  height: 14px;
+  background: var(--spine);
+}
+
+.ca-book-band:first-child {
+  margin-bottom: 14px;
+  border-radius: 3px 3px 0 0;
+}
+
+.ca-book-band:last-child {
+  margin-top: 8px;
+}
+
+.ca-book-title {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.1;
+  font-weight: 500;
+}
+
+.ca-book-count {
+  flex: none;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: lining-nums;
+  line-height: 1;
+}
+
+.ca-book-count small {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-app);
+  font-size: 10px;
+}
+
+.ca-book:hover {
+  transform: translateY(-8px) rotate(-1.5deg);
+}
+
+.ca-book:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+:root[data-theme="dark"] .ca-book,
+.ca-app[data-theme="dark"] .ca-book {
+  box-shadow:
+    inset 2px 0 0 rgb(255 255 255 / 0.06),
+    inset -2px 0 0 rgb(0 0 0 / 0.25),
+    0 0 0 1px rgb(0 0 0 / 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ca-book {
+    transition: none;
+  }
+}

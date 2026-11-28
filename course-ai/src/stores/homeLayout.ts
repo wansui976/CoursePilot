@@ -9,6 +9,10 @@ export type HomeLayout = "dashboard" | "desk";
 const LAYOUT_KEY = "course-ai-home-layout";
 const DECK_KEY = "course-ai-course-deck-expanded";
 const WINDOW_KEY = "course-ai-desk-window";
+const SHELF_KEY = "course-ai-course-shelf";
+
+/** 课程库里课程怎么摆：封面卡片（默认）或一面书架。 */
+export type CourseLibraryStyle = "cards" | "shelf";
 
 function read(key: string): string | null {
   try {
@@ -35,15 +39,18 @@ interface HomeLayoutState {
   deckExpanded: boolean;
   /** 课桌左上角的窗（纯装饰，可关）。 */
   deskWindow: boolean;
+  courseStyle: CourseLibraryStyle;
   setLayout: (layout: HomeLayout) => void;
   setDeckExpanded: (expanded: boolean) => void;
   setDeskWindow: (on: boolean) => void;
+  setCourseStyle: (style: CourseLibraryStyle) => void;
 }
 
 export const useHomeLayout = create<HomeLayoutState>((set) => ({
   layout: typeof window === "undefined" ? "dashboard" : readHomeLayout(),
   deckExpanded: typeof window === "undefined" ? false : read(DECK_KEY) === "1",
   deskWindow: typeof window === "undefined" ? true : read(WINDOW_KEY) !== "0",
+  courseStyle: typeof window !== "undefined" && read(SHELF_KEY) === "shelf" ? "shelf" : "cards",
   setLayout: (layout) => {
     write(LAYOUT_KEY, layout);
     set({ layout });
@@ -55,6 +62,10 @@ export const useHomeLayout = create<HomeLayoutState>((set) => ({
   setDeskWindow: (deskWindow) => {
     write(WINDOW_KEY, deskWindow ? "1" : "0");
     set({ deskWindow });
+  },
+  setCourseStyle: (courseStyle) => {
+    write(SHELF_KEY, courseStyle);
+    set({ courseStyle });
   },
 }));
 

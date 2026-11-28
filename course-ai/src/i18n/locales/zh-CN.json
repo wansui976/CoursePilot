@@ -909,6 +909,10 @@
       "densityCompact": "紧凑",
       "densityFootnote": "紧凑会收窄侧栏、列表、卡片与文稿的留白，一屏多放几行；只在用鼠标或触控板时生效。",
       "homeLayout": "主页样式",
+      "courseStyle": "课程库样式",
+      "courseStyleHint": "书架：每门课是一本竖着插的书，讲数越多书脊越厚。",
+      "courseStyleCards": "封面卡片",
+      "courseStyleShelf": "书架",
       "homeLayoutHint": "两种主页显示同样的内容，只是摆法不同。",
       "homeLayoutDashboard": "仪表盘",
       "homeLayoutDesk": "课桌",
@@ -2196,6 +2200,8 @@
     "more": "更多格式"
   },
   "library": {
+    "shelfLabel": "书架上的课程",
+    "shelfBook": "打开课程「{{name}}」（{{count}} 讲）",
     "overviewSub": "{{courses}} 门课程 · {{videos}} 个视频",
     "continueSection": "继续学习",
     "resumeGo": "继续播放",

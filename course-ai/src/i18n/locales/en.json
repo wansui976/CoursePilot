@@ -911,6 +911,10 @@
       "densityCompact": "Compact",
       "densityFootnote": "Compact tightens the sidebar, lists, cards and transcript so more fits on screen. Applies only with a mouse or trackpad.",
       "homeLayout": "Home layout",
+      "courseStyle": "Course library",
+      "courseStyleHint": "Shelf: each course is a book standing on a shelf; more lectures, thicker spine.",
+      "courseStyleCards": "Cover cards",
+      "courseStyleShelf": "Shelf",
       "homeLayoutHint": "Both show the same things, laid out differently.",
       "homeLayoutDashboard": "Dashboard",
       "homeLayoutDesk": "Desk",
@@ -2212,6 +2216,8 @@
     "more": "More formatting"
   },
   "library": {
+    "shelfLabel": "Courses on the shelf",
+    "shelfBook": "Open course \"{{name}}\" ({{count}} lectures)",
     "overviewSub": "{{courses}} courses · {{videos}} videos",
     "continueSection": "Continue learning",
     "resumeGo": "Resume",

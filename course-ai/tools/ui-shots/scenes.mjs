@@ -91,6 +91,26 @@ export const scenes = [
     },
   },
   {
+    // 课程库样式选「书架」：仪表盘和课桌里的课程都换成一面书架。
+    name: "home-shelf",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("__shot-many-courses", "1");
+        localStorage.setItem("course-ai-course-shelf", "shelf");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator(".ca-shelf").first().waitFor();
+      await page.locator(".ca-shelf").first().scrollIntoViewIfNeeded();
+      await shot();
+      await page.evaluate(() => localStorage.setItem("course-ai-home-layout", "desk"));
+      await page.reload({ waitUntil: "networkidle" });
+      await page.locator(".ca-shelf").first().waitFor();
+      await page.locator(".ca-shelf").first().scrollIntoViewIfNeeded();
+      await shot("desk");
+    },
+  },
+  {
     // 主页样式选「课桌」。
     name: "home-desk",
     devices: ["desktop", "tablet"],

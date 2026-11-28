@@ -11,6 +11,7 @@ import { ErrorNote } from "@/ui/ErrorNote";
 import { Kbd, Mark } from "@/ui/marks";
 import { MistakeDeck } from "@/features/study/MistakeDeck";
 import { CourseDeck } from "./CourseDeck";
+import { CourseShelf } from "./CourseShelf";
 import { LectureCover } from "./LectureCover";
 import { UpdateNotice } from "./UpdateNotice";
 import { DeskWindow } from "./DeskWindow";
@@ -126,6 +127,7 @@ export function DeskHome({
   const now = useNow();
 
   const showWindow = useHomeLayout((state) => state.deskWindow);
+  const courseStyle = useHomeLayout((state) => state.courseStyle);
   const windowWeather = useWindowWeather(showWindow);
   const sun = windowWeather.weather
     ? {
@@ -306,6 +308,12 @@ export function DeskHome({
           className="ca-desk-deck"
           aria-label={t("desk.deckCaption", { count: summaries.length })}
         >
+          {courseStyle === "shelf" ? (
+            <CourseShelf
+              courses={summaries.map((summary) => summary.course)}
+              onOpenCourse={onSelectCourse}
+            />
+          ) : (
           <CourseDeck
             items={summaries}
             front={Math.min(front, Math.max(0, summaries.length - 1))}
@@ -313,6 +321,7 @@ export function DeskHome({
             onOpenCourse={onSelectCourse}
             onContinue={onContinue}
           />
+          )}
           <span className="ca-desk-label">
             {t("desk.deckCaption", { count: summaries.length })}
           </span>

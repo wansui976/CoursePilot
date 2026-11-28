@@ -19,6 +19,7 @@ import { formatMs } from "@/lib/time";
 import type { Course, VideoListItem } from "@/lib/types";
 import { displayTitle } from "@/lib/videoTitle";
 import { CourseDeck } from "./CourseDeck";
+import { CourseShelf } from "./CourseShelf";
 import { DeskHome } from "./DeskHome";
 import { LectureCover } from "./LectureCover";
 import { CourseBoardCover } from "./CourseBoardCover";
@@ -85,6 +86,7 @@ export function LibraryOverview({
   const now = useNow();
   const layout = useHomeLayout((state) => state.layout);
   const deckExpanded = useHomeLayout((state) => state.deckExpanded);
+  const courseStyle = useHomeLayout((state) => state.courseStyle);
   const setDeckExpanded = useHomeLayout((state) => state.setDeckExpanded);
   const [deckFront, setDeckFront] = useState(0);
   const lists = useQueries({
@@ -121,7 +123,8 @@ export function LibraryOverview({
     );
   }
 
-  const stacked = courses.length > DECK_THRESHOLD && !deckExpanded;
+  const shelf = courseStyle === "shelf";
+  const stacked = !shelf && courses.length > DECK_THRESHOLD && !deckExpanded;
 
   return (
     <div className="ca-main-col ca-overview">
@@ -180,7 +183,7 @@ export function LibraryOverview({
             <h2 id="library-courses" className="ca-overview-heading">
               {t("library.allCourses")}
             </h2>
-            {courses.length > DECK_THRESHOLD && (
+            {!shelf && courses.length > DECK_THRESHOLD && (
               <span className="ca-section-more ca-deck-nav">
                 {stacked && (
                   <>
@@ -208,7 +211,9 @@ export function LibraryOverview({
               </span>
             )}
           </div>
-          {stacked ? (
+          {shelf ? (
+            <CourseShelf courses={courses} onOpenCourse={onSelectCourse} />
+          ) : stacked ? (
             <CourseDeck
               items={summaries.map((summary) => ({
                 course: summary.course,
