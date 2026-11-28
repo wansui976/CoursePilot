@@ -981,7 +981,9 @@
       "takeNote": "Take a note",
       "takeNoteHint": "Pause and add the current time where your cursor is",
       "swapped": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" uses \"{{previous}}\" instead.",
-      "swappedUnset": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" has no shortcut now."
+      "swappedUnset": "\"{{key}}\" was the shortcut for \"{{other}}\" and now belongs to \"{{action}}\"; \"{{other}}\" has no shortcut now.",
+      "abLoop": "A-B loop",
+      "abLoopHint": "Press once for start, again for end, a third time to clear"
     },
     "storage": {
       "title": "Storage Location",
@@ -2724,5 +2726,29 @@
       "custom": "Drawn by AI",
       "generic": "Plain board"
     }
+  },
+  "playbackTools": {
+    "title": "Loop & timer",
+    "loop": "A-B loop",
+    "loopFrom": "from {{time}}",
+    "setStart": "Start A",
+    "setStartHint": "Start looping from here (shortcut R by default: press once for start, again for end, a third time to clear)",
+    "setEnd": "End B",
+    "setEndHint": "Loop back to the start when playback reaches here",
+    "sentence": "This line",
+    "sentenceHint": "Replay the sentence being spoken now",
+    "clear": "Clear",
+    "loopStartSet": "Loop starts at {{time}} — press again to set the end",
+    "loopOn": "Looping {{start}} – {{end}}",
+    "loopCleared": "Loop cleared",
+    "sleep": "Stop",
+    "sleepOffShort": "Off",
+    "sleepChapter": "Chapter",
+    "sleepMinutes": "{{count}}m",
+    "sleepOff": "Sleep timer off",
+    "sleepMinutesSet": "Stopping in {{count}} minutes",
+    "sleepChapterSet": "Stopping at {{time}} (end of chapter)",
+    "sleepFired": "Timer's up — paused",
+    "sleepRemaining": "Stops in {{time}}"
   }
 }

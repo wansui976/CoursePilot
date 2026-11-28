@@ -31,6 +31,8 @@ type KeyboardHandlers = {
   revealVolumeHint: (value: number) => void;
   setCaptionsOn: Dispatch<SetStateAction<boolean>>;
   toggleFullscreen: () => void;
+  /** 区间复读：按一下定起点、再按定终点、第三下清掉。 */
+  stepLoop: () => void;
 };
 
 /** 跳到上一句/下一句字幕的开头；该视频还没有字幕时回退到 ±10s 快退/快进。 */
@@ -165,6 +167,9 @@ export function usePlayerKeyboard(
           break;
         case "captions":
           h.setCaptionsOn((v) => !v);
+          break;
+        case "abLoop":
+          h.stepLoop();
           break;
         case "takeNote":
           // 视频还没装载好（刚打开、尚未跳到上次进度）时 currentTime 还是 0，改用记录的进度。

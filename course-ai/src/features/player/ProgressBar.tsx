@@ -8,6 +8,7 @@ import type { SkipRange } from "@/lib/silenceSkip";
 import type { HighlightSegment } from "@/lib/types";
 import type { DanmakuEntry } from "@/lib/types";
 import { danmakuHeat, heatAreaPath, heatPeaks } from "@/lib/danmakuHeat";
+import type { AbLoop } from "@/lib/abLoop";
 
 const ARROW_SEEK_STEP_MS = 5_000;
 const MIN_PAGE_SEEK_STEP_MS = 10_000;
@@ -28,6 +29,7 @@ export function ProgressBar({
   skipRanges,
   highlightSegments = NO_HIGHLIGHTS,
   danmaku = NO_DANMAKU,
+  loop = null,
   onSeek,
 }: {
   videoId: string;
@@ -36,6 +38,8 @@ export function ProgressBar({
   highlightSegments?: HighlightSegment[];
   /** 弹幕开着时传入；不足以成曲线（太少）时不画。 */
   danmaku?: DanmakuEntry[];
+  /** 区间复读：起点 / 终点画两道竖线，中间一层浅色。 */
+  loop?: AbLoop | null;
   onSeek: (ms: number) => void;
 }) {
   const { t } = useTranslation();
@@ -219,6 +223,17 @@ export function ProgressBar({
             />
           ))}
         </div>
+        {loop && (
+          <div
+            data-testid="ab-loop"
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 h-3 -translate-y-1/2 rounded-[2px] border-x-2 border-[var(--video-accent)] bg-white/15"
+            style={{
+              left: `${pct(loop.startMs)}%`,
+              width: loop.endMs == null ? 0 : `${Math.max(0.5, pct(loop.endMs) - pct(loop.startMs))}%`,
+            }}
+          />
+        )}
         {/* 拖动圆点：平时收起，悬停 / 键盘聚焦时弹出（触屏常显，见 .ca-progress-thumb）。 */}
         <div
           aria-hidden="true"

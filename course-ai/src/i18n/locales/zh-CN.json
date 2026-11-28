@@ -979,7 +979,9 @@
       "takeNote": "记一笔",
       "takeNoteHint": "暂停，在光标处插入当前时间，接着写",
       "swapped": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」换成了「{{previous}}」。",
-      "swappedUnset": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」现在没有快捷键。"
+      "swappedUnset": "「{{key}}」原来是「{{other}}」的快捷键，已改给「{{action}}」；「{{other}}」现在没有快捷键。",
+      "abLoop": "区间复读",
+      "abLoopHint": "按一下定起点、再按定终点、第三下取消"
     },
     "storage": {
       "title": "存储位置",
@@ -2708,5 +2710,29 @@
       "custom": "AI 画的图",
       "generic": "通用黑板"
     }
+  },
+  "playbackTools": {
+    "title": "复读与定时",
+    "loop": "区间复读",
+    "loopFrom": "从 {{time}} 起",
+    "setStart": "起点 A",
+    "setStartHint": "从现在这里开始复读（快捷键默认 R：按一下定起点、再按定终点、第三下取消）",
+    "setEnd": "终点 B",
+    "setEndHint": "复读到现在这里，然后回到起点",
+    "sentence": "复读这句",
+    "sentenceHint": "反复播放正在讲的这一句",
+    "clear": "取消",
+    "loopStartSet": "复读起点 {{time}}，再按一次定终点",
+    "loopOn": "复读 {{start}} – {{end}}",
+    "loopCleared": "已取消复读",
+    "sleep": "定时",
+    "sleepOffShort": "关",
+    "sleepChapter": "本章完",
+    "sleepMinutes": "{{count}} 分",
+    "sleepOff": "已取消定时停止",
+    "sleepMinutesSet": "{{count}} 分钟后停止播放",
+    "sleepChapterSet": "播到 {{time}}（本章结束）时停止",
+    "sleepFired": "定时已到，已暂停",
+    "sleepRemaining": "还剩 {{time}} 停止播放"
   }
 }

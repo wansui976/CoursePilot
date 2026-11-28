@@ -45,6 +45,8 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { HighlightMode, HighlightStrength } from "@/lib/highlights";
 import { useHighlightPrefs } from "@/stores/highlightPrefs";
+import { SLEEP_MINUTES, sleepRemainingMs, type AbLoop, type SleepTimer } from "@/lib/abLoop";
+import type { LoopAction, SleepChoice } from "./usePlayerTools";
 
 const SPEEDS = [2, 1.5, 1.25, 1, 0.75, 0.5];
 const CAPTION_MODES: CaptionMode[] = ["original", "bilingual", "translation"];
@@ -210,6 +212,113 @@ function ChoiceRow<T extends string>({
   );
 }
 
+const SLEEP_OPTIONS = ["off", ...SLEEP_MINUTES.map(String), "chapter"] as const;
+type SleepOption = (typeof SLEEP_OPTIONS)[number];
+
+function sleepOptionOf(timer: SleepTimer | null | undefined): SleepOption {
+  if (!timer) return "off";
+  if (timer.kind === "chapter") return "chapter";
+  return String(timer.minutes) as SleepOption;
+}
+
+/** 设置菜单里的「复读与定时」：A-B 区间复读、复读当前这句、定时停止播放。 */
+function LoopSleepSection({
+  loop,
+  sleep,
+  onLoop,
+  onSleep,
+  hasSentences,
+}: {
+  loop: AbLoop | null;
+  sleep: SleepTimer | null;
+  onLoop: (action: LoopAction) => void;
+  onSleep: (choice: SleepChoice) => void;
+  hasSentences: boolean;
+}) {
+  const { t } = useTranslation();
+  const remaining = sleepRemainingMs(sleep);
+  const chip = `${chipClass(false)} flex items-center justify-center disabled:opacity-35`;
+  return (
+    <>
+      <SectionLabel>
+        {t("playbackTools.title")}
+        {loop && (
+          <span className="ml-1.5 font-normal tabular-nums text-[var(--video-accent)]">
+            {loop.endMs == null
+              ? t("playbackTools.loopFrom", { time: formatMs(loop.startMs) })
+              : `${formatMs(loop.startMs)} – ${formatMs(loop.endMs)}`}
+          </span>
+        )}
+      </SectionLabel>
+      <div role="group" aria-label={t("playbackTools.loop")} className="flex gap-1 px-3 pb-1">
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          className={chip}
+          title={t("playbackTools.setStartHint")}
+          onClick={() => onLoop("start")}
+        >
+          {t("playbackTools.setStart")}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          className={chip}
+          disabled={!loop}
+          title={t("playbackTools.setEndHint")}
+          onClick={() => onLoop("end")}
+        >
+          {t("playbackTools.setEnd")}
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          className={chip}
+          disabled={!hasSentences}
+          title={t("playbackTools.sentenceHint")}
+          onClick={() => onLoop("sentence")}
+        >
+          {t("playbackTools.sentence")}
+        </button>
+        {loop && (
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            className={chip}
+            onClick={() => onLoop("clear")}
+          >
+            {t("playbackTools.clear")}
+          </button>
+        )}
+      </div>
+      <ChoiceRow
+        label={t("playbackTools.sleep")}
+        options={SLEEP_OPTIONS}
+        value={sleepOptionOf(sleep)}
+        optionLabel={(option) =>
+          option === "off"
+            ? t("playbackTools.sleepOffShort")
+            : option === "chapter"
+              ? t("playbackTools.sleepChapter")
+              : t("playbackTools.sleepMinutes", { count: Number(option) })
+        }
+        onChange={(option) =>
+          onSleep(option === "off" || option === "chapter" ? option : Number(option))
+        }
+      />
+      {remaining != null && (
+        <div className="px-3 pb-1 text-[11px] tabular-nums text-white/55" aria-live="off">
+          {t("playbackTools.sleepRemaining", { time: formatMs(remaining) })}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** 菜单里方向键 / Home / End 在所有可用项之间移动，Esc 关闭并把焦点还给触发按钮。 */
 function moveMenuFocus(
   event: ReactKeyboardEvent<HTMLDivElement>,
@@ -275,6 +384,11 @@ export function Controls({
   danmakuOn,
   translationAvailable = false,
   chapters = NO_CHAPTERS,
+  hasSentences = false,
+  loop = null,
+  sleep = null,
+  onLoop,
+  onSleep,
   onToggleCrop,
   onToggleCaptions,
   onToggleDanmaku,
@@ -312,6 +426,15 @@ export function Controls({
   translationAvailable?: boolean;
   /** 章节：时间后面跟着显示当前所在章节名（YouTube 式）。 */
   chapters?: Chapter[];
+  /** 有文稿才能「复读这句」。 */
+  hasSentences?: boolean;
+  /** 区间复读的当前区间（只给本视频的）。 */
+  loop?: AbLoop | null;
+  /** 定时停止。 */
+  sleep?: SleepTimer | null;
+  /** 不传就不出「复读与定时」这一节。 */
+  onLoop?: (action: LoopAction) => void;
+  onSleep?: (choice: SleepChoice) => void;
   onToggleCrop: () => void;
   onToggleCaptions: () => void;
   onToggleDanmaku: () => void;
@@ -369,7 +492,8 @@ export function Controls({
       ? ([...chapters].reverse().find((chapter) => chapter.start_ms <= currentMs) ?? null)
       : null;
   // 设置齿轮上的小圆点：有「会改变播放行为」的开关开着，提醒一眼。
-  const playbackTweaked = smartRate || skipSilence || (cropOn && hasCrop);
+  const playbackTweaked =
+    smartRate || skipSilence || (cropOn && hasCrop) || loop != null || sleep != null;
   const audible = !muted && volume > 0;
   const volumeMax = maxVolume();
   const volumePercent = audible ? Math.min(100, Math.max(0, (volume / volumeMax) * 100)) : 0;
@@ -600,6 +724,19 @@ export function Controls({
           {t("videoPlayer.danmaku")}
           <SwitchMark on={danmakuOn} />
         </button>
+      )}
+
+      {onLoop && onSleep && (
+        <>
+          <div role="separator" className="mx-3 my-1.5 h-px bg-white/10" />
+          <LoopSleepSection
+            loop={loop}
+            sleep={sleep}
+            onLoop={onLoop}
+            onSleep={onSleep}
+            hasSentences={hasSentences}
+          />
+        </>
       )}
 
       <div role="separator" className="mx-3 my-1.5 h-px bg-white/10" />

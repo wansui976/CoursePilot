@@ -17,7 +17,7 @@ import {
 } from "@/lib/playback";
 import { isIOS, isMobile } from "@/lib/platform";
 import { findActiveSegmentIndex } from "@/lib/transcript";
-import type { DanmakuEntry, TranscriptSegment } from "@/lib/types";
+import type { Chapter, DanmakuEntry, TranscriptSegment } from "@/lib/types";
 import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
 import { useWatchLogger } from "@/lib/useWatchLogger";
 import { usePlayer } from "@/stores/player";
@@ -40,6 +40,7 @@ import {
 import { applyVolume, canBoost, isBoosted, readCourseVolume, writeCourseVolume } from "./volume";
 import { usePlayerKeyboard } from "./usePlayerKeyboard";
 import { useHighlights } from "./useHighlights";
+import { usePlayerTools } from "./usePlayerTools";
 import { useIosGestures, type TapState } from "./useIosGestures";
 import {
   AudioStage,
@@ -70,6 +71,7 @@ const TAP_DELAY_MS = 240;
 const DESKTOP_IDLE_HIDE_MS = 2500;
 const EMPTY_TRANSCRIPT_SEGMENTS: TranscriptSegment[] = [];
 const EMPTY_DANMAKU: DanmakuEntry[] = [];
+const EMPTY_CHAPTERS: Chapter[] = [];
 
 export function VideoPlayer({
   src,
@@ -336,6 +338,7 @@ export function VideoPlayer({
       ? Math.min(APPLE_MAX_PLAYBACK_RATE, rate * smartRate.multiplier)
       : rate * smartRate.multiplier,
   });
+  const playbackTools = usePlayerTools(ref, videoId, segments, chapters ?? EMPTY_CHAPTERS);
   const { rateFor: highlightRateFor, mode: highlightMode, segments: highlightSegments } = highlights;
   const effectiveRate = applePlaybackEngine
     ? Math.min(APPLE_MAX_PLAYBACK_RATE, rate * smartRate.multiplier)
@@ -638,6 +641,7 @@ export function VideoPlayer({
     revealVolumeHint: (value) => revealGestureHint("volume", value),
     setCaptionsOn,
     toggleFullscreen,
+    stepLoop: () => playbackTools.applyLoop("step"),
   });
 
   const playbackControlsVisible = immersive ? controlsVisible : desktopControlsVisible;
@@ -722,6 +726,8 @@ export function VideoPlayer({
               // 精华版跳过档、跳停顿：落在要跳的区间里就直接跃过去，跳完这一轮不再按旧位置记进度。
               if (highlights.handleTimeUpdate(event.currentTarget)) return;
               if (silenceSkip.handleTimeUpdate(event.currentTarget)) return;
+              // 区间复读：越过终点就回到起点（定时「本章结束」也在这里判）。
+              if (playbackTools.handleTimeUpdate(event.currentTarget)) return;
               const t = event.currentTarget.currentTime;
               // 长按快进时播放器的 playbackRate 由手势直接改，这时别去抢。
               if (!keyScanRef.current?.engaged && !gestureRef.current?.longPressActive) {
@@ -748,6 +754,7 @@ export function VideoPlayer({
               }
             }}
             onLoadStart={(event) => watchRemoteLoad(event.currentTarget)}
+            onEnded={(event) => playbackTools.handleEnded(event.currentTarget)}
             onError={(event) => {
               window.clearTimeout(stallTimerRef.current);
               // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED：这类失败九成是编码问题，
@@ -880,6 +887,9 @@ export function VideoPlayer({
             />
           )}
           {smartRate.notice && <StageNotice align="right">{smartRate.notice}</StageNotice>}
+          {playbackTools.notice && !silenceSkip.notice && !highlights.notice && (
+            <StageNotice align="center">{playbackTools.notice}</StageNotice>
+          )}
           {silenceSkip.notice && !highlights.notice && (
             <StageNotice align="center">{silenceSkip.notice}</StageNotice>
           )}
@@ -963,6 +973,7 @@ export function VideoPlayer({
             skipRanges={silenceSkip.ranges}
             highlightSegments={highlights.mode === "off" ? undefined : highlights.segments}
             danmaku={danmakuOn ? danmaku : undefined}
+            loop={playbackTools.loop}
             onSeek={(ms) => {
               if (ref.current) ref.current.currentTime = ms / 1000;
             }}
@@ -1002,6 +1013,11 @@ export function VideoPlayer({
               danmakuOn={danmakuOn}
               translationAvailable={translationByIdx.size > 0}
               chapters={chapters}
+              hasSentences={segments.length > 0}
+              loop={playbackTools.loop}
+              sleep={playbackTools.sleep}
+              onLoop={playbackTools.applyLoop}
+              onSleep={playbackTools.applySleep}
               onToggleCrop={toggleCrop}
               onToggleCaptions={() => setCaptionsOn((on) => !on)}
               onToggleDanmaku={() => {

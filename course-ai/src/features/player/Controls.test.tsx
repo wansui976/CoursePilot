@@ -542,3 +542,40 @@ describe("Controls caption settings", () => {
     expect(localStorage.getItem("course-ai-caption-size")).toBe("large");
   });
 });
+
+describe("Controls loop & sleep section", () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("zh-CN");
+    usePlayer.setState({ currentMs: 12_000, durationMs: 60_000 });
+  });
+
+  it("sets loop points and the sleep timer from the settings menu", () => {
+    const onLoop = vi.fn();
+    const onSleep = vi.fn();
+    renderControls({ onLoop, onSleep, hasSentences: true });
+    fireEvent.click(screen.getByRole("button", { name: "播放设置" }));
+    const menu = screen.getByRole("menu", { name: "播放设置" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "起点 A" }));
+    expect(onLoop).toHaveBeenCalledWith("start");
+    // 还没有起点：终点不能点。
+    expect(within(menu).getByRole("menuitem", { name: "终点 B" })).toBeDisabled();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "复读这句" }));
+    expect(onLoop).toHaveBeenCalledWith("sentence");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "30 分" }));
+    expect(onSleep).toHaveBeenCalledWith(30);
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "本章完" }));
+    expect(onSleep).toHaveBeenCalledWith("chapter");
+  });
+
+  it("shows the loop range and marks the gear while looping", () => {
+    renderControls({
+      onLoop: vi.fn(),
+      onSleep: vi.fn(),
+      loop: { videoId: "v", startMs: 61_000, endMs: 75_000 },
+    });
+    expect(screen.getByTestId("settings-active-dot")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "播放设置" }));
+    expect(screen.getByText("01:01 – 01:15")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "取消" })).toBeInTheDocument();
+  });
+});
