@@ -1920,7 +1920,9 @@
     "masteredSummary": "{{mastered}} of {{total}} concepts explained clearly",
     "shareWeekly": "Weekly card",
     "shareWeeklyBusy": "Creating…",
-    "shareWeeklyTitle": "Create a shareable image of your last 7 days"
+    "shareWeeklyTitle": "Create a shareable image of your last 7 days",
+    "focusSessions_one": "{{count}} focus session",
+    "focusSessions_other": "{{count}} focus sessions"
   },
   "whisperModels": {
     "title": "On-device models",

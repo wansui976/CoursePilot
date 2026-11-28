@@ -26,6 +26,7 @@ import { saveShareCard, useShareCardLabels } from "@/features/workspace/useShare
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
 import { ExamsSection } from "./ExamsSection";
+import { localDay as focusLocalDay, useFocusTimer } from "@/stores/focusTimer";
 import { MistakeDeck } from "./MistakeDeck";
 import {
   computeStreak,
@@ -406,6 +407,9 @@ export function Dashboard({
   const [goalMin, setGoalMin] = useState(() => readDailyGoalMin());
   const todayWatched = dayMs(daily, today);
   const todayReviews = dayReviews(daily, today);
+  // 番茄钟今天完成的段数（只记本机）；跨过零点后按新的一天算。
+  const focusDone = useFocusTimer((state) => state.doneToday);
+  const focusToday = focusDone.day === focusLocalDay() ? focusDone : { count: 0 };
   const goalMs = goalMin * 60_000;
   const goalPercent = goalMs > 0 ? Math.min(100, Math.round((todayWatched / goalMs) * 100)) : 0;
   const goalReached = goalMs > 0 && todayWatched >= goalMs;
@@ -687,7 +691,15 @@ export function Dashboard({
                 {t("dashboard.streakDays", { days: streak })}
               </div>
               <div className="mt-1 text-xs text-[var(--text-muted)]">
-                {todayWatched > 0 || todayReviews > 0 ? t("dashboard.studiedToday") : t("dashboard.notStudiedToday")}
+                {todayWatched > 0 || todayReviews > 0 || focusToday.count > 0
+                  ? t("dashboard.studiedToday")
+                  : t("dashboard.notStudiedToday")}
+                {focusToday.count > 0 && (
+                  <span className="text-[var(--text-faint)]">
+                    {" · "}
+                    {t("dashboard.focusSessions", { count: focusToday.count })}
+                  </span>
+                )}
               </div>
               <div
                 role="img"

@@ -1915,7 +1915,8 @@
     "masteredSummary": "已能讲清 {{mastered}} / {{total}} 个知识点",
     "shareWeekly": "周报图",
     "shareWeeklyBusy": "生成中…",
-    "shareWeeklyTitle": "把最近 7 天的学习情况生成一张分享图"
+    "shareWeeklyTitle": "把最近 7 天的学习情况生成一张分享图",
+    "focusSessions": "专注 {{count}} 段"
   },
   "whisperModels": {
     "title": "本地识别模型",
