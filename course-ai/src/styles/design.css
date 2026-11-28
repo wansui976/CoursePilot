@@ -2776,3 +2776,50 @@ button[data-tour="assistant"][data-tucked] {
     transition: none;
   }
 }
+
+/* ===================== 直尺式进度条 ===================== */
+
+/* 刻度贴在轨道上沿往上长：分钟短、每 5 道稍长、章节处最长最亮。画在视频上，用白色透明度分层。 */
+.ca-ruler-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 3px;
+  background: rgb(255 255 255 / 0.32);
+  transform: translateX(-50%);
+}
+
+.ca-ruler-tick--major {
+  height: 5px;
+  background: rgb(255 255 255 / 0.45);
+}
+
+.ca-ruler-tick--chapter {
+  width: 1.5px;
+  height: 8px;
+  background: rgb(255 255 255 / 0.8);
+}
+
+/* 铅笔记号：轨道下沿一道斜划的石墨短线（视频是暗底，铅笔灰提亮一些才看得见）。 */
+.ca-ruler-pencil {
+  position: absolute;
+  top: 0;
+  width: 1.5px;
+  height: 7px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--pencil) 55%, #fff);
+  transform: translateX(-50%) rotate(20deg);
+  transform-origin: 50% 0;
+}
+
+/* 摘录：一道半透明的荧光笔压在轨道上，上下各比轨道多出 3px，两头略斜像笔头。 */
+.ca-ruler-clip {
+  position: absolute;
+  top: 50%;
+  height: 9px;
+  border-radius: 2px 1px;
+  background: var(--marker-strong);
+  opacity: 0.45;
+  transform: translateY(-50%) skewX(-12deg);
+  pointer-events: none;
+}

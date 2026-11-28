@@ -11,6 +11,7 @@ import {
 } from "@/stores/readingFont";
 import { DENSITIES, useDensity } from "@/stores/density";
 import { useHomeLayout, type CourseLibraryStyle, type HomeLayout } from "@/stores/homeLayout";
+import { useLookPrefs, type ProgressStyle, type ReviewStyle } from "@/stores/lookPrefs";
 import { NOTE_PAPERS, useNotePaper, type NoteTabStyle } from "@/stores/notePaper";
 import { WeatherPlaceRow } from "./WeatherPlaceRow";
 import { PaperSwatch } from "./PaperSwatch";
@@ -117,6 +118,10 @@ export function AppearanceSection() {
   const setHomeLayout = useHomeLayout((s) => s.setLayout);
   const deskWindow = useHomeLayout((s) => s.deskWindow);
   const courseStyle = useHomeLayout((s) => s.courseStyle);
+  const progressStyle = useLookPrefs((s) => s.progressStyle);
+  const setProgressStyle = useLookPrefs((s) => s.setProgressStyle);
+  const reviewStyle = useLookPrefs((s) => s.reviewStyle);
+  const setReviewStyle = useLookPrefs((s) => s.setReviewStyle);
   const setCourseStyle = useHomeLayout((s) => s.setCourseStyle);
   const notePaper = useNotePaper((s) => s.paper);
   const setNotePaper = useNotePaper((s) => s.setPaper);
@@ -355,6 +360,28 @@ export function AppearanceSection() {
             ]}
             value={courseStyle}
             onChange={setCourseStyle}
+          />
+        </Row>
+        <Row label={t("settings.appearance.progressStyle")} hint={t("settings.appearance.progressStyleHint")} layout="inline">
+          <Segmented
+            label={t("settings.appearance.progressStyle")}
+            options={[
+              { key: "ruler" as ProgressStyle, label: t("settings.appearance.progressStyleRuler") },
+              { key: "plain" as ProgressStyle, label: t("settings.appearance.progressStylePlain") },
+            ]}
+            value={progressStyle}
+            onChange={setProgressStyle}
+          />
+        </Row>
+        <Row label={t("settings.appearance.reviewStyle")} hint={t("settings.appearance.reviewStyleHint")} layout="inline">
+          <Segmented
+            label={t("settings.appearance.reviewStyle")}
+            options={[
+              { key: "card" as ReviewStyle, label: t("settings.appearance.reviewStyleCard") },
+              { key: "box" as ReviewStyle, label: t("settings.appearance.reviewStyleBox") },
+            ]}
+            value={reviewStyle}
+            onChange={setReviewStyle}
           />
         </Row>
         {homeLayout === "desk" && (

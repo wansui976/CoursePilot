@@ -8,6 +8,10 @@ import type { SkipRange } from "@/lib/silenceSkip";
 import type { HighlightSegment } from "@/lib/types";
 import type { DanmakuEntry } from "@/lib/types";
 import { danmakuHeat, heatAreaPath, heatPeaks } from "@/lib/danmakuHeat";
+import { ipc } from "@/lib/ipc";
+import { qk } from "@/lib/queryKeys";
+import { noteStampTimes, rulerStepMinutes } from "@/lib/noteStamps";
+import { useLookPrefs } from "@/stores/lookPrefs";
 
 const ARROW_SEEK_STEP_MS = 5_000;
 const MIN_PAGE_SEEK_STEP_MS = 10_000;
@@ -20,6 +24,9 @@ const NO_DANMAKU: DanmakuEntry[] = [];
  * 悬停时轨道加粗并露出拖动圆点、从头到指针处浅色预览、指针处始终显示时间；
  * 跳停顿段灰显（这部分播放时会直接跃过）。
  * 传入弹幕时在轨道上方画弹幕热度曲线，高峰处打点、可点击跳转，悬停显示该处弹幕数。
+ *
+ * 「直尺」样式（默认，设置 → 外观可换回素色）：轨道上沿一排刻度——章节处长刻度、分钟短刻度
+ * （每 5 道稍长）；笔记里记过时间的地方在轨道下沿划一道铅笔记号；用户的摘录在轨道上涂荧光黄。
  */
 const NO_HIGHLIGHTS: HighlightSegment[] = [];
 
@@ -66,6 +73,30 @@ export function ProgressBar({
     [chapters, safeDuration],
   );
   const trackMask = useMemo(() => chapterGapMask(chapterGaps), [chapterGaps]);
+  const ruler = useLookPrefs((s) => s.progressStyle) === "ruler";
+  const { data: notes } = useQuery({ ...queries.notes(videoId), enabled: ruler });
+  const { data: clips = [] } = useQuery({
+    queryKey: qk.clips(videoId),
+    queryFn: () => ipc.clips.list(videoId),
+    enabled: ruler,
+  });
+  const noteMarks = useMemo(
+    () =>
+      ruler && safeDuration > 0
+        ? noteStampTimes(notes).filter((ms) => ms <= safeDuration)
+        : [],
+    [ruler, notes, safeDuration],
+  );
+  // 分钟刻度（不含 0 和片尾）：长视频放宽成 5 / 10 分钟一道，免得挤成一片灰。
+  const minuteTicks = useMemo(() => {
+    if (!ruler || safeDuration <= 0) return [];
+    const step = rulerStepMinutes(safeDuration);
+    const ticks: { ms: number; major: boolean }[] = [];
+    for (let minute = step; minute * 60_000 < safeDuration; minute += step) {
+      ticks.push({ ms: minute * 60_000, major: minute % (step * 5) === 0 });
+    }
+    return ticks;
+  }, [ruler, safeDuration]);
 
   const hoverPct = hover?.pct ?? null;
   const hoverMs =
@@ -80,6 +111,10 @@ export function ProgressBar({
   const hoverHighlight =
     hoverMs != null
       ? highlightSegments.find((segment) => segment.start_ms <= hoverMs && hoverMs < segment.end_ms)
+      : undefined;
+  const hoverClip =
+    ruler && hoverMs != null
+      ? clips.find((clip) => clip.start_ms <= hoverMs && hoverMs < clip.end_ms)
       : undefined;
   const hoverDanmakuCount =
     heat && hoverMs != null
@@ -175,6 +210,43 @@ export function ProgressBar({
             <path d={heatPath} fill="currentColor" />
           </svg>
         )}
+        {/* 直尺刻度：贴在轨道上沿往上长，分钟短、每 5 道稍长、章节处最长。 */}
+        {ruler && (
+          <div
+            aria-hidden="true"
+            data-testid="progress-ruler"
+            className="pointer-events-none absolute inset-x-0 bottom-[calc(50%+2px)] h-2"
+          >
+            {minuteTicks.map((tick) => (
+              <span
+                key={`m-${tick.ms}`}
+                className={`ca-ruler-tick${tick.major ? " ca-ruler-tick--major" : ""}`}
+                style={{ left: `${pct(tick.ms)}%` }}
+              />
+            ))}
+            {chapters
+              .filter((chapter) => chapter.start_ms > 0 && chapter.start_ms < safeDuration)
+              .map((chapter) => (
+                <span
+                  key={`c-${chapter.start_ms}`}
+                  className="ca-ruler-tick ca-ruler-tick--chapter"
+                  style={{ left: `${pct(chapter.start_ms)}%` }}
+                />
+              ))}
+          </div>
+        )}
+        {/* 铅笔记号：笔记里记过时间的地方，在轨道下沿斜着划一道。 */}
+        {noteMarks.length > 0 && (
+          <div
+            aria-hidden="true"
+            data-testid="progress-note-marks"
+            className="pointer-events-none absolute inset-x-0 top-[calc(50%+2px)] h-2"
+          >
+            {noteMarks.map((ms) => (
+              <span key={`n-${ms}`} className="ca-ruler-pencil" style={{ left: `${pct(ms)}%` }} />
+            ))}
+          </div>
+        )}
         {/* 视觉轨：3px 细线，悬停加粗成 5px；章节处用遮罩断开。 */}
         <div
           data-chapter-gaps={chapterGaps.length}
@@ -219,6 +291,19 @@ export function ProgressBar({
             />
           ))}
         </div>
+        {/* 摘录：用户自己划的段落，像荧光笔压着轨道涂一道（比轨道粗，播放过的部分也看得出）。 */}
+        {ruler &&
+          clips.map((clip) => (
+            <div
+              key={`clip-${clip.id}`}
+              data-testid="progress-clip"
+              className="ca-ruler-clip"
+              style={{
+                left: `${pct(clip.start_ms)}%`,
+                width: `${Math.max(0.4, pct(clip.end_ms) - pct(clip.start_ms))}%`,
+              }}
+            />
+          ))}
         {/* 拖动圆点：平时收起，悬停 / 键盘聚焦时弹出（触屏常显，见 .ca-progress-thumb）。 */}
         <div
           aria-hidden="true"
@@ -246,6 +331,11 @@ export function ProgressBar({
           >
             {hoverChapter && (
               <span className="max-w-full truncate text-xs font-medium">{hoverChapter.title}</span>
+            )}
+            {hoverClip && (
+              <span className="max-w-full truncate text-xs text-[var(--marker-strong)]">
+                {hoverClip.note.trim() || t("videoPlayer.clipHover")}
+              </span>
             )}
             {hoverHighlight && (
               <span className="max-w-full truncate text-xs text-[var(--marker-strong)]">

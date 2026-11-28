@@ -535,6 +535,22 @@ export const scenes = [
     },
   },
   {
+    // 直尺式进度条：章节长刻度、分钟短刻度、笔记处铅笔记号、摘录涂荧光黄；再拍一张素色的。
+    name: "player-ruler",
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await openVideo(page);
+      const bar = page.getByRole("slider", { name: /进度/ });
+      await bar.hover({ position: { x: 300, y: 8 } });
+      await shot();
+      await page.evaluate(() => localStorage.setItem("course-ai-progress-style", "plain"));
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("slider", { name: /进度/ }).hover({ position: { x: 300, y: 8 } });
+      await shot("plain");
+    },
+  },
+  {
     // 笔记纸张：横线、方格、点阵、米字格。
     name: "notes-paper",
     devices: ["desktop"],

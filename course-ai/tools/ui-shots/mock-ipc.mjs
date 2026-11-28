@@ -148,11 +148,11 @@ export function installMockIpc({ theme, safeArea }) {
         `## ${title}\n\n` +
         (i === 0 ? "![课上截图](note-image:frame1)\n\n" : "") +
         "沿**负梯度**方向迭代更新参数，直到损失不再明显下降。每一步走多远由学习率决定。[00:15]\n\n" +
-        "- 太大：在谷底两侧来回震荡，甚至发散 [00:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [00:45]\n\n" +
+        "- 太大：在谷底两侧来回震荡，甚至发散 [06:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [09:45]\n\n" +
         "> 一句话：蒙着眼下山，每一步朝最陡处迈一小步。",
     ),
   ].join("\n\n");
-  const notes = "# 梯度下降笔记\n\n## 核心思想\n\n沿**负梯度**方向迭代更新参数，直到损失不再明显下降。[00:15]\n\n## 学习率\n\n- 太大：在谷底两侧来回震荡，甚至发散 [00:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [00:45]\n\n> 一句话：蒙着眼下山，每一步朝最陡处迈一小步。";
+  const notes = "# 梯度下降笔记\n\n## 核心思想\n\n沿**负梯度**方向迭代更新参数，直到损失不再明显下降。[02:15]\n\n## 学习率\n\n- 太大：在谷底两侧来回震荡，甚至发散 [06:30]\n- 太小：收敛很慢\n- 实践：常用**学习率衰减** [09:45]\n\n> 一句话：蒙着眼下山，每一步朝最陡处迈一小步。";
 
   // —— 课程知识 ——
   const occ = (vid, title, min, excerpt) => ({ video_id: vid, video_title: title, start_ms: min * 60_000, end_ms: min * 60_000 + 40_000, excerpt });
@@ -774,7 +774,10 @@ export function installMockIpc({ theme, safeArea }) {
     cmd_stale_ai_artifacts: () => [],
     cmd_get_slides: () => [],
     cmd_get_screenshots: () => [],
-    cmd_list_clips: () => [],
+    cmd_list_clips: ({ videoId }) => [
+      { id: 1, video_id: videoId, start_ms: 250_000, end_ms: 300_000, note: "学习率的直观解释", created_at: now - DAY },
+      { id: 2, video_id: videoId, start_ms: 660_000, end_ms: 700_000, note: "", created_at: now - DAY },
+    ],
     cmd_video_skips: () => [],
     // 场景可在 __shot-settings 里放一组设置值（如本地识别选了哪个模型）。
     cmd_get_setting: ({ key }) => {

@@ -5,10 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ProgressBar } from "./ProgressBar";
 import i18n from "@/i18n";
 import { usePlayer } from "@/stores/player";
+import { useLookPrefs } from "@/stores/lookPrefs";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
-    ai: { getChapters: vi.fn() },
+    ai: { getChapters: vi.fn(), getNotes: vi.fn() },
+    clips: { list: vi.fn() },
   },
 }));
 
@@ -33,6 +35,27 @@ describe("ProgressBar", () => {
     await i18n.changeLanguage("zh-CN");
     usePlayer.setState({ currentMs: 0, durationMs: 60_000 });
     mockIpc.ai.getChapters.mockReset().mockResolvedValue([]);
+    mockIpc.ai.getNotes.mockReset().mockResolvedValue(null);
+    mockIpc.clips.list.mockReset().mockResolvedValue([]);
+    useLookPrefs.setState({ progressStyle: "ruler" });
+  });
+
+  it("直尺：分钟刻度、笔记处铅笔记号、摘录涂黄；换成素色就都不画", async () => {
+    usePlayer.setState({ currentMs: 0, durationMs: 10 * 60_000 });
+    mockIpc.ai.getNotes.mockResolvedValue("要点 [02:00]\n再看 [05:30]");
+    mockIpc.clips.list.mockResolvedValue([
+      { id: 1, video_id: "video-1", start_ms: 60_000, end_ms: 120_000, note: "", created_at: 0 },
+    ]);
+    const { container, unmount } = renderProgressBar();
+    expect(container.querySelectorAll(".ca-ruler-tick")).toHaveLength(9);
+    await waitFor(() => expect(container.querySelectorAll(".ca-ruler-pencil")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByTestId("progress-clip")).toHaveStyle({ left: "10%", width: "10%" }));
+    unmount();
+
+    useLookPrefs.setState({ progressStyle: "plain" });
+    const plain = renderProgressBar();
+    expect(plain.container.querySelector("[data-testid='progress-ruler']")).toBeNull();
+    expect(mockIpc.clips.list).toHaveBeenCalledTimes(1);
   });
 
   it("exposes a keyboard-accessible seek slider", () => {
