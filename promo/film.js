@@ -5,13 +5,18 @@ import { Clawd } from './lib/clawd.js';
 import { Scene, camLerp } from './lib/scene.js';
 import { clawdAt, cueTrack } from './lib/track.js';
 import { buildReview } from './scenes/review.js';
+import { buildDesk, DESK, deskChars } from './scenes/desk.js';
+import { buildNotes, NOTE_CHARS } from './scenes/notes.js';
+import { buildDevices, srcScreen, DEV } from './scenes/devices.js';
+import { buildFlow } from './scenes/flow.js';
+import { buildEnding, END_CHARS } from './scenes/ending.js';
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 export async function build(stage, A) {
   const { W, H, portrait } = A;
   const narration = (await (await fetch('script/narration.json')).json()).lines;
-  await loadHanzi('学而时习之论语');
+  await loadHanzi('学而时习之论语' + deskChars() + NOTE_CHARS + END_CHARS);
   const script = await loadLineFont('EMSAllure');
   const plain = await loadLineFont('EMSReadability');
   const allText = narration.map((l) => l.sub).join('') + '学习率过大时，梯度下降会出现什么现象？点按翻面看答案';
@@ -236,6 +241,9 @@ export async function build(stage, A) {
     board3d.style.display = t < 18.6 ? '' : 'none';
     for (const sc of scenes) sc.show(t);
     for (const u of updaters) u(t);
+    const away = 1 - 0.92 * ease.inOut(prog(t, 81.2, 82.0));
+    V.el.style.opacity = away;
+    N.el.style.opacity = away;
     world.style.transform = `translate(${W / 2}px, ${H / 2}px) scale(${c.z}) rotate(${c.r}deg) translate(${-c.cx}px, ${-c.cy}px)`;
 
     // 板面的一道反光，慢慢扫过去。
@@ -317,9 +325,10 @@ export async function build(stage, A) {
     board3d.style.transform = `translateZ(${lift * 260}px) rotateX(${lift * 6}deg) rotateY(${fp * 180}deg)`;
     // 背景从夜里的墙慢慢亮成纸色
     const bgk = ease.inOut(prog(t, FLIP0 + 0.2, FLIP1 + 0.4));
-    stage.style.background = mixColor('#0b0e0d', paper, bgk);
-    vignette.style.opacity = lerp(1, 0.18, bgk);
-    grain.style.opacity = lerp(0.09, 0.05, bgk);
+    const night = ease.inOut(prog(t, 104.85, 105.2));
+    stage.style.background = mixColor('#0b0e0d', paper, bgk * (1 - night));
+    vignette.style.opacity = lerp(1, 0.18, bgk * (1 - night));
+    grain.style.opacity = lerp(0.09, 0.05, bgk * (1 - night));
 
     // Clawd
     updateClawd(t);
@@ -330,7 +339,7 @@ export async function build(stage, A) {
     grain.style.backgroundPosition = `${Math.floor(gr() * 256)}px ${Math.floor(gr() * 256)}px`;
 
     // 开头从黑里浮出来。
-    black.style.opacity = 1 - ease.outCubic(prog(t, 0.0, 1.3));
+    black.style.opacity = Math.max(1 - ease.outCubic(prog(t, 0.0, 1.3)), ease.inOut(prog(t, 119.0, 119.95)));
 
     // 字幕（预览用）
     if (A.subs) {
@@ -345,7 +354,8 @@ export async function build(stage, A) {
 
   function updateClawd(t) {
     if (t < POP) { clawd.update({ opacity: 0 }); return; }
-    if (t >= 18.6) { cclipRect.setAttribute('height', 8000); clawd.update(sceneClawd(t)); return; }
+    if (t >= 18.6) { clawdG.removeAttribute('clip-path'); clawd.update(sceneClawd(t)); return; }
+    clawdG.setAttribute('clip-path', 'url(#aboveLedge)');
     let x = CX0, y = ledgeTop, squash = 0, tilt = 0, blink = 0, look = 0, wave = 0, step = 0, scale = 1, shadow = 1;
     // 从槽后面冒出来
     const up = spring(t - POP, 1.5, 0.45);
@@ -386,7 +396,29 @@ export async function build(stage, A) {
   // ================= 后面的场景 =================
   const zCard = (W / BW) * (portrait ? 0.78 : 0.7);
   const R = new Scene(scenesLayer, { cx: 0, cy: portrait ? -120 : -60, s: 1 / zCard, W, H, name: 'review' }).live(18.6, 37.8);
-  const scenes = [R];
+  // 课桌：右边那格正好是收集册拉远以后的样子。
+  const DL = DESK(portrait);
+  const collR = portrait ? { x: 60, y: 300, w: 960, h: 1360 } : { x: 170, y: 120, w: 1580, h: 860 };
+  const sD = R.s * (collR.w / DL.coll.w);
+  const collW = R.w(collR.x + collR.w / 2, collR.y + collR.h / 2);
+  const D = new Scene(scenesLayer, { cx: collW.x - (DL.coll.x + DL.coll.w / 2 - W / 2) * sD, cy: collW.y - (DL.coll.y + DL.coll.h / 2 - H / 2) * sD, s: sD, W, H, name: 'desk' }).live(35.8, 53.5);
+  scenesLayer.insertBefore(D.el, R.el);
+  // 笔记：正好盖在课桌上摊开的那一讲上。
+  const covW = D.w(DL.cover.x + DL.cover.w / 2, DL.cover.y + DL.cover.h / 2);
+  const N = new Scene(scenesLayer, { cx: covW.x, cy: covW.y, s: (D.s * DL.cover.w) / W, W, H, name: 'notes' }).live(52.1, 66.5);
+  N.live(52.1, 81.5);
+  // 设备：笔记页正好是 Mac（竖屏是 iPhone）的屏幕。
+  const ss = srcScreen(portrait);
+  const sV = (N.s * W) / ss.w;
+  const V = new Scene(scenesLayer, { cx: N.cx - (ss.x + ss.w / 2 - W / 2) * sV, cy: N.cy - (ss.y + ss.h / 2 - H / 2) * sV, s: sV, W, H, name: 'devices' }).live(64.3, 81.5);
+  scenesLayer.insertBefore(V.el, N.el);
+  N.live(52.1, 82.3);
+  V.live(64.3, 82.3);
+  // 导入、搜索、复习资料、提速：和设备同一个位置、同一个比例。
+  const I = new Scene(scenesLayer, { cx: V.cx, cy: V.cy, s: V.s, W, H, name: 'flow' }).live(81.1, 105.8);
+  const phoneR = DEV(portrait).devs.iphone;
+  const E = new Scene(scenesLayer, { cx: I.cx + I.s * W * 1.9, cy: I.cy, s: I.s, W, H, name: 'ending' }).live(104.5, 121);
+  const scenes = [D, R, N, V, I, E];
   const camKeys = [];
   const tracks = [];
   const ctx = {
@@ -395,9 +427,17 @@ export async function build(stage, A) {
     cam: (t, c, e) => camKeys.push({ t, ...c, e }),
     track: (scene, keys, t0, t1) => { tracks.push({ scene, keys, t0, t1 }); cueTrack(keys.slice(1), cue); },
     clawdLanding: () => R.l(CX1, CY1),
-    deskSlot: () => ({ x: 1500, y: 700, w: 340, h: 280 }),
+    D, N, V, I, E, stage, boardTexture,
+    devCamAtPhone: () => V.cam(...DEV(portrait).lanCam),
+    devPhoneRectInI: () => phoneR,
+    devPhoneTopInI: () => ({ x: phoneR.x + phoneR.w / 2, y: phoneR.y }),
+    deskSlot: () => {
+      const a = R.l(D.w(DL.coll.x, DL.coll.y).x, D.w(DL.coll.x, DL.coll.y).y);
+      const b = R.l(D.w(DL.coll.x + DL.coll.w, DL.coll.y + DL.coll.h).x, D.w(DL.coll.x + DL.coll.w, DL.coll.y + DL.coll.h).y);
+      return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+    },
   };
-  const updaters = [buildReview(ctx).update];
+  const updaters = [buildReview(ctx).update, buildDesk(ctx).update, buildNotes(ctx).update, buildDevices(ctx).update, buildFlow(ctx).update, buildEnding(ctx).update];
   camKeys.sort((a, b) => a.t - b.t);
 
   function sceneCamera(t) {

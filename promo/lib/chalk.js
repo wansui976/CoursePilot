@@ -258,3 +258,41 @@ export class Dust {
     ctx.globalAlpha = 1;
   }
 }
+
+/** 一块局部坐标里的粉笔画布：放在 (x, y, w, h)，按 res 倍分辨率；writers 依次画，再盖颗粒。 */
+export class ChalkCanvas {
+  constructor(parent, { x, y, w, h, res = 1.5, grain = true, z = 5 }) {
+    this.x = x; this.y = y; this.w = w; this.h = h; this.res = res;
+    this.c = document.createElement('canvas');
+    this.c.width = Math.round(w * res);
+    this.c.height = Math.round(h * res);
+    Object.assign(this.c.style, { position: 'absolute', left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px', pointerEvents: 'none', zIndex: z });
+    parent.appendChild(this.c);
+    this.ctx = this.c.getContext('2d');
+    this.grain = grain ? grainCanvas(this.c.width, this.c.height, 17) : null;
+    this.writers = [];
+    this.dust = null;
+    this.lastT = null;
+  }
+  /** 局部坐标直接画（画布左上角在 x, y）。 */
+  draw(t, before, after) {
+    const { ctx, res } = this;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.c.width, this.c.height);
+    ctx.setTransform(res, 0, 0, res, -this.x * res, -this.y * res);
+    if (before) before(ctx);
+    for (const w of this.writers) w.draw(ctx, t);
+    if (after) after(ctx);
+    if (this.grain) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(this.grain, 0, 0);
+      ctx.restore();
+    }
+    if (this.dust) {
+      ctx.setTransform(res, 0, 0, res, -this.x * res, -this.y * res);
+      this.dust.draw(ctx, t);
+    }
+  }
+}

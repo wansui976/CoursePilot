@@ -1,0 +1,14 @@
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
+const repo='/home/user/CoursePilot';
+const server=http.createServer((q,r)=>{const p=path.join(repo,decodeURIComponent(new URL(q.url,'http://x').pathname)); if(!fs.existsSync(p)||fs.statSync(p).isDirectory()){r.writeHead(404);return r.end();} r.writeHead(200,{'content-type':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':p.endsWith('.html')?'text/html':'application/octet-stream'}); fs.createReadStream(p).pipe(r);});
+await new Promise(r=>server.listen(0,r));
+const b=await chromium.launch();
+const page=await b.newPage({viewport:{width:1920,height:1080}});
+await page.goto(`http://127.0.0.1:${server.address().port}/promo/index.html`);
+await page.waitForFunction(()=>window.__film&&(window.__film.ready||window.__film.error));
+const out=await page.evaluate((ts)=>ts.map(t=>{window.__film.seek(t); const g=document.querySelector(".world"); const r=g.getBoundingClientRect(); return [t,g.style.transform];}), process.argv.slice(2).map(Number));
+console.log(out.map(x=>x.join(' ')).join('\n'));
+await b.close(); server.close();
