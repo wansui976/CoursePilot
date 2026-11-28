@@ -1,7 +1,8 @@
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { queries } from "@/lib/queries";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { notesCoordinator } from "@/lib/notesCoordinator";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import type { SkipRange } from "@/lib/silenceSkip";
@@ -74,7 +75,21 @@ export function ProgressBar({
   );
   const trackMask = useMemo(() => chapterGapMask(chapterGaps), [chapterGaps]);
   const ruler = useLookPrefs((s) => s.progressStyle) === "ruler";
-  const { data: notes } = useQuery({ ...queries.notes(videoId), enabled: ruler });
+  const queryClient = useQueryClient();
+  const { data: notes } = useQuery({
+    queryKey: qk.noteStamps(videoId),
+    queryFn: () => ipc.ai.getNotes(videoId),
+    enabled: ruler,
+  });
+  // 「记一笔」、改笔记存好之后重读一次，铅笔记号跟着出现 / 消失。
+  useEffect(() => {
+    if (!ruler) return;
+    return notesCoordinator.subscribe(videoId, (state) => {
+      if (state.status === "saved") {
+        void queryClient.invalidateQueries({ queryKey: qk.noteStamps(videoId) });
+      }
+    });
+  }, [ruler, videoId, queryClient]);
   const { data: clips = [] } = useQuery({
     queryKey: qk.clips(videoId),
     queryFn: () => ipc.clips.list(videoId),

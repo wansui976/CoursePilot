@@ -93,14 +93,16 @@ export const scenes = [
   {
     // 课程库样式选「书架」：仪表盘和课桌里的课程都换成一面书架。
     name: "home-shelf",
-    devices: ["desktop"],
+    devices: ["desktop", "tablet"],
     run: async ({ page, shot }) => {
       await page.evaluate(() => {
         localStorage.setItem("__shot-many-courses", "1");
         localStorage.setItem("course-ai-course-shelf", "shelf");
       });
       await page.reload({ waitUntil: "networkidle" });
-      await page.locator(".ca-shelf").first().waitFor();
+      // 竖屏平板的首页是课程列表（CourseSidebar），不摆书架。
+      await page.waitForTimeout(800);
+      if ((await page.locator(".ca-shelf").count()) === 0) return;
       await page.locator(".ca-shelf").first().scrollIntoViewIfNeeded();
       await shot();
       await page.evaluate(() => localStorage.setItem("course-ai-home-layout", "desk"));
@@ -537,7 +539,7 @@ export const scenes = [
   {
     // 直尺式进度条：章节长刻度、分钟短刻度、笔记处铅笔记号、摘录涂荧光黄；再拍一张素色的。
     name: "player-ruler",
-    devices: ["desktop"],
+    devices: ["desktop", "phone"],
     run: async ({ page, shot }) => {
       await openVideo(page);
       const bar = page.getByRole("slider", { name: /进度/ });

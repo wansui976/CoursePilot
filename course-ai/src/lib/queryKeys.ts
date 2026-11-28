@@ -14,6 +14,8 @@ export const qk = {
   courseCovers: () => ["course-covers"] as const,
   weather: (latitude: number, longitude: number) => ["weather", latitude, longitude] as const,
   noteAnnotations: (videoId: string) => ["note-annotations", videoId] as const,
+  /** 进度条直尺上的铅笔记号：单独一份笔记读数，每次笔记存好就重读，不去碰笔记面板自己的缓存。 */
+  noteStamps: (videoId: string) => ["note-stamps", videoId] as const,
   folders: (courseId: string | null) => ["folders", courseId] as const,
   search: {
     all: () => ["course-search"] as const,

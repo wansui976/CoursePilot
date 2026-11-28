@@ -6,10 +6,11 @@ import { ProgressBar } from "./ProgressBar";
 import i18n from "@/i18n";
 import { usePlayer } from "@/stores/player";
 import { useLookPrefs } from "@/stores/lookPrefs";
+import { notesCoordinator } from "@/lib/notesCoordinator";
 
 const { mockIpc } = vi.hoisted(() => ({
   mockIpc: {
-    ai: { getChapters: vi.fn(), getNotes: vi.fn() },
+    ai: { getChapters: vi.fn(), getNotes: vi.fn(), saveNotes: vi.fn() },
     clips: { list: vi.fn() },
   },
 }));
@@ -37,7 +38,25 @@ describe("ProgressBar", () => {
     mockIpc.ai.getChapters.mockReset().mockResolvedValue([]);
     mockIpc.ai.getNotes.mockReset().mockResolvedValue(null);
     mockIpc.clips.list.mockReset().mockResolvedValue([]);
+    mockIpc.ai.saveNotes.mockReset().mockResolvedValue(undefined);
     useLookPrefs.setState({ progressStyle: "ruler" });
+  });
+
+  it("笔记存好后重读时间点，铅笔记号跟着更新", async () => {
+    usePlayer.setState({ currentMs: 0, durationMs: 10 * 60_000 });
+    mockIpc.ai.getNotes.mockResolvedValue("[02:00]");
+    const { container } = renderProgressBar();
+    await waitFor(() => expect(container.querySelectorAll(".ca-ruler-pencil")).toHaveLength(1));
+    const doc = JSON.stringify({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "timestamp", attrs: { ms: 120_000 } }] },
+        { type: "paragraph", content: [{ type: "timestamp", attrs: { ms: 300_000 } }] },
+      ],
+    });
+    mockIpc.ai.getNotes.mockResolvedValue(doc);
+    notesCoordinator.scheduleSave("video-1", doc, 0);
+    await waitFor(() => expect(container.querySelectorAll(".ca-ruler-pencil")).toHaveLength(2));
   });
 
   it("直尺：分钟刻度、笔记处铅笔记号、摘录涂黄；换成素色就都不画", async () => {
