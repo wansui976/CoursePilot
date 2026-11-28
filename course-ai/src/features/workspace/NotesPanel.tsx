@@ -45,7 +45,7 @@ import { insertNoteStamp } from "./notes/insertNoteStamp";
 import { NotesToolbar } from "./notes/NotesToolbar";
 import { TimestampToggle } from "./TimestampToggle";
 import { useTimestampPrefs } from "@/stores/timestampPrefs";
-import { useNotePaper } from "@/stores/notePaper";
+import { loadHandFont, useNotePaper } from "@/stores/notePaper";
 import {
   notesCoordinator,
   type NotesSaveStatus,
@@ -71,6 +71,10 @@ const RESTORE_PIN_MS = 2500;
 export function NotesPanel({ videoId }: { videoId: string }) {
   const { t } = useTranslation();
   const notePaper = useNotePaper((state) => state.paper);
+  const noteFont = useNotePaper((state) => state.font);
+  useEffect(() => {
+    if (noteFont === "hand") void loadHandFont();
+  }, [noteFont]);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const showTimestamps = useTimestampPrefs((s) => s.showTimestamps);
   const qc = useQueryClient();
@@ -699,6 +703,7 @@ export function NotesPanel({ videoId }: { videoId: string }) {
               ref={sheetRef}
               className="ca-paper-sheet"
               data-paper={notePaper}
+              data-font={noteFont}
               data-annotated={annotationCount > 0 ? "" : undefined}
             >
               <EditorContent editor={editor} />

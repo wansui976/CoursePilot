@@ -963,6 +963,10 @@
       "weatherNoResult": "没找到这个地方，换个写法试试。",
       "weatherResults": "搜索结果",
       "noteTabs": "笔记索引标签",
+      "noteFont": "笔记字体",
+      "noteFontHint": "手写用霞鹜文楷，只换笔记正文；第一次选会加载约 4.6MB 字体。",
+      "noteFontSerif": "衬线",
+      "noteFontHand": "手写",
       "noteTabsHint": "长笔记右边缘按小节贴的标签。单色：只有当前小节那张有颜色；彩色：每张一个颜色。",
       "noteTabsPlain": "单色",
       "noteTabsColor": "彩色"

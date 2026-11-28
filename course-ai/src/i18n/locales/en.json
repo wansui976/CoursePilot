@@ -965,6 +965,10 @@
       "weatherNoResult": "No place found. Try another spelling.",
       "weatherResults": "Results",
       "noteTabs": "Note section tabs",
+      "noteFont": "Note font",
+      "noteFontHint": "Handwriting uses LXGW WenKai for the note body only; choosing it the first time loads about 4.6 MB of font.",
+      "noteFontSerif": "Serif",
+      "noteFontHand": "Handwriting",
       "noteTabsHint": "Tabs along the edge of long notes. Plain: only the current section's tab is coloured. Colourful: each tab has its own colour.",
       "noteTabsPlain": "Plain",
       "noteTabsColor": "Colourful"

@@ -553,6 +553,24 @@ export const scenes = [
     },
   },
   {
+    // 笔记手写字（霞鹜文楷），配横线纸。
+    name: "notes-hand",
+    devices: ["desktop", "phone"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => {
+        localStorage.setItem("course-ai-note-font", "hand");
+        localStorage.setItem("course-ai-note-paper", "lined");
+      });
+      await page.reload({ waitUntil: "networkidle" });
+      await openVideo(page);
+      await page.getByRole("tab", { name: /笔记/ }).click();
+      await page.locator(".ca-paper-sheet .tiptap-notes").waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(800);
+      await shot();
+    },
+  },
+  {
     // 笔记纸张：横线、方格、点阵、米字格。
     name: "notes-paper",
     devices: ["desktop"],

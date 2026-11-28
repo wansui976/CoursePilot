@@ -57,6 +57,7 @@
     "i18next": "^26.3.6",
     "katex": "^0.17.0",
     "lucide-react": "^1.17.0",
+    "lxgw-wenkai-screen-webfont": "1.7.0",
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",
     "postcss": "^8.5.15",

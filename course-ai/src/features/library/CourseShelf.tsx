@@ -78,6 +78,7 @@ export function CourseShelf({
           </li>
         );
       })}
+      <li className="ca-shelf-end" aria-hidden="true" />
     </ul>
   );
 }

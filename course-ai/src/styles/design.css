@@ -2637,9 +2637,6 @@ button[data-tour="assistant"][data-tucked] {
   align-items: flex-end;
   column-gap: 2px;
   row-gap: 14px;
-  width: fit-content;
-  min-width: min(100%, 360px);
-  max-width: 100%;
   margin: 0;
   padding: 0 12px 14px;
   list-style: none;
@@ -2679,6 +2676,47 @@ button[data-tour="assistant"][data-tucked] {
   display: flex;
   align-items: flex-end;
   height: 240px;
+}
+
+/* 书挡：最后一本书后面立一块 L 形木书挡（立板 + 往右伸出的一截底脚），书柜撑满一行时
+   书有个收尾，不像随手堆在一角。 */
+.ca-shelf-end {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  width: 34px;
+  height: 240px;
+  /* 抵消书与书之间的 2px 间距：书挡贴着最后一本书立着。 */
+  margin-left: -2px;
+}
+
+.ca-shelf-end::before {
+  content: "";
+  width: 14px;
+  height: 148px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--wood) 55%, #c9a47c),
+    color-mix(in srgb, var(--wood) 80%, #c9a47c) 30%,
+    var(--wood) 70%,
+    var(--wood-dark)
+  );
+  box-shadow:
+    -3px 0 6px rgb(0 0 0 / 0.4),
+    inset 0 1px 0 rgb(255 255 255 / 0.12);
+}
+
+.ca-shelf-end::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 34px;
+  height: 6px;
+  border-radius: 0 2px 0 0;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--wood) 70%, #c9a47c), var(--wood-dark));
+  box-shadow: 2px -1px 3px rgb(0 0 0 / 0.3);
 }
 
 /* 一本精装书：深色布面书脊（课程色压暗），左右两侧压暗出书脊的弧度；上下各一组烫印双线，

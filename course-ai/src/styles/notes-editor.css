@@ -288,3 +288,23 @@
     display: none;
   }
 }
+
+/* 手写字（设置 → 外观 → 笔记字体）：正文和标题都换成霞鹜文楷，像写在本子上。
+   它只有一种字重，标题不加粗（浏览器硬描粗的楷体发糊），靠字号和颜色分层；
+   行高不变，横线纸的线照样落在每行字下。代码、公式、时间戳保留自己的字体。 */
+.ca-paper-sheet[data-font="hand"] .tiptap-notes {
+  font-family: "LXGW WenKai Screen", var(--font-reading);
+  letter-spacing: 0.02em;
+}
+
+.ca-paper-sheet[data-font="hand"] .tiptap-notes :is(h1, h2, h3, h4, strong, b, th) {
+  font-family: "LXGW WenKai Screen", var(--font-display);
+  font-weight: 400;
+}
+
+/* 加粗在手写里改成笔划的一道下划线：楷体没有粗体，描粗了反而糊。 */
+.ca-paper-sheet[data-font="hand"] .tiptap-notes :is(strong, b) {
+  color: var(--text-strong);
+  text-decoration: underline 1.5px var(--text-muted);
+  text-underline-offset: 0.22em;
+}
