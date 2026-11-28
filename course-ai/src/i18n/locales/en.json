@@ -689,7 +689,9 @@
     },
     "subtitleMissingDismiss": "Got it",
     "mdExport": "Transcript Markdown (chapters, timestamps)",
-    "txtExport": "Transcript plain text"
+    "txtExport": "Transcript plain text",
+    "loopSelection": "Loop this",
+    "loopSelectionHint": "Replay the selected lines over and over; clear it in playback settings"
   },
   "notes": {
     "unsaved": "Unsaved",

@@ -3,6 +3,7 @@ import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { usePlaybackTools } from "@/stores/playbackTools";
 import { notesCoordinator } from "@/lib/notesCoordinator";
 import { TranscriptPanel } from "./TranscriptPanel";
 import { useInlineAsk } from "@/stores/inlineAsk";
@@ -170,6 +171,28 @@ describe("TranscriptPanel", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent("已摘到笔记");
     append.mockRestore();
+  });
+
+  it("划选跨两句时「复读这段」从第一句开头循环到最后一句结尾", async () => {
+    usePlaybackTools.setState({ loop: null, kick: 0 });
+    renderTranscriptPanel("loop-selection");
+    const first = await screen.findByText("第 1 句文稿内容");
+    const second = await screen.findByText("第 2 句文稿内容");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: second.firstChild ?? second,
+      focusNode: first.firstChild ?? first,
+      toString: () => "第 1 句文稿内容 第 2 句",
+      getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 100, width: 40, top: 200 }) }),
+      removeAllRanges: () => {},
+    } as unknown as Selection);
+
+    fireEvent.mouseUp(screen.getByLabelText("文稿内容滚动区"));
+    fireEvent.click(await screen.findByRole("button", { name: "复读这段" }));
+    const state = usePlaybackTools.getState();
+    expect(state.kick).toBe(1);
+    expect(state.loop).toMatchObject({ videoId: "video-1", startMs: 1000 });
+    expect(state.loop!.endMs).toBe(2900);
   });
 
   it("offers 问 AI on a selection and dispatches the text with its timestamp", async () => {

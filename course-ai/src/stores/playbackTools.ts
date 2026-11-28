@@ -9,6 +9,9 @@ interface PlaybackToolsState {
   loop: AbLoop | null;
   sleep: SleepTimer | null;
   setLoop: (loop: AbLoop | null) => void;
+  /** 别处（文稿划选）要求马上开始复读：播放器看到 `kick` 变了就跳到起点开播。 */
+  startLoop: (loop: AbLoop) => void;
+  kick: number;
   setSleep: (timer: SleepTimer | null) => void;
 }
 
@@ -16,5 +19,7 @@ export const usePlaybackTools = create<PlaybackToolsState>((set) => ({
   loop: null,
   sleep: null,
   setLoop: (loop) => set({ loop }),
+  kick: 0,
+  startLoop: (loop) => set((state) => ({ loop, kick: state.kick + 1 })),
   setSleep: (sleep) => set({ sleep }),
 }));

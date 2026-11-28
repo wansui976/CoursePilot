@@ -687,7 +687,9 @@
     },
     "subtitleMissingDismiss": "知道了",
     "mdExport": "文稿 Markdown（分章节、带时间）",
-    "txtExport": "文稿纯文本"
+    "txtExport": "文稿纯文本",
+    "loopSelection": "复读这段",
+    "loopSelectionHint": "反复播放选中的这几句，在播放设置里取消"
   },
   "notes": {
     "unsaved": "未保存",

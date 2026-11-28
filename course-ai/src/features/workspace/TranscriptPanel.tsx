@@ -28,6 +28,8 @@ import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { formatMs } from "@/lib/time";
 import { usePlayer } from "@/stores/player";
 import { useInlineAsk } from "@/stores/inlineAsk";
+import { usePlaybackTools } from "@/stores/playbackTools";
+import { MIN_LOOP_MS } from "@/lib/abLoop";
 import type { SubtitleMissing, TranscriptSegment } from "@/lib/types";
 import { findActiveSegmentIndex } from "@/lib/transcript";
 import { TRANSLATION_LANGS, useCaptionPrefs, useTranslationLang } from "@/stores/captionPrefs";
@@ -314,6 +316,8 @@ export function TranscriptPanel({
     text: string;
     startMs: number | null;
     segmentText: string | null;
+    /** 选区覆盖的句子从哪到哪：「复读这段」用。 */
+    loop: { startMs: number; endMs: number } | null;
   } | null>(null);
   // 挖空成卡成功后短暂提示。
   // 划选操作完成后的就地提示（已加入复习 / 已摘到笔记），一会儿自动消失。
@@ -644,6 +648,15 @@ export function TranscriptPanel({
     const index = rowEl ? Number(rowEl.getAttribute("data-row")) : -1;
     const seg = index >= 0 ? rows[index] : undefined;
     const startMs = seg ? seg.start_ms : null;
+    // 选区可能跨好几句（从下往上划也行）：取两头所在句，复读整段。
+    const focusEl =
+      sel.focusNode && sel.focusNode.nodeType === Node.ELEMENT_NODE
+        ? (sel.focusNode as Element)
+        : (sel.focusNode?.parentElement ?? null);
+    const focusRow = focusEl?.closest<HTMLElement>("[data-row]");
+    const focusIndex = focusRow ? Number(focusRow.getAttribute("data-row")) : index;
+    const first = rows[Math.min(index, focusIndex)];
+    const last = rows[Math.max(index, focusIndex)];
     const rect = sel.getRangeAt(0).getBoundingClientRect();
     setAskAnchor({
       left: rect.left + rect.width / 2,
@@ -651,6 +664,7 @@ export function TranscriptPanel({
       text,
       startMs,
       segmentText: seg ? seg.text : null,
+      loop: index >= 0 && first && last ? { startMs: first.start_ms, endMs: last.end_ms } : null,
     });
   }
 
@@ -1021,6 +1035,25 @@ export function TranscriptPanel({
           >
             {t("transcript.quoteToNotes")}
           </Button>
+          {askAnchor.loop && (
+            <Button
+              type="button"
+              size="sm"
+              className="shadow-[var(--shadow-pop)]"
+              title={t("transcript.loopSelectionHint")}
+              onClick={() => {
+                const range = askAnchor.loop!;
+                usePlaybackTools.getState().startLoop({
+                  videoId,
+                  startMs: range.startMs,
+                  endMs: Math.max(range.endMs, range.startMs + MIN_LOOP_MS),
+                });
+                closeAskAnchor();
+              }}
+            >
+              {t("transcript.loopSelection")}
+            </Button>
+          )}
           {/* 仅当所选词落在单个句子内（可挖空）时提供。 */}
           {askAnchor.segmentText?.includes(askAnchor.text) && (
             <Button

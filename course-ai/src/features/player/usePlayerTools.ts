@@ -104,6 +104,20 @@ export function usePlayerTools(
     [videoId, segments, say, describeLoop, videoRef],
   );
 
+  // 文稿里划一段「复读这段」：跳到起点开播。只认挂载之后的请求。
+  const kick = usePlaybackTools((s) => s.kick);
+  const handledKick = useRef(kick);
+  useEffect(() => {
+    if (kick === handledKick.current) return;
+    handledKick.current = kick;
+    const next = usePlaybackTools.getState().loop;
+    const video = videoRef.current;
+    if (!next || next.videoId !== videoId || !video) return;
+    video.currentTime = next.startMs / 1000;
+    if (video.paused) void video.play();
+    say(describeLoop(next));
+  }, [kick, videoId, videoRef, say, describeLoop]);
+
   const applySleep = useCallback(
     (choice: SleepChoice) => {
       const store = usePlaybackTools.getState();
