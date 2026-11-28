@@ -7,6 +7,7 @@
  */
 
 import { splitFollowups } from "./followups";
+import { scratchToMarkdown } from "@/lib/scratch";
 
 export interface SocraticBlock {
   step?: number;
@@ -77,6 +78,10 @@ export function splitSocratic(answer: string): { text: string; block: SocraticBl
 
 /** 给人看的回答正文：引导模式去掉结构块，普通问答去掉追问建议块（复制、存笔记、导出对话都用它）。 */
 export function visibleAnswer(turn: { answer: string; mode?: "socratic" }): string {
+  return scratchToMarkdown(rawVisibleAnswer(turn));
+}
+
+function rawVisibleAnswer(turn: { answer: string; mode?: "socratic" }): string {
   if (turn.mode !== "socratic") {
     // 普通问答去掉末尾的追问建议块；只剩它时宁可给原文，也别复制出空字符串。
     const { text } = splitFollowups(turn.answer);

@@ -47,7 +47,10 @@ const ASSISTANT_SYSTEM: &str = "你是这个课程学习应用里的助手，帮
 9. 讲解课程内容的回答，在最末尾单独附一个追问块，给两三个用户很可能接着问的问题（每个不超过 20 字，\
    用用户的语言，顺着你刚讲的往深处或旁边走，别重复他已经问过的），界面会画成按钮、用户看不到原文：\n\
 ```followups\n[\"问题一\",\"问题二\"]\n```\n\
-   执行操作（打开、跳转、改名、删除、改设置、导入）、闲聊、或者查不到内容时不附。";
+   执行操作（打开、跳转、改名、删除、改设置、导入）、闲聊、或者查不到内容时不附。\
+10. 三步以上的推导、演算、证明或解题过程，把步骤写进一个草稿纸块，界面会画成方格草稿纸：\n\
+```scratch\n每行一步，公式用 $…$\n~~写错的那一步整行用两道波浪线包住表示划掉~~\n下一行重写\n答：最终结果\n```\n\
+   块外只写一两句说明思路，不要把步骤再重复一遍；不用自己编号；最后一行以「答：」开头。";
 
 /// 引导（苏格拉底）模式追加的规矩。
 ///
@@ -964,6 +967,7 @@ mod tests {
     fn plain_answers_end_with_a_followups_block_but_guided_answers_do_not() {
         let plain = system_prompt(false);
         assert!(plain.contains("```followups"));
+        assert!(plain.contains("```scratch"), "多步推导写进草稿纸块");
         assert!(system_prompt(true).contains("引导模式下不附 followups"));
     }
 

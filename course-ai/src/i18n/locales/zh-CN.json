@@ -1315,6 +1315,8 @@
     "retry": "重试",
     "turnFailedAnnouncement": "这一问没答完：{{error}}",
     "followupsLabel": "接着问",
+    "scratch": "草稿纸",
+    "scratchAnswer": "答",
     "generationStopped": "生成已停止",
     "stopping": "正在停止…",
     "answering": "正在作答…",

@@ -1317,6 +1317,8 @@
     "retry": "Retry",
     "turnFailedAnnouncement": "This question didn't finish: {{error}}",
     "followupsLabel": "Ask next",
+    "scratch": "Scratch paper",
+    "scratchAnswer": "Answer",
     "generationStopped": "Generation stopped",
     "stopping": "Stopping…",
     "answering": "Answering…",

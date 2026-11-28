@@ -773,6 +773,32 @@ export const scenes = [
     },
   },
   {
+    // 多步推导画在方格草稿纸上；再拍一张手写字的。
+    name: "assistant-scratch",
+    devices: ["desktop", "phone"],
+    run: async ({ page, shot }) => {
+      for (const font of ["serif", "hand"]) {
+        await page.evaluate((value) => localStorage.setItem("course-ai-note-font", value), font);
+        await page.reload({ waitUntil: "networkidle" });
+        await openVideo(page);
+        // 助手面板开着会被记住：重新载入后已经开着就别再点（再点就关上了）。
+        if (!(await page.getByLabel("对 AI 助手说").isVisible().catch(() => false))) {
+          if (await sidebarShell(page)) {
+            await page.getByRole("button", { name: "切换 AI 助手" }).click();
+          } else {
+            await page.getByRole("button", { name: "打开 AI 助手" }).click();
+          }
+        }
+        await page.getByLabel("对 AI 助手说").fill("推导一下学习率 1.2 时会怎样");
+        await page.getByLabel("发送").click();
+        await page.locator(".ca-scratch").waitFor({ timeout: 4000 });
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(900);
+        await shot(font);
+      }
+    },
+  },
+  {
     // 从视频工作台进设置，再回到视频：设置页上要有明确的回去的路。
     name: "settings-from-video",
     devices: ALL,

@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { ScratchPaper } from "@/ui/ScratchPaper";
 import { CodeBlock } from "@/ui/CodeBlock";
 import { MathText } from "@/ui/MathText";
 import i18n from "@/i18n";
@@ -296,6 +297,14 @@ export function renderMarkdown(
         >
           {blockRich(block.text, onSeek, key, tail)}
         </HeadingTag>
+      );
+    }
+    if (block.kind === "code" && block.lang === "scratch") {
+      return (
+        <Fragment key={key}>
+          <ScratchPaper body={block.text} renderLine={(text, k) => inlineRich(text, onSeek, `${key}-${k}`)} />
+          {tail}
+        </Fragment>
       );
     }
     if (block.kind === "code") {

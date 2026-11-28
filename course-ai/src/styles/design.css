@@ -3203,3 +3203,117 @@ button[data-tour="assistant"][data-tucked] {
   --hole-x: 30px;
   --hole-y: 28px;
 }
+
+/* ===================== 助手：草稿纸 ===================== */
+
+/* 一张方格草稿纸：格距 24px（和行高一致，字落在格里），左边一道淡红竖线是页边。
+   色标位置只写固定像素（色标里写 calc(var()) 在部分 WebKit 上整条渐变失效）。 */
+.ca-scratch {
+  --scratch-line: 24px;
+  position: relative;
+  margin: 12px 0;
+  padding: 12px 16px 14px 52px;
+  border-radius: var(--r-md);
+  background-color: var(--surface-panel);
+  background-image:
+    linear-gradient(to right, transparent 39px, color-mix(in srgb, var(--status-err) 35%, transparent) 39px, color-mix(in srgb, var(--status-err) 35%, transparent) 40px, transparent 40px),
+    linear-gradient(to bottom, transparent 23px, var(--border-faint) 23px),
+    linear-gradient(to right, transparent 23px, var(--border-faint) 23px);
+  background-size: 100% 100%, 24px 24px, 24px 24px;
+  background-position: 0 0, 0 12px, 4px 0;
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  font-family: var(--font-reading);
+  font-size: calc(15px * var(--reading-scale, 1));
+  line-height: var(--scratch-line);
+  color: var(--text-normal);
+}
+
+.ca-scratch[data-font="hand"] {
+  font-family: "LXGW WenKai Screen", var(--font-reading);
+  letter-spacing: 0.02em;
+}
+
+.ca-scratch-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 一步一行：圈号挂在页边线左边，正文从左往右「写」出来。 */
+.ca-scratch-step {
+  position: relative;
+  min-height: var(--scratch-line);
+}
+
+/* 只裁正文不裁圈号：圈号挂在行框外面，跟着裁会被切掉。 */
+.ca-scratch-text {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  animation: ca-scratch-write 0.5s var(--ease-out) both;
+}
+
+.ca-scratch-mark {
+  position: absolute;
+  left: -40px;
+  width: 30px;
+  text-align: right;
+  font-family: var(--font-app);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* 写错又改的一步：一道铅笔斜线划掉，字变淡，留着划痕。 */
+.ca-scratch-step[data-struck] .ca-scratch-text {
+  color: var(--text-faint);
+}
+
+.ca-scratch-step[data-struck] s {
+  text-decoration: none;
+}
+
+/* 划痕画在整行上（公式也划到），微微斜一点，像随手一划。 */
+.ca-scratch-step[data-struck] .ca-scratch-text::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 50%;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--text-muted);
+  transform: rotate(-1.5deg);
+}
+
+/* 答案：像考卷上那样框起来。 */
+.ca-scratch-answer {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 2px 10px;
+  border: 1.5px solid var(--text-strong);
+  border-radius: 3px;
+  color: var(--text-strong);
+  animation: ca-scratch-write 0.5s var(--ease-out) both;
+}
+
+.ca-scratch-answer-label {
+  font-weight: 600;
+}
+
+@keyframes ca-scratch-write {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ca-scratch-text,
+  .ca-scratch-answer {
+    animation: none;
+  }
+}
