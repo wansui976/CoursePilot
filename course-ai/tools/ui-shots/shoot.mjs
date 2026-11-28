@@ -368,9 +368,12 @@ function auditLayout() {
   // 第六类：模板化装饰——装饰性渐变 / 光晕与星星图标（应用的视觉原则：颜色只表达含义）。
   // 进度条、滑块的「已完成 / 未完成」两段是硬分界的纯色，不算装饰，按元素排除。
   // 有含义的渐变（如自定义颜色的色轮）在元素上写 data-allow-gradient 放行。
+  // 设计规范里点了名的实物质感也放行：荧光笔划痕（.ca-mark）、笔记纸张的格线（纸张里的段落）、
+  // 课桌的窗和摊开的笔记本（CLAUDE.md「实物质感只用在固定的几处」）。
   const fillTrack = (el) =>
     el.matches(
-      'input[type="range"], .ca-slider, .course-video-progress, .course-video-volume, [data-allow-gradient]',
+      'input[type="range"], .ca-slider, .course-video-progress, .course-video-volume, [data-allow-gradient], ' +
+        '.ca-mark, .ca-paper-sheet, .ca-paper-sheet *, .ca-desk-window-bars, .ca-notebook-page',
     );
   for (const el of document.querySelectorAll("body *")) {
     const rect = el.getBoundingClientRect();

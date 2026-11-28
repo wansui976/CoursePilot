@@ -1609,7 +1609,9 @@ button.ca-time:hover {
 }
 
 .ca-grade-interval {
-  font-family: var(--font-mono);
+  /* 「1 分钟」「2 天」：等宽字体里空格占一整个字宽，看着像空了两格。数字等宽、字体随界面。 */
+  font-family: var(--font-app);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ===================== 记忆曲线 ===================== */

@@ -160,7 +160,7 @@ const TranscriptRow = memo(function TranscriptRow({
               onSeek(segment.start_ms);
             }
           }}
-          className="ca-transcript-text ca-prose block w-full cursor-pointer select-text px-2 py-1 text-left text-sm leading-relaxed"
+          className="ca-transcript-text ca-prose w-full cursor-pointer select-text px-2 py-1 text-left text-sm leading-relaxed"
         >
           <span className="ca-tr-time">{formatMs(segment.start_ms)}</span>
           {/* 外层是网格里的一格（块级），高亮要画在里面这层行内元素上，才会每一行各画一条。 */}

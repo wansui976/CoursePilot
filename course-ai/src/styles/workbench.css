@@ -676,8 +676,10 @@ li[data-active] > .ca-chapter .ca-chapter-time {
 
 /* 正文上面压着右下角悬浮操作条的面板（笔记）：底部留出操作条的高度，滚到底时最后一行
    露在它上面。手机上按钮是 44px 触控尺寸，操作条顶边离底约 62px，再让开手势条。 */
+/* 底部留白给手机上浮在右下角的助手球让位置。桌面侧栏布局没有浮球（笔记操作也早已
+   收进格式条），留 5rem 只会让纸张下面空出一条，像没铺满。 */
 .ca-panel-actions-clearance {
-  padding-bottom: 5rem;
+  padding-bottom: 1rem;
 }
 
 .ca-app[data-shell="stacked"] .ca-panel-actions-clearance {

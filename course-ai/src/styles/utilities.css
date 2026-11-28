@@ -301,6 +301,17 @@
   flex-grow: 3;
 }
 
+/* 手机竖屏：卡片底部对齐，钉在离底边 12% 处。「显示答案」和评分按钮落在拇指够得着的
+   同一处；翻面时卡片往上长，按钮不跟着跳。宽屏照旧放在视觉中心。 */
+@media (max-width: 640px) and (orientation: portrait) {
+  .ca-review-center::before {
+    flex: 1 1 0;
+  }
+  .ca-review-center::after {
+    flex: 0 0 12vh;
+  }
+}
+
 /* 阅读区：笔记、摘要、复习卡片等「读」的内容用衬线与更松的行距（参考 Apple 图书 / Readwise）。
    界面控件不挂这个类。 */
 .ca-reading {
