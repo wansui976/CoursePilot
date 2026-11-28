@@ -2790,7 +2790,8 @@
       "focusStart": "开始专注计时",
       "focusStop": "停止专注计时",
       "recycle": "回收站",
-      "settings": "设置"
+      "settings": "设置",
+      "shortcuts": "键盘快捷键"
     }
   },
   "focusTimer": {
@@ -2834,5 +2835,18 @@
     "todayShort": "今天",
     "allWatched": "都看完了，接着复习",
     "planLine": "还有 {{remaining}} 讲没看 · 每天约 {{perDay}} 讲，考前一天留给复习"
+  },
+  "shortcutHelp": {
+    "title": "键盘快捷键",
+    "playback": "看视频时",
+    "global": "任何地方",
+    "review": "复习卡",
+    "palette": "搜索课程、视频和功能",
+    "assistant": "打开 / 收起 AI 助手",
+    "help": "这张速查表",
+    "reveal": "翻到答案",
+    "grade": "重来 / 困难 / 良好 / 容易",
+    "choose": "选择题选项",
+    "customize": "在设置里改键位"
   }
 }

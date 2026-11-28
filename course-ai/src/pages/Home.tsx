@@ -54,6 +54,7 @@ import { ShellContext, type KnowledgeReturnState, type Shell } from "@/app/shell
 import { MAIN_VIEW_COMPONENTS } from "@/app/mainViews";
 import { useAndroidBack, useTransientDismissal } from "@/features/shell/systemBack";
 import { CommandPalette } from "@/features/shell/CommandPalette";
+import { ShortcutHelp } from "@/features/shell/ShortcutHelp";
 import { useFocusTicker } from "@/features/shell/useFocusTicker";
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
@@ -758,6 +759,7 @@ export function Home() {
         />
       )}
       {!isPhoneDevice && <CommandPalette nav={shellNav} />}
+      {!isPhoneDevice && <ShortcutHelp />}
       <TaskCompletionNotices
         isWatching={isWatchingTask}
         onOpenTask={openTask}

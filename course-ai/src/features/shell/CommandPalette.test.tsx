@@ -111,7 +111,7 @@ describe("CommandPalette", () => {
     const { shell } = renderPalette();
     const input = openPalette();
     fireEvent.change(input, { target: { value: "快捷键" } });
-    fireEvent.click(await screen.findByRole("option", { name: /快捷键/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /^快捷键设置/ }));
     await waitFor(() => expect(shell.openSettingsCategory).toHaveBeenCalledWith("shortcuts"));
   });
 });

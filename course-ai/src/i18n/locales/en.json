@@ -2806,7 +2806,8 @@
       "focusStart": "Start focus timer",
       "focusStop": "Stop focus timer",
       "recycle": "Trash",
-      "settings": "Settings"
+      "settings": "Settings",
+      "shortcuts": "Keyboard shortcuts"
     }
   },
   "focusTimer": {
@@ -2852,5 +2853,18 @@
     "todayShort": "today",
     "allWatched": "All watched — keep reviewing",
     "planLine": "{{remaining}} lectures to go · ~{{perDay}} a day, last day saved for review"
+  },
+  "shortcutHelp": {
+    "title": "Keyboard shortcuts",
+    "playback": "While watching",
+    "global": "Anywhere",
+    "review": "Review cards",
+    "palette": "Search courses, videos and actions",
+    "assistant": "Toggle the AI assistant",
+    "help": "This cheat sheet",
+    "reveal": "Show the answer",
+    "grade": "Again / Hard / Good / Easy",
+    "choose": "Pick a choice option",
+    "customize": "Change keys in Settings"
   }
 }

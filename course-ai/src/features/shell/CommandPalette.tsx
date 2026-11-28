@@ -3,6 +3,7 @@ import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   Clock,
+  Keyboard,
   ClipboardList,
   CornerDownLeft,
   LayoutDashboard,
@@ -31,6 +32,7 @@ import { useFocusTimer } from "@/stores/focusTimer";
 import { useStudyNav } from "@/stores/studyNav";
 import type { StudyTarget } from "@/lib/backgroundTasks";
 import type { ShellNav } from "./shellNav";
+import { SHORTCUT_HELP_EVENT } from "./ShortcutHelp";
 
 type Entry = PaletteEntry & { icon: LucideIcon; run: () => void };
 
@@ -133,6 +135,9 @@ function PaletteDialog({ nav, onClose }: { nav: ShellNav; onClose: () => void })
       },
       ["pomodoro", "focus", "番茄"],
     );
+    page("shortcuts", Keyboard, t("palette.page.shortcuts"), () => {
+      window.dispatchEvent(new Event(SHORTCUT_HELP_EVENT));
+    }, ["keyboard", "shortcuts", "hotkeys", "?"]);
     page("recycle", Trash2, t("palette.page.recycle"), nav.onOpenRecycleBin, ["trash"]);
     page("settings", Settings, t("palette.page.settings"), nav.onOpenSettings, ["settings", "preferences"]);
 
