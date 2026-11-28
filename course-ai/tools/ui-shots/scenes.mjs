@@ -966,6 +966,25 @@ export const scenes = [
     },
   },
   {
+    // 卡片盒样式：底下一只按到期分五格的索引卡盒；评完分卡片飞进对应的格子。
+    name: "review-box",
+    devices: ALL,
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("course-ai-review-style", "box"));
+      await page.reload({ waitUntil: "networkidle" });
+      await nav(page, "学习面板", "学习");
+      await page.getByRole("button", { name: "开始复习" }).first().click();
+      await page.locator(".ca-cardbox").waitFor();
+      await shot();
+      await page.getByRole("button", { name: /显示答案/ }).first().click();
+      await page.waitForTimeout(600);
+      await shot("answer");
+      await page.locator(".ca-grade[data-grade='3']").click();
+      await page.waitForTimeout(120);
+      await shot("filing");
+    },
+  },
+  {
     // 复习卡「回看出处」跳到视频，再从视频返回：应回到学习面板、接着复习。
     name: "review-source",
     devices: ["desktop"],

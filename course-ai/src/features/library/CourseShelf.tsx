@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { COURSE_COLORS, type Course } from "@/lib/types";
 import { stableIndex } from "@/lib/coverKind";
+import { spineWidth } from "@/lib/shelf";
 
 /**
  * 课程库的「书架」摆法（设置 → 外观 → 课程库样式）：每门课是一本竖着插在架上的书。
@@ -10,11 +11,6 @@ import { stableIndex } from "@/lib/coverKind";
  * （和封面上的丝带、粉笔灰一样，用户不要装饰）。书脊上课程名逐字直立堆叠，底下写讲数。
  * 书一多就自动换到下一层，每层下面一块搁板。
  */
-
-/** 书脊厚度（px）：按讲数取平方根铺开，1 讲也看得清名字，40 讲也不会宽成一块砖。 */
-export function spineWidth(lectures: number): number {
-  return Math.round(Math.min(88, 24 + Math.sqrt(Math.max(0, lectures)) * 9.5));
-}
 
 /** 书脊高度：同一门课每次一样，各本之间差一点，摆在一起才像书。 */
 function spineHeight(course: Course): number {

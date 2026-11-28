@@ -87,9 +87,9 @@ use crate::commands::slides::{
     cmd_extract_slides, cmd_get_screenshots, cmd_get_slides, cmd_ocr_slides, cmd_read_slide_image,
 };
 use crate::commands::srs::{
-    cmd_add_card, cmd_concept_due_counts, cmd_count_due, cmd_due_by_course, cmd_due_cards,
-    cmd_due_cards_by_concept, cmd_generate_cards, cmd_generate_cards_for_concept, cmd_review_card,
-    cmd_weak_concepts,
+    cmd_add_card, cmd_card_box, cmd_concept_due_counts, cmd_count_due, cmd_due_by_course,
+    cmd_due_cards, cmd_due_cards_by_concept, cmd_generate_cards, cmd_generate_cards_for_concept,
+    cmd_review_card, cmd_weak_concepts,
 };
 use crate::commands::stats::{
     cmd_continue_learning, cmd_course_totals, cmd_course_video_ids, cmd_daily_totals,
@@ -529,6 +529,7 @@ pub fn run() {
             cmd_generate_cards_for_concept,
             cmd_due_cards,
             cmd_count_due,
+            cmd_card_box,
             cmd_review_card,
             cmd_concept_due_counts,
             cmd_due_cards_by_concept,

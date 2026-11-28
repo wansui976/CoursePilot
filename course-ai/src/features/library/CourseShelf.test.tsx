@@ -3,7 +3,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "@/i18n";
 import type { Course } from "@/lib/types";
-import { CourseShelf, spineWidth } from "./CourseShelf";
+import { CourseShelf } from "./CourseShelf";
+import { spineWidth } from "@/lib/shelf";
 
 const course = (id: string, name: string, count: number): Course =>
   ({ id, name, video_count: count, color: null }) as unknown as Course;

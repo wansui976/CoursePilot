@@ -47,6 +47,8 @@ export const srs = {
     invoke("cmd_add_card", { videoId, kind, front, back, sourceMs }),
   // 到期待复习卡（跨课程）。
   due: (limit: number): Promise<DueCard[]> => invoke("cmd_due_cards", { limit }),
+  // 卡片盒五格的卡数：今天 / 明天 / 一周内 / 一个月内 / 更久（按下次到期离现在多远）。
+  cardBox: (): Promise<number[]> => invoke("cmd_card_box"),
   // 今日待复习张数。
   countDue: (): Promise<number> => invoke("cmd_count_due"),
   // 复习评分：1=重来 2=困难 3=良好 4=容易。

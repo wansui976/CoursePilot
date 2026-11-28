@@ -71,6 +71,8 @@ export const qk = {
     nextDue: () => ["srs-next-due"] as const,
     dueByCourse: () => ["srs-due-by-course"] as const,
     cardMarks: (videoId: string) => ["srs-card-marks", videoId] as const,
+    /** 卡片盒各格卡数（复习的卡片盒样式）。 */
+    cardBox: () => ["srs-card-box"] as const,
     cardHistory: (cardId: string) => ["srs-card-history", cardId] as const,
     mistakes: (courseId: string | null) => ["srs-mistakes", courseId] as const,
     conceptMastery: (courseId: string) => ["srs-concept-mastery", courseId] as const,

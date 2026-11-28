@@ -14,6 +14,9 @@ import { MathText } from "@/ui/MathText";
 import { renderInlineMarkdown } from "@/lib/renderMarkdown";
 import { MemoryCurve } from "./MemoryCurve";
 import { useSwipeCard } from "./useSwipeCard";
+import { CardBox } from "./CardBox";
+import { cardBoxSlot } from "@/lib/cardBox";
+import { useLookPrefs } from "@/stores/lookPrefs";
 
 /** 评完分甩出去的时长（与 design.css 的 ca-toss 一致）。 */
 const TOSS_MS = 320;
@@ -122,6 +125,17 @@ export function ReviewSession({
   /** 评完分的这张正被甩向右边（做完的那摞），动画结束才换下一张。 */
   const [tossing, setTossing] = useState(false);
   const [showCurve, setShowCurve] = useState(false);
+  // 卡片盒样式：评完分卡片飞进对应的格子（flight 是相对卡片自身的位移），落下的那格亮一下。
+  const boxStyle = useLookPrefs((s) => s.reviewStyle) === "box";
+  const { data: boxCounts } = useQuery({
+    queryKey: qk.srs.cardBox(),
+    queryFn: () => ipc.srs.cardBox(),
+    enabled: boxStyle,
+  });
+  const boxRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [flight, setFlight] = useState<{ x: number; y: number } | null>(null);
+  const [landed, setLanded] = useState<number | null>(null);
   // 手机上：翻面后左滑「重来」、右滑「良好」（困难 / 容易仍用按钮）。
   const swipe = useSwipeCard({
     enabled: revealed && !tossing,
@@ -160,14 +174,24 @@ export function ReviewSession({
         queryClient.invalidateQueries({ queryKey: qk.srs.conceptDue.all() }),
         queryClient.invalidateQueries({ queryKey: qk.weakConcepts() }),
         queryClient.invalidateQueries({ queryKey: ["srs-mistakes"] }),
+        queryClient.invalidateQueries({ queryKey: qk.srs.cardBox() }),
       ]);
       // 不论评几分都往右甩：放到「做完的那摞」上。等级只看按钮，不看方向。
       haptic(rating === 1 ? "warning" : "tick");
+      const interval = card.preview_ms?.[rating - 1];
+      const slot = boxStyle && interval != null ? cardBoxSlot(interval) : null;
+      const target = slot != null ? fileTarget(slot) : null;
       if (!prefersReducedMotion()) {
         playSound("flip");
-        setTossing(true);
+        if (target) setFlight(target);
+        else setTossing(true);
         await new Promise((resolve) => window.setTimeout(resolve, TOSS_MS));
       }
+      if (slot != null) {
+        setLanded(slot);
+        window.setTimeout(() => setLanded((current) => (current === slot ? null : current)), 700);
+      }
+      setFlight(null);
       setTossing(false);
       setRevealed(false);
       selectedOptionsRef.current = [];
@@ -178,6 +202,19 @@ export function ReviewSession({
     } finally {
       gradingRef.current = false;
     }
+  }
+
+  /** 卡片中心到卡片盒某一格的位移（px），盒子不在屏上就不飞。 */
+  function fileTarget(slot: number): { x: number; y: number } | null {
+    const well = boxRef.current?.querySelector(`[data-slot="${slot}"] .ca-cardbox-well`);
+    const cardEl = cardRef.current;
+    if (!well || !cardEl) return null;
+    const to = well.getBoundingClientRect();
+    const from = cardEl.getBoundingClientRect();
+    return {
+      x: to.left + to.width / 2 - (from.left + from.width / 2),
+      y: to.top + to.height / 2 - (from.top + from.height / 2),
+    };
   }
 
   function selectOption(option: string) {
@@ -363,15 +400,19 @@ export function ReviewSession({
               ))}
             <div
               key={card.id}
-              // 一张纸卡：翻面时绕竖轴转一下，评完分甩向右边。
+              ref={cardRef}
+              // 一张纸卡：翻面时绕竖轴转一下，评完分甩向右边（卡片盒样式下飞进对应的格子）。
               className="ca-review-card ca-card-enter"
               data-revealed={revealed ? "" : undefined}
               data-tossing={tossing ? "" : undefined}
+              data-filing={flight ? "" : undefined}
               data-dragging={swipe.dx !== 0 ? "" : undefined}
               style={
-                swipe.dx !== 0
-                  ? { transform: `translateX(${swipe.dx}px) rotate(${swipe.dx / 18}deg)` }
-                  : undefined
+                flight
+                  ? ({ "--fly-x": `${flight.x}px`, "--fly-y": `${flight.y}px` } as React.CSSProperties)
+                  : swipe.dx !== 0
+                    ? { transform: `translateX(${swipe.dx}px) rotate(${swipe.dx / 18}deg)` }
+                    : undefined
               }
               {...swipe.handlers}
             >
@@ -570,6 +611,11 @@ export function ReviewSession({
           </div>
         </div>
       </div>
+      {boxStyle && boxCounts && (
+        <div className="ca-cardbox-dock">
+          <CardBox ref={boxRef} counts={boxCounts} landed={landed} />
+        </div>
+      )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

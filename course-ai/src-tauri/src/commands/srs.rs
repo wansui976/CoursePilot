@@ -920,6 +920,47 @@ pub async fn count_due(db: &Db, now: i64) -> AppResult<i64> {
     .await?)
 }
 
+/// 卡片盒各格的卡数（复习的「卡片盒」样式）：按下次到期离现在多远分成五格——
+/// 今天（已到期或一天内）、明天（两天内）、一周内、一个月内、更久。回收站里的卡不算。
+pub const CARD_BOX_BOUNDS_MS: [i64; 4] = [DAY_MS, 2 * DAY_MS, 7 * DAY_MS, 30 * DAY_MS];
+
+pub async fn card_box_counts(db: &Db, now: i64) -> AppResult<Vec<i64>> {
+    let [d1, d2, d7, d30] = CARD_BOX_BOUNDS_MS;
+    let row: (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT
+           COALESCE(SUM(CASE WHEN s.due_at - ? <= ? THEN 1 ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN s.due_at - ? > ? AND s.due_at - ? <= ? THEN 1 ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN s.due_at - ? > ? AND s.due_at - ? <= ? THEN 1 ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN s.due_at - ? > ? AND s.due_at - ? <= ? THEN 1 ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN s.due_at - ? > ? THEN 1 ELSE 0 END), 0)
+         FROM card_schedule s JOIN cards c ON c.id = s.card_id
+         LEFT JOIN videos v ON v.id = c.video_id
+         LEFT JOIN courses course ON course.id = COALESCE(v.course_id, c.course_id)
+         WHERE (c.video_id IS NULL OR (v.id IS NOT NULL AND v.deleted_at IS NULL))
+           AND (COALESCE(v.course_id, c.course_id) IS NULL
+                OR (course.id IS NOT NULL AND course.deleted_at IS NULL))",
+    )
+    .bind(now)
+    .bind(d1)
+    .bind(now)
+    .bind(d1)
+    .bind(now)
+    .bind(d2)
+    .bind(now)
+    .bind(d2)
+    .bind(now)
+    .bind(d7)
+    .bind(now)
+    .bind(d7)
+    .bind(now)
+    .bind(d30)
+    .bind(now)
+    .bind(d30)
+    .fetch_one(&db.pool)
+    .await?;
+    Ok(vec![row.0, row.1, row.2, row.3, row.4])
+}
+
 /// 每门课的到期待复习卡数（供仪表盘课程卡「待复习」徽章）。只含有到期卡的课程。
 pub async fn due_by_course(db: &Db, now: i64) -> AppResult<Vec<(String, i64)>> {
     Ok(sqlx::query_as(
@@ -1076,6 +1117,11 @@ pub async fn cmd_generate_cards_for_concept(
 #[tauri::command]
 pub async fn cmd_due_cards(state: State<'_, AppState>, limit: i64) -> AppResult<Vec<DueCard>> {
     due_cards(&state.db, chrono::Utc::now().timestamp_millis(), limit).await
+}
+
+#[tauri::command]
+pub async fn cmd_card_box(state: State<'_, AppState>) -> AppResult<Vec<i64>> {
+    card_box_counts(&state.db, chrono::Utc::now().timestamp_millis()).await
 }
 
 #[tauri::command]
@@ -1665,6 +1711,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(cards, 0);
+    }
+
+    #[tokio::test]
+    async fn card_box_counts_split_cards_by_next_due() {
+        let db = fresh_db().await;
+        let vid = seed_quiz(
+            &db,
+            r#"[{"stem":"Q1","answer":"A"},{"stem":"Q2","answer":"A"},{"stem":"Q3","answer":"A"}]"#,
+        )
+        .await;
+        generate_cards_from_quiz(&db, &vid).await.unwrap();
+        let now = chrono::Utc::now().timestamp_millis() + 1_000;
+        assert_eq!(
+            card_box_counts(&db, now).await.unwrap(),
+            vec![3, 0, 0, 0, 0]
+        );
+
+        for (stem, offset) in [("Q2", 36 * 3_600_000i64), ("Q3", 40 * DAY_MS)] {
+            sqlx::query("UPDATE card_schedule SET due_at=? WHERE card_id=?")
+                .bind(now + offset)
+                .bind(quiz_card_id(&vid, stem))
+                .execute(&db.pool)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            card_box_counts(&db, now).await.unwrap(),
+            vec![1, 1, 0, 0, 1]
+        );
+
+        sqlx::query("UPDATE videos SET deleted_at=1 WHERE id=?")
+            .bind(&vid)
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            card_box_counts(&db, now).await.unwrap(),
+            vec![0, 0, 0, 0, 0]
+        );
     }
 
     #[tokio::test]
