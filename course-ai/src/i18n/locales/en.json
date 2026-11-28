@@ -2810,5 +2810,29 @@
     "focusDoneStopped": "Session {{count}} today — take a break.",
     "breakDoneTitle": "Break's over",
     "breakDoneBody": "Ready for the next focus session."
+  },
+  "exam": {
+    "menu": "Exam date…",
+    "dialogTitle": "Exam date",
+    "dialogDescription": "“{{course}}”: the course page and study dashboard will count down and work out how many lectures to watch each day.",
+    "defaultName": "Exam",
+    "name": "Name",
+    "date": "Date",
+    "inPast": "That day has passed",
+    "today": "That's today",
+    "daysLeft_one": "{{count}} day left",
+    "daysLeft_other": "{{count}} days left",
+    "clear": "Clear",
+    "save": "Save",
+    "edit": "Change exam date",
+    "countdown_one": "{{name}} in {{count}} day",
+    "countdown_other": "{{name}} in {{count}} days",
+    "todayNamed": "{{name}} today",
+    "perDay": "~{{count}} lectures a day",
+    "sectionTitle": "Upcoming exams",
+    "daysUnit": "days",
+    "todayShort": "today",
+    "allWatched": "All watched — keep reviewing",
+    "planLine": "{{remaining}} lectures to go · ~{{perDay}} a day, last day saved for review"
   }
 }

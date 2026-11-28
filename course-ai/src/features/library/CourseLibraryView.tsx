@@ -70,6 +70,7 @@ import { FolderItem, SelectMark } from "./FolderItem";
 import { MoveDialog, type MoveTarget } from "./MoveDialog";
 import { DroppableCrumb, LibraryDnd } from "./LibraryDnd";
 import { SearchResults } from "./SearchResults";
+import { ExamCountdown, ExamDialog } from "./ExamDialog";
 import {
   childFolders,
   childVideos,
@@ -271,6 +272,7 @@ export function CourseLibraryView({
   // 网格卡片密度（舒适/紧凑）：只影响网格列宽，切到列表视图无意义但保留记忆。
   const [gridDensity, setGridDensity] = useState<GridDensity>(readGridDensity);
   const [openMenuVideoId, setOpenMenuVideoId] = useState<string | null>(null);
+  const [editingExam, setEditingExam] = useState(false);
   const [renamingVideo, setRenamingVideo] = useState<{
     id: string;
     title: string;
@@ -1459,6 +1461,15 @@ export function CourseLibraryView({
                           <i style={{ width: `${(watchedCount / videos.length) * 100}%` }} />
                         </span>
                       </>
+                    )}
+                    <ExamCountdown
+                      courseId={selectedCourse.id}
+                      total={videos.length}
+                      watched={watchedCount}
+                      onEdit={() => setEditingExam(true)}
+                    />
+                    {editingExam && (
+                      <ExamDialog course={selectedCourse} onClose={() => setEditingExam(false)} />
                     )}
                   </>
                 ) : (

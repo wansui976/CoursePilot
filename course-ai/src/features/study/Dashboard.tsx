@@ -25,6 +25,7 @@ import { buildWeeklyReport } from "@/lib/shareCard/weekly";
 import { saveShareCard, useShareCardLabels } from "@/features/workspace/useShareCard";
 import { DailyGoalDialog } from "./DailyGoalDialog";
 import { ReviewSession } from "./ReviewSession";
+import { ExamsSection } from "./ExamsSection";
 import { MistakeDeck } from "./MistakeDeck";
 import {
   computeStreak,
@@ -722,6 +723,8 @@ export function Dashboard({
               </span>
             </section>
           )}
+
+          <ExamsSection onOpenCourse={onOpenCourse} />
 
           <MistakeDeck onReview={() => setReviewingMistakes(true)} />
 

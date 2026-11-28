@@ -2794,5 +2794,27 @@
     "focusDoneStopped": "今天第 {{count}} 段，歇一会儿再继续。",
     "breakDoneTitle": "休息结束",
     "breakDoneBody": "可以开始下一段专注了。"
+  },
+  "exam": {
+    "menu": "考试日期…",
+    "dialogTitle": "考试日期",
+    "dialogDescription": "「{{course}}」：设好后课程页和学习面板会倒数，并按还没看的讲数排出每天要看几讲。",
+    "defaultName": "考试",
+    "name": "名称",
+    "date": "日期",
+    "inPast": "这一天已经过去了",
+    "today": "就是今天",
+    "daysLeft": "还有 {{count}} 天",
+    "clear": "清除",
+    "save": "保存",
+    "edit": "改考试日期",
+    "countdown": "距{{name}} {{count}} 天",
+    "todayNamed": "今天{{name}}",
+    "perDay": "每天约 {{count}} 讲",
+    "sectionTitle": "考试倒计时",
+    "daysUnit": "天",
+    "todayShort": "今天",
+    "allWatched": "都看完了，接着复习",
+    "planLine": "还有 {{remaining}} 讲没看 · 每天约 {{perDay}} 讲，考前一天留给复习"
   }
 }
