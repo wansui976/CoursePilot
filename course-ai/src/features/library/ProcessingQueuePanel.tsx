@@ -116,15 +116,16 @@ export function ProcessingQueuePanel({
         backLabel={t("home.queueBack")}
         actions={
           <>
-            {/* 批量操作：有运行/排队中的任务时「全部取消」，有失败任务时「全部重试」。 */}
+            {/* 批量操作：有运行/排队中的任务时「全部取消」，有失败任务时「全部重试」。
+                和学习面板的「周报图」一样是页头里的轻按钮（无边框），不和标题抢分量。 */}
             {hasCancellable && (
-              <Button variant="outline" size="sm" onClick={onCancelAll} className="ca-touch-44">
+              <Button variant="ghost" size="sm" onClick={onCancelAll} className="ca-touch-44">
                 <X className="h-3.5 w-3.5" />
                 {t("home.cancelAll")}
               </Button>
             )}
             {hasFailed && (
-              <Button variant="outline" size="sm" onClick={onRetryAll} className="ca-touch-44">
+              <Button variant="ghost" size="sm" onClick={onRetryAll} className="ca-touch-44">
                 <RotateCcw className="h-3.5 w-3.5" />
                 {t("home.retryAll")}
               </Button>

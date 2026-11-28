@@ -270,6 +270,19 @@ button.ca-time:hover {
   text-decoration-color: currentColor;
 }
 
+/* 窄（手机竖屏、窄面板）时操作换到正文下面一行、靠右，不再把正文挤成半宽、
+   一句话折成四行。正文至少要 14 个字宽，放不下就让操作自己换行。 */
+.ca-callout {
+  flex-wrap: wrap;
+}
+.ca-callout > :not(.ca-callout-icon):not(.ca-callout-act) {
+  flex: 1 1 14em;
+  min-width: 0;
+}
+.ca-callout > .ca-callout-act {
+  margin-left: auto;
+}
+
 .ca-callout-act > svg {
   width: 12px;
   height: 12px;
@@ -1702,9 +1715,27 @@ button.ca-time:hover {
 }
 
 .ca-mistakes-count {
-  font-family: var(--font-mono);
+  /* 等宽字体里的空格有一个字宽，「2 张」看着像「2  张」：数字用表格数字，字体随界面。 */
+  font-family: var(--font-app);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   color: var(--status-err);
+}
+
+/* 学习面板里的错题本：标题和「继续学习」「薄弱主题」一样是小号灰字小节名，张数紧跟在后面，
+   不再是课桌上那种衬线大标题、张数顶到卡片右缘。 */
+.ca-mistakes--section .ca-mistakes-head {
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 8px;
+  max-width: none;
+}
+.ca-mistakes--section .ca-mistakes-head h3 {
+  font-family: var(--font-app);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  color: var(--text-muted);
 }
 
 .ca-mistakes-pile {
@@ -2486,5 +2517,25 @@ button[data-tour="assistant"][data-tucked] {
     transform: none;
     opacity: 1;
     pointer-events: auto;
+  }
+}
+
+/* 学习面板热力图的一格：桌面 12px；触屏 24px，点按区再往外扩 2px 到 28px（相邻格子的扩区
+   正好铺满 4px 的缝，不重叠）。周数按格子大小重新算（Dashboard 的 HEAT_COLUMN_PX_TOUCH）。 */
+.ca-heat-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+@media (pointer: coarse) {
+  .ca-heat-cell {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+  }
+  button.ca-heat-cell::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
   }
 }

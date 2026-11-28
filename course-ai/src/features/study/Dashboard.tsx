@@ -53,6 +53,15 @@ const HEATMAP_MAX_WEEKS = 53;
 // 每列 = 方块 w-3（12px）+ 列间 gap-1（4px）。
 const HEAT_COLUMN_PX = 16;
 const HEAT_GAP_PX = 4;
+/** 触屏上格子放大到 24px（点按区再往外扩到 28px，见 .ca-heat-cell），一列占 28px。
+ *  12px 的格子手指点不准，点到的常常是隔壁那天。 */
+const HEAT_COLUMN_PX_TOUCH = 28;
+
+function coarsePointer(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(pointer: coarse)").matches
+    : false;
+}
 // 覆盖热力图所需的历史范围（含今天所在周的补位），略放宽。
 const LOOKBACK_DAYS = HEATMAP_MAX_WEEKS * 7 + 7;
 
@@ -101,7 +110,8 @@ function useHeatmapWeeks(container: HTMLElement | null): number {
     if (!container || typeof ResizeObserver === "undefined") return;
     const measure = () => {
       const width = container.clientWidth;
-      setFitted(width > 0 ? Math.floor((width + HEAT_GAP_PX) / HEAT_COLUMN_PX) : null);
+      const column = coarsePointer() ? HEAT_COLUMN_PX_TOUCH : HEAT_COLUMN_PX;
+      setFitted(width > 0 ? Math.floor((width + HEAT_GAP_PX) / column) : null);
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -165,7 +175,7 @@ function HeatSquare({
   onNavigate: (day: string, offsetDays: number) => void;
   t: TFunction;
 }) {
-  if (!cell) return <span className="h-3 w-3" aria-hidden="true" />;
+  if (!cell) return <span className="ca-heat-cell" aria-hidden="true" />;
   // 目标只存当前值、没有按天留存，所以过去的达标是按「今天的目标」回看的。
   const reached = goalMs > 0 && cell.ms >= goalMs;
   const label = heatCellLabel(cell, reached, t);
@@ -195,7 +205,7 @@ function HeatSquare({
       }}
       // 达标与否写在格子的说明里（悬停 / 选中时下方显示），格子本身不再点小白点——
       // 大多数日子都达标时，满屏的小点比描边网格还吵。今天与选中格保留描边。
-      className={`relative h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-app)] ${
+      className={`ca-heat-cell relative flex-none cursor-pointer ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-app)] ${
         isToday
           ? "outline outline-2 outline-offset-1 outline-[var(--text-strong)]"
           : active
@@ -567,7 +577,7 @@ export function Dashboard({
             // 整页唯一的实色主按钮：今天该复习了。
             <button
               onClick={() => setReviewing(true)}
-              className="group flex w-full items-center gap-4 border-y border-[var(--border-faint)] py-4 text-left"
+              className="group flex w-full items-center gap-4 border-b border-[var(--border-faint)] py-4 text-left first:border-t"
             >
               <span className="min-w-0 flex-1">
                 <span className="block text-base font-semibold text-[var(--text-strong)]">
@@ -592,7 +602,7 @@ export function Dashboard({
             />
           ) : (
             // 没有到期卡时不摆一个点不动的禁用按钮（读屏也读不到它）：改成说明下一批什么时候来。
-            <div className="flex w-full items-center gap-3 border-y border-[var(--border-faint)] py-4">
+            <div className="flex w-full items-center gap-3 border-b border-[var(--border-faint)] py-4 first:border-t">
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-[var(--text-strong)]">
                   {t("dashboard.noDueToday")}
@@ -626,7 +636,7 @@ export function Dashboard({
             >
             <section
               aria-label={t("dashboard.todayStudy")}
-              className="ca-dashboard-stat-today col-span-2 min-w-0 py-1 pr-4 min-[400px]:col-span-1"
+              className="ca-dashboard-stat-today col-span-2 min-w-0 py-1 min-[400px]:col-span-1 min-[400px]:pr-4"
             >
               <div className="flex min-h-7 items-center justify-between gap-1">
                 <span className="text-xs text-[var(--text-muted)]">{t("dashboard.todayStudy")}</span>
@@ -679,7 +689,7 @@ export function Dashboard({
 
             <section
               aria-label={t("dashboard.streak")}
-              className="ca-dashboard-stat-streak min-w-0 border-l border-[var(--border-faint)] px-4 py-1 max-[399px]:mt-3 max-[399px]:border-t max-[399px]:pt-3"
+              className="ca-dashboard-stat-streak min-w-0 border-l border-[var(--border-faint)] py-1 pl-4 max-[399px]:mt-3 max-[399px]:border-t max-[399px]:pt-3"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.streak")}</div>
               <div className="mt-1 flex items-center gap-1.5 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
@@ -723,7 +733,7 @@ export function Dashboard({
             </section>
           )}
 
-          <MistakeDeck onReview={() => setReviewingMistakes(true)} />
+          <MistakeDeck className="ca-mistakes--section" onReview={() => setReviewingMistakes(true)} />
 
           {weakQuery.isError ? (
             <section aria-labelledby="dashboard-weak-title">

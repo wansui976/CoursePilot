@@ -195,7 +195,7 @@ describe("Dashboard", () => {
     });
     expect(todayCell).toHaveAttribute("aria-current", "date");
     expect(todayCell).toHaveClass(
-      "rounded-[2px]",
+      "ca-heat-cell",
       "outline-2",
       "outline-[var(--text-strong)]",
       "focus-visible:ring-[var(--focus-ring)]",

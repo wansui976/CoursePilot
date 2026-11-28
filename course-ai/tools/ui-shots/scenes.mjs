@@ -906,6 +906,12 @@ export const scenes = [
     run: async ({ page, shot }) => {
       await nav(page, "学习面板", "学习");
       await shot();
+      // 热力图在页面下方：滚过去再拍一张（触屏上格子放大，看排得下几周）。
+      const heatmap = page.getByRole("group", { name: /学习热力图|热力图/ }).first();
+      if (await heatmap.count()) {
+        await heatmap.scrollIntoViewIfNeeded();
+        await shot("heatmap");
+      }
     },
   },
   {
