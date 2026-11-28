@@ -7,6 +7,7 @@ use crate::commands::whisper::{
 };
 use crate::error::{AppError, AppResult};
 use crate::pipeline::model_store;
+use crate::pipeline::rerank;
 use crate::pipeline::semantic::{self, IndexProgress, Purpose};
 use serde::Serialize;
 use tauri::{Emitter, State};
@@ -38,6 +39,9 @@ pub struct SemanticStatus {
     pub indexed: i64,
     pub total: i64,
     pub progress: IndexProgress,
+    /// 重排用的大模型配置和模型名（没设置为 None）。
+    pub rerank_profile: Option<String>,
+    pub rerank_model: Option<String>,
 }
 
 #[tauri::command]
@@ -72,6 +76,12 @@ pub async fn cmd_semantic_status(
         indexed,
         total,
         progress: semantic::progress(),
+        rerank_profile: get_setting(db, rerank::SETTING_PROFILE)
+            .await?
+            .filter(|v| !v.trim().is_empty()),
+        rerank_model: get_setting(db, rerank::SETTING_MODEL)
+            .await?
+            .filter(|v| !v.trim().is_empty()),
     })
 }
 
@@ -235,4 +245,60 @@ pub async fn cmd_semantic_resume() -> AppResult<()> {
 #[tauri::command]
 pub async fn cmd_semantic_rebuild(state: State<'_, AppState>) -> AppResult<()> {
     semantic::rebuild(&state.db).await
+}
+
+/// 保存重排设置。模型名留空 = 不重排。
+#[tauri::command]
+pub async fn cmd_semantic_save_rerank(
+    state: State<'_, AppState>,
+    profile: Option<String>,
+    model: Option<String>,
+) -> AppResult<()> {
+    let db = &state.db;
+    set_setting(
+        db,
+        rerank::SETTING_PROFILE,
+        profile.as_deref().unwrap_or("").trim(),
+    )
+    .await?;
+    set_setting(
+        db,
+        rerank::SETTING_MODEL,
+        model.as_deref().unwrap_or("").trim(),
+    )
+    .await?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RerankTest {
+    pub millis: u64,
+    /// 测试的三句里，排在第一的是不是那句真相关的。
+    pub ranked_correctly: bool,
+}
+
+/// 用当前设置给三句话重排一次，确认接口通、模型名对、排得出先后。
+#[tauri::command]
+pub async fn cmd_semantic_test_rerank(state: State<'_, AppState>) -> AppResult<RerankTest> {
+    let reranker = rerank::current(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Config("重排还没设置好".into()))?;
+    let documents = [
+        "今天先把作业收一下，下周一交实验报告",
+        "学习率太大时梯度下降会在最低点附近来回震荡，甚至发散",
+        "这张图是数据集里的几张样例图片",
+    ]
+    .map(String::from);
+    let started = std::time::Instant::now();
+    let scores = rerank::score(&state.db, &reranker, "学习率设大了会怎样", &documents).await?;
+    let best = scores
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(index, _)| index);
+    Ok(RerankTest {
+        millis: started.elapsed().as_millis() as u64,
+        ranked_correctly: best == Some(1),
+    })
 }

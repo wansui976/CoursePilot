@@ -854,7 +854,8 @@ const SEMANTIC_SNIPPET_CHARS: usize = 140;
 /// RRF 的平滑常数（取通行的 60）。
 const RRF_K: f64 = 60.0;
 
-/// 课程级 / 全库搜索：关键词结果和语义结果按名次融合（RRF）。没开语义检索时等同关键词搜索。
+/// 课程级 / 全库搜索：关键词结果和语义结果按名次融合（RRF），设置了重排模型时再按它重排
+/// 前几十条（见 `rerank`）。没开语义检索时等同关键词搜索。
 ///
 /// 一条关键词命中如果落在某个语义命中的块里，两边的分合在一起、显示关键词那条（更精确）；
 /// 只有语义命中的显示那一块讲稿。课件页只来自关键词那边。
@@ -875,14 +876,16 @@ pub async fn hybrid_search_scope(
     }
     let ids: Vec<String> = videos.iter().map(|(id, _)| id.clone()).collect();
     let semantic_hits = semantic::search_or_skip(db, &ids, query, limit.max(30)).await;
+    // 重排要从比 limit 多一些的候选里挑：融合排在第 limit+1 名的那段，可能才是真答案。
+    let pool = limit.max(crate::pipeline::rerank::MAX_CANDIDATES);
     if semantic_hits.is_empty() {
-        return Ok(renumber(
-            keyword
-                .into_iter()
-                .take(limit)
-                .map(|(_, citation)| citation)
-                .collect(),
-        ));
+        let candidates: Vec<Citation> = keyword
+            .into_iter()
+            .take(pool)
+            .map(|(_, citation)| citation)
+            .collect();
+        let ranked = crate::pipeline::rerank::rerank_or_keep(db, query, candidates).await;
+        return Ok(renumber(ranked.into_iter().take(limit).collect()));
     }
     let titles: std::collections::HashMap<&str, &str> = videos
         .iter()
@@ -941,13 +944,13 @@ pub async fn hybrid_search_scope(
         ));
     }
     fused.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
-    Ok(renumber(
-        fused
-            .into_iter()
-            .take(limit)
-            .map(|(_, citation, _)| citation)
-            .collect(),
-    ))
+    let candidates: Vec<Citation> = fused
+        .into_iter()
+        .take(pool)
+        .map(|(_, citation, _)| citation)
+        .collect();
+    let ranked = crate::pipeline::rerank::rerank_or_keep(db, query, candidates).await;
+    Ok(renumber(ranked.into_iter().take(limit).collect()))
 }
 
 /// 检索式问答（非流式）：召回相关讲稿窗口与课件页，只喂这些片段。
@@ -1076,7 +1079,6 @@ fn retrieved_citations(retrieved: &Retrieved) -> Vec<Citation> {
     renumber(windows.chain(slides).collect())
 }
 
-
 /// 文稿搜索框的结果。
 #[derive(Debug, Clone, Serialize)]
 pub struct TranscriptSearch {
@@ -1192,7 +1194,11 @@ async fn literal_hits(
     keyed.sort_by_key(|(key, _)| *key);
     let truncated = keyed.len() > limit;
     Ok((
-        keyed.into_iter().take(limit).map(|(_, citation)| citation).collect(),
+        keyed
+            .into_iter()
+            .take(limit)
+            .map(|(_, citation)| citation)
+            .collect(),
         truncated,
     ))
 }
@@ -1239,7 +1245,12 @@ pub async fn transcript_search(
         .filter(|hit| hit.score >= best * RELATED_RELATIVE)
         .take(RELATED_LIMIT)
         .map(|hit| {
-            let mut text: String = hit.chunk.text.chars().take(SEMANTIC_SNIPPET_CHARS).collect();
+            let mut text: String = hit
+                .chunk
+                .text
+                .chars()
+                .take(SEMANTIC_SNIPPET_CHARS)
+                .collect();
             if hit.chunk.text.chars().count() > SEMANTIC_SNIPPET_CHARS {
                 text.push('…');
             }
@@ -1248,7 +1259,9 @@ pub async fn transcript_search(
                 text,
                 start_ms: hit.chunk.start_ms,
                 end_ms: hit.chunk.end_ms,
-                video_title: titles.get(hit.video_id.as_str()).map(|title| title.to_string()),
+                video_title: titles
+                    .get(hit.video_id.as_str())
+                    .map(|title| title.to_string()),
                 video_id: Some(hit.video_id),
                 slide_image: None,
                 slide_page: None,
@@ -3300,12 +3313,19 @@ mod tests {
         let found = transcript_search(&db, &videos, "消沉", 30).await.unwrap();
         assert!(!found.related && !found.truncated);
         assert_eq!(
-            found.citations.iter().map(|c| c.start_ms).collect::<Vec<_>>(),
+            found
+                .citations
+                .iter()
+                .map(|c| c.start_ms)
+                .collect::<Vec<_>>(),
             [60_000, 120_000, 180_000],
             "只有写着「消沉」的两句和那页课件，按时间排"
         );
         assert_eq!(found.citations[1].slide_page, Some(3));
-        assert_eq!(found.citations.iter().map(|c| c.index).collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(
+            found.citations.iter().map(|c| c.index).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
 
         // 查询里带了标点：照样算字面命中。
         let punctuated = transcript_search(&db, &videos, "消沉？", 30).await.unwrap();
@@ -3318,13 +3338,17 @@ mod tests {
         assert!(capped.truncated);
 
         // 字面上一处都没有：给最相关的几条部分相符的，标成「相关」，不再铺满一屏。
-        let partial = transcript_search(&db, &videos, "消沉民生", 30).await.unwrap();
+        let partial = transcript_search(&db, &videos, "消沉民生", 30)
+            .await
+            .unwrap();
         assert!(partial.related);
         assert!(!partial.citations.is_empty());
         assert!(partial.citations.len() <= RELATED_LIMIT);
 
         // 连部分相符都没有：给意思最近的几段，也标成「相关」，而且不会把整篇都列出来。
-        let meaning = transcript_search(&db, &videos, "泛化能力", 30).await.unwrap();
+        let meaning = transcript_search(&db, &videos, "泛化能力", 30)
+            .await
+            .unwrap();
         assert!(meaning.related || meaning.citations.is_empty());
         assert!(meaning.citations.len() <= RELATED_LIMIT);
     }

@@ -1137,7 +1137,19 @@
       "indexing": "Indexing: {{title}} ({{pending}} left)",
       "inactive": "Not ready yet: download the on-device model, or pick a profile and enter a model name.",
       "rebuild": "Rebuild index",
-      "rebuildConfirm": "Delete every index for the current model and rebuild from scratch? This takes a while with many videos, and a cloud endpoint will bill again."
+      "rebuildConfirm": "Delete every index for the current model and rebuild from scratch? This takes a while with many videos, and a cloud endpoint will bill again.",
+      "rerankGroup": "Rerank",
+      "rerankHint": "The top few dozen search results are read against the question by a rerank model and reordered by how well each one actually answers it, so the assistant's \"where was this covered\" lands on the right passage first. It only reorders, never adds or drops results; if it isn't set up or the endpoint fails, the original order is kept.",
+      "rerankProfile": "Rerank profile",
+      "rerankProfileHint": "Calls this profile's /rerank endpoint. Only OpenAI-compatible profiles are listed (SiliconFlow, Jina and others provide it).",
+      "rerankModel": "Rerank model",
+      "rerankModelHint": "A dedicated rerank model, not a chat model: BAAI/bge-reranker-v2-m3 on SiliconFlow, jina-reranker-v2-base-multilingual on Jina. Leave empty to turn reranking off.",
+      "rerankNoProfiles": "No OpenAI-compatible profile yet. Add a SiliconFlow or Jina profile under LLM to use reranking here.",
+      "rerankOff": "No reranking",
+      "rerankTestOk": "Works · {{millis}} ms",
+      "rerankTestOdd": "The endpoint answered ({{millis}} ms) but ranked the test sentences wrong; the model name may be a chat or embedding model",
+      "rerankSave": "Save rerank settings",
+      "rerankTest": "Test reranking"
     },
     "lanShare": {
       "group": "Play over local network",

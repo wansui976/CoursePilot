@@ -467,6 +467,78 @@ pub fn parse_embeddings_response(v: &Value) -> AppResult<Vec<Vec<f32>>> {
     Ok(out)
 }
 
+/// 解析重排接口的返回，得到与 `documents` 一一对应的相关性分数。
+///
+/// 硅基流动 / Jina / Cohere / vLLM / llama.cpp 都是 `results: [{index, relevance_score}]`；
+/// 阿里云百炼的原生接口包在 `output.results` 里。没出现在结果里的文档记最低分。
+pub fn parse_rerank_response(v: &Value, documents: usize) -> AppResult<Vec<f32>> {
+    let results = v
+        .get("results")
+        .or_else(|| v.get("output").and_then(|output| output.get("results")))
+        .and_then(|r| r.as_array())
+        .ok_or_else(|| AppError::Other(format!("unexpected rerank response: {v}")))?;
+    let mut scores = vec![f32::MIN; documents];
+    let mut seen = 0usize;
+    for item in results {
+        let Some(index) = item.get("index").and_then(|i| i.as_u64()) else {
+            continue;
+        };
+        let Some(score) = item
+            .get("relevance_score")
+            .or_else(|| item.get("score"))
+            .and_then(|s| s.as_f64())
+        else {
+            continue;
+        };
+        if let Some(slot) = scores.get_mut(index as usize) {
+            *slot = score as f32;
+            seen += 1;
+        }
+    }
+    if seen == 0 && documents > 0 {
+        return Err(AppError::Other("重排接口没有给出任何分数".into()));
+    }
+    Ok(scores)
+}
+
+/// 调 `{base}/rerank`（硅基流动、Jina、Cohere 等通行的格式）。
+pub async fn rerank(
+    base_url: &str,
+    api_key: &str,
+    client: &reqwest::Client,
+    model: &str,
+    query: &str,
+    documents: &[String],
+) -> AppResult<Vec<f32>> {
+    let url = format!("{}/rerank", normalize_openai_base_url(base_url));
+    let resp = Auth::Bearer(api_key)
+        .apply(client.post(&url))
+        .json(&serde_json::json!({
+            "model": model,
+            "query": query,
+            "documents": documents,
+            "top_n": documents.len(),
+            "return_documents": false,
+        }))
+        .send()
+        .await
+        .map_err(request_error)?;
+    let content_type = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(http_error("rerank", status, &body));
+    }
+    let body = resp.text().await.map_err(request_error)?;
+    let v = parse_json_response(&body, &content_type)?;
+    parse_rerank_response(&v, documents.len())
+}
+
 pub async fn embed(
     base_url: &str,
     api_key: &str,

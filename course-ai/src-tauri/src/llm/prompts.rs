@@ -310,19 +310,25 @@ pub fn digest_request(model: &str, chunk: &str) -> ChatRequest {
 ///
 /// 对话历史没有讲稿版 `digest_request` 要摘的 [mm:ss] 原句，直接复用会让模型在
 /// 历史里找不存在的行首时间戳；这里只保留「用户问过什么、查到过什么、达成了什么」——
-/// 后续轮次真正需要的上下文，体量压进 300 字。
+/// 后续轮次真正需要的上下文，分成概要 / 约束 / 已确认 / 待继续四项，约束（用户说过「用英文答」之类）单列，压几次都不丢。
 pub fn history_digest_request(model: &str, history: &str) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
-        system: Some("你是对话压缩助手。输出纯文本，不要代码围栏、不要任何解释。".into()),
+        system: Some(
+            "你是对话压缩助手。只输出一个 JSON 对象，不要代码围栏、不要任何解释。".into(),
+        ),
         cacheable_context: None,
         messages: vec![ChatMessage::user(format!(
-            "把下面这段更早的用户与助手对话压成一条要点摘要：\n{history}\n\n\
-                 要求：\n\
-                 - 按时间顺序列出：用户问过什么、助手查到过什么资料、得出过什么结论、\n\
-                   还有哪些待确认的操作（如「重命名/删除提案待确认」）；\n\
-                 - 保留具体名词与结论（课程名、视频名、搜索结果），丢掉寒暄和过程；\n\
-                 - 不超过 300 字；只用对话里有的内容，不要补充。"
+            "把下面这段更早的用户与助手对话压成要点，之后的对话只能看到这份要点：\n{history}\n\n\
+                 输出格式：{{\"summary\":\"…\",\"constraints\":[…],\"confirmed_facts\":[…],\"open_threads\":[…]}}\n\
+                 - summary：按时间顺序一段话说清用户问过什么、助手查到过什么、得出过什么结论；\n\
+                 - constraints：用户提过的、之后回答还要继续遵守的要求和偏好\
+                   （如「用英文回答」「别给代码」「只看第三章」），原话照录要点；\n\
+                 - confirmed_facts：已经查实或用户确认过的事实，带上具体名词\
+                   （课程名、视频名、时间点、搜索结果）；\n\
+                 - open_threads：还没做完的事（待确认的重命名/删除提案、说好下次接着讲的内容）；\n\
+                 - 对话开头若已有一份更早的要点摘要，把它的各项并进来，约束不要丢；\n\
+                 - 没有的项给空数组；总共不超过 400 字；只用对话里有的内容，不要补充，丢掉寒暄和过程。"
         ))],
         temperature: 0.2,
         tools: Vec::new(),

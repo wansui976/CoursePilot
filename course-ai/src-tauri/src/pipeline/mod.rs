@@ -27,6 +27,8 @@ pub mod paddle_ocr;
 pub mod playable;
 pub mod quiz;
 pub mod rag;
+pub mod request_pacing;
+pub mod rerank;
 pub mod review_book;
 pub mod search_terms;
 pub mod semantic;
@@ -317,7 +319,8 @@ async fn asr_ready_with_models(db: &crate::db::Db, models_root: &Path) -> bool {
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| DEFAULT_LOCAL_MODEL.into());
-            let lang = whisper_language_or_default(setting(db, "asr_language").await.ok().flatten());
+            let lang =
+                whisper_language_or_default(setting(db, "asr_language").await.ok().flatten());
             select_local_model(models_root, &model_id, &lang).is_some()
         }
         AsrBackend::Volcengine => {

@@ -123,6 +123,95 @@ fn apply_replacements(original: &str, edits: &[(String, String)]) -> String {
     out
 }
 
+/// 整段清空只认短段：语气词、口头禅一段通常就几个字。再长的一段被清空，多半是模型
+/// 误判或偷懒，宁可留着原文。
+const MAX_DROPPABLE_TOKENS: usize = 20;
+/// 改后至少要有这么多词元才判「是不是换了内容」：太短的段落改一两个字比例就会很难看。
+const MIN_TOKENS_FOR_OVERLAP_CHECK: usize = 6;
+/// 改后的词元里至少这一比例要在原文里出现过。纠错是改错字、删赘语，
+/// 绝大部分字应该还是原来的字。
+const MIN_KEPT_RATIO: f64 = 0.4;
+
+/// 把一段文本切成用来比对的词元：中日韩等非 ASCII 字母数字一字一个，ASCII 字母数字
+/// 连成一个小写单词。公式（`\(...\)`、`\[...\]`、`$...$`）整块不算——把「m 零」写成
+/// `\(m_0\)` 是正当的纠错，字面上却几乎全是新字符。
+fn comparison_tokens(text: &str) -> Vec<String> {
+    let text = strip_math_spans(text);
+    let mut tokens = Vec::new();
+    let mut word = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            word.push(ch.to_ascii_lowercase());
+            continue;
+        }
+        if !word.is_empty() {
+            tokens.push(std::mem::take(&mut word));
+        }
+        if !ch.is_ascii() && ch.is_alphanumeric() {
+            tokens.push(ch.to_string());
+        }
+    }
+    if !word.is_empty() {
+        tokens.push(word);
+    }
+    tokens
+}
+
+fn strip_math_spans(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let next = [("\\(", "\\)"), ("\\[", "\\]"), ("$", "$")]
+            .iter()
+            .filter_map(|(open, close)| rest.find(open).map(|at| (at, *open, *close)))
+            .min_by_key(|(at, _, _)| *at);
+        let Some((at, open, close)) = next else {
+            out.push_str(rest);
+            return out;
+        };
+        let after_open = &rest[at + open.len()..];
+        let Some(end) = after_open.find(close) else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..at]);
+        out.push(' ');
+        rest = &after_open[end + close.len()..];
+    }
+}
+
+/// 改后的文本是不是已经不是「同一句话改了几个字」了。
+fn drifted_from_original(original: &str, corrected: &str) -> bool {
+    let before = comparison_tokens(original);
+    let after = comparison_tokens(corrected);
+    if after.is_empty() {
+        // 清空：只放过短段（语气词）；原文本身就没几个字的也放过。
+        return before.len() > MAX_DROPPABLE_TOKENS;
+    }
+    // 扩写：纠错只会让一段变短或差不多长。
+    if after.len() > before.len() * 2 + 8 {
+        return true;
+    }
+    if after.len() < MIN_TOKENS_FOR_OVERLAP_CHECK {
+        return false;
+    }
+    let mut pool: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for token in &before {
+        *pool.entry(token.as_str()).or_default() += 1;
+    }
+    let kept = after
+        .iter()
+        .filter(|token| match pool.get_mut(token.as_str()) {
+            Some(n) if *n > 0 => {
+                *n -= 1;
+                true
+            }
+            _ => false,
+        })
+        .count();
+    (kept as f64) < (after.len() as f64) * MIN_KEPT_RATIO
+}
+
 fn load_correction_segments(
     rows: &[crate::commands::transcripts::TranscriptSegment],
 ) -> Vec<CorrectionSegment> {
@@ -190,13 +279,19 @@ pub fn parse_corrections(
                 apply_replacements(&orig.text, &pairs)
             }
         };
+        let text = text.trim();
+        // 纠错只该改字、删赘语，不该换内容。改完和原文对不上（编了新内容、把一段
+        // 扩写成好几句、把一整段正经话清空）就整段退回原文。
+        if drifted_from_original(&orig.text, text) {
+            continue;
+        }
         // 文本为空是合法的「整段删除」：当一段全是语气词/口头禅（如「哎。」）时，
         // 模型按提示词把它清空。这里保留分段（时间戳不变，满足下游行数一致校验），
         // 只把文本置空——该时间段不再显示字幕，也不污染文稿/笔记。
         out[id] = CorrectionSegment {
             start_ms: orig.start_ms,
             end_ms: orig.end_ms,
-            text: text.trim().to_string(),
+            text: text.to_string(),
         };
     }
 
@@ -722,6 +817,94 @@ mod tests {
         let out = parse_corrections(&raw, r#"[{"id":0,"replacedtext":"我们来看这道题"}]"#).unwrap();
 
         assert_eq!(out[0].text, "我们来看这道题");
+    }
+
+    #[test]
+    fn a_rewrite_that_replaces_the_content_falls_back_to_the_original() {
+        // 模型没改错字，而是自己编了一句（或者把上下文串进来了）。这份文稿会进笔记、
+        // 出题和检索，宁可留着带错字的原话。
+        let raw = vec![seg(0, 5000, "接下来我们看一下梯度下降的收敛条件")];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"replacedtext":"本节课主要介绍了神经网络反向传播算法"}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(out[0].text, "接下来我们看一下梯度下降的收敛条件");
+    }
+
+    #[test]
+    fn a_rewrite_that_expands_one_line_into_a_paragraph_is_dropped() {
+        let raw = vec![seg(0, 5000, "这个叫学习率")];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"replacedtext":"这个叫学习率，学习率决定了每一步沿梯度方向走多远，太大会震荡，太小会收敛得很慢"}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(out[0].text, "这个叫学习率");
+    }
+
+    #[test]
+    fn wiping_a_long_real_sentence_is_refused_but_filler_can_go() {
+        let raw = vec![
+            seg(
+                0,
+                5000,
+                "所以说反向传播本质上就是链式法则在计算图上的反复应用而已",
+            ),
+            seg(5000, 6000, "嗯，那个，就是说"),
+        ];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"replacedtext":""},{"id":1,"replacedtext":""}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            out[0].text,
+            "所以说反向传播本质上就是链式法则在计算图上的反复应用而已"
+        );
+        assert_eq!(out[1].text, "");
+    }
+
+    #[test]
+    fn turning_spoken_math_into_latex_is_not_mistaken_for_drift() {
+        let raw = vec![seg(0, 5000, "洛伦兹因子等于根号下一减 v 方比 c 方分之一")];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"replacedtext":"洛伦兹因子等于 \\(\\frac{1}{\\sqrt{1-v^2/c^2}}\\)"}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            out[0].text,
+            "洛伦兹因子等于 \\(\\frac{1}{\\sqrt{1-v^2/c^2}}\\)"
+        );
+    }
+
+    #[test]
+    fn an_english_rewrite_that_fixes_words_is_kept() {
+        let raw = vec![seg(
+            0,
+            5000,
+            "so the grand ian descent step uses the learning rate alpha",
+        )];
+
+        let out = parse_corrections(
+            &raw,
+            r#"[{"id":0,"replacedtext":"So the gradient descent step uses the learning rate α."}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            out[0].text,
+            "So the gradient descent step uses the learning rate α."
+        );
     }
 
     #[test]

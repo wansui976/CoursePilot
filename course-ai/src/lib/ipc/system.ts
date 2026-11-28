@@ -26,6 +26,7 @@ import type {
   SemanticBackend,
   SemanticStatus,
   SemanticTest,
+  RerankTest,
   RemoteSyncReport,
   RemoteSyncStatus,
   LanShareStatus,
@@ -241,6 +242,11 @@ export const semantic = {
   rebuild: (): Promise<void> => invoke("cmd_semantic_rebuild"),
   /** 上一轮出错停下后，接着把没建的建完。 */
   resume: (): Promise<void> => invoke("cmd_semantic_resume"),
+  /** 保存重排设置；模型名留空 = 不重排。 */
+  saveRerank: (config: { profile: string | null; model: string | null }): Promise<void> =>
+    invoke("cmd_semantic_save_rerank", config),
+  /** 用当前重排设置给三句话排一次。 */
+  testRerank: (): Promise<RerankTest> => invoke("cmd_semantic_test_rerank"),
 };
 
 /** 设置 → 多设备同步（网盘 / WebDAV）。密码传 null 表示沿用已保存的。 */

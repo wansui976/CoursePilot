@@ -15,6 +15,8 @@ const { mockIpc } = vi.hoisted(() => ({
       test: vi.fn(),
       rebuild: vi.fn(),
       resume: vi.fn(),
+      saveRerank: vi.fn(),
+      testRerank: vi.fn(),
     },
     ai: { getProfiles: vi.fn() },
   },
@@ -38,6 +40,8 @@ function status(overrides: Partial<SemanticStatus> = {}): SemanticStatus {
     indexed: 0,
     total: 12,
     progress: { running: false, pending: 0, done: 0, currentTitle: null, lastError: null },
+    rerankProfile: null,
+    rerankModel: null,
     ...overrides,
   };
 }
@@ -102,5 +106,32 @@ describe("SemanticSection", () => {
         cloudModel: "text-embedding-v3",
       }),
     );
+  });
+
+  it("重排：只列 OpenAI 兼容的配置；模型名留空就是不重排；保存后能测", async () => {
+    mockIpc.semantic.status.mockResolvedValue(status());
+    mockIpc.semantic.testRerank.mockResolvedValue({ millis: 42, rankedCorrectly: true });
+    const { rerender } = render(<SemanticSection />);
+
+    const profile = await screen.findByLabelText("重排用哪个配置");
+    await waitFor(() => expect(profile.querySelectorAll("option")).toHaveLength(1));
+    expect(screen.getByRole("button", { name: "测试重排" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("重排模型名"), { target: { value: " BAAI/bge-reranker-v2-m3 " } });
+    fireEvent.click(screen.getByRole("button", { name: "保存重排设置" }));
+    await waitFor(() =>
+      expect(mockIpc.semantic.saveRerank).toHaveBeenCalledWith({ profile: "qw", model: "BAAI/bge-reranker-v2-m3" }),
+    );
+
+    mockIpc.semantic.status.mockResolvedValue(status({ rerankProfile: "qw", rerankModel: "BAAI/bge-reranker-v2-m3" }));
+    rerender(<SemanticSection key="again" />);
+    const test = await screen.findByRole("button", { name: "测试重排" });
+    await waitFor(() => expect(test).toBeEnabled());
+    fireEvent.click(test);
+    expect(await screen.findByText("可用 · 42 ms")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("重排模型名"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存重排设置" }));
+    await waitFor(() => expect(mockIpc.semantic.saveRerank).toHaveBeenLastCalledWith({ profile: null, model: null }));
   });
 });

@@ -173,6 +173,7 @@ async fn fetch_subtitles_with(
 ) -> SubtitleOutcome {
     let mut attempt = 0;
     loop {
+        crate::pipeline::request_pacing::pace_args(args).await;
         let run = crate::sidecar::command(ytdlp)
             .args(ffmpeg_location_args())
             .args(args)
@@ -446,6 +447,7 @@ async fn run_ytdlp(
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
+    crate::pipeline::request_pacing::pace_args(args).await;
     let mut child = crate::sidecar::command(ytdlp)
         .args(ffmpeg_location_args())
         .args([
@@ -992,6 +994,7 @@ pub async fn probe_playlist(url: &str, cookies: Option<&str>) -> AppResult<Playl
         }
     }
     cmd.arg(url);
+    crate::pipeline::request_pacing::pace_url(url).await;
     let output = cmd
         .output()
         .await
@@ -1047,6 +1050,7 @@ pub async fn probe(url: &str, cookies: Option<&str>) -> AppResult<ProbeResult> {
         }
     }
     cmd.arg(url);
+    crate::pipeline::request_pacing::pace_url(url).await;
     let output = cmd
         .output()
         .await
@@ -1752,6 +1756,8 @@ pub async fn search_bilibili(query: &str, limit: usize) -> AppResult<Vec<SearchH
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| AppError::Pipeline(format!("构造 HTTP 客户端失败: {e}")))?;
+    crate::pipeline::request_pacing::pace(crate::pipeline::request_pacing::Platform::Bilibili)
+        .await;
     let response = client
         .get("https://api.bilibili.com/x/web-interface/search/type")
         .query(&[

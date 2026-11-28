@@ -334,6 +334,7 @@ async fn http_get_bytes(
     url: &str,
     cookies: Option<&str>,
 ) -> AppResult<(reqwest::StatusCode, Vec<u8>)> {
+    crate::pipeline::request_pacing::pace_url(url).await;
     let client = reqwest::Client::new();
     let mut req = client
         .get(url)

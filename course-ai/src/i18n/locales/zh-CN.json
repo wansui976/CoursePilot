@@ -1135,7 +1135,19 @@
       "indexing": "正在建：{{title}}（还剩 {{pending}} 个）",
       "inactive": "还不能用：本机模型需要先下载，云端接口需要选好配置并填写模型名。",
       "rebuild": "重建索引",
-      "rebuildConfirm": "删掉当前模型的全部索引并从头重建？视频多时要一段时间；用云端接口会重新计费。"
+      "rebuildConfirm": "删掉当前模型的全部索引并从头重建？视频多时要一段时间；用云端接口会重新计费。",
+      "rerankGroup": "重排",
+      "rerankHint": "搜到的几十段再交给重排模型逐段对着问题读一遍，按「到底答没答这个问题」重新排序，助手找「在哪讲的」时第一条更准。只改顺序、不增删结果；没设置或接口出错时按原顺序。",
+      "rerankProfile": "重排用哪个配置",
+      "rerankProfileHint": "调这个配置的 /rerank 接口。只列出 OpenAI 兼容的配置（硅基流动、Jina 等有这个接口）。",
+      "rerankModel": "重排模型名",
+      "rerankModelHint": "专门的重排模型，不是聊天模型。硅基流动可填 BAAI/bge-reranker-v2-m3，Jina 填 jina-reranker-v2-base-multilingual。留空 = 不重排。",
+      "rerankNoProfiles": "还没有 OpenAI 兼容的配置。在「大模型」里加一个硅基流动或 Jina 的配置，就能在这里用重排。",
+      "rerankOff": "不重排",
+      "rerankTestOk": "可用 · {{millis}} ms",
+      "rerankTestOdd": "接口通了（{{millis}} ms），但测试句排错了，模型名可能填成了聊天或嵌入模型",
+      "rerankSave": "保存重排设置",
+      "rerankTest": "测试重排"
     },
     "lanShare": {
       "group": "局域网直连播放",

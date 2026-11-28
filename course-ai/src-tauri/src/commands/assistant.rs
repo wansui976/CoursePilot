@@ -481,8 +481,59 @@ async fn digest_history(
         .complete(&crate::llm::prompts::history_digest_request(model, text))
         .await
         .ok()?;
-    let digest = response.content.trim().to_string();
-    (!digest.is_empty()).then_some(digest)
+    let content = response.content.trim();
+    if content.is_empty() {
+        return None;
+    }
+    // 结构化的要点按项渲染；模型没按格式回（纯文本）也照用，总比截断强。
+    match crate::pipeline::ai::parse_lenient_json::<HistoryDigest>(content) {
+        Ok(digest) => render_history_digest(&digest),
+        Err(_) => Some(content.to_string()),
+    }
+}
+
+/// 压缩后的较早对话。约束单列：「用英文回答」「别给代码」这种要求混在一段概要里，
+/// 再压一两次就没了，而它们恰恰是之后每一轮都要遵守的。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default)]
+struct HistoryDigest {
+    summary: String,
+    constraints: Vec<String>,
+    confirmed_facts: Vec<String>,
+    open_threads: Vec<String>,
+}
+
+fn render_history_digest(digest: &HistoryDigest) -> Option<String> {
+    let mut out = String::new();
+    let summary = digest.summary.trim();
+    if !summary.is_empty() {
+        out.push_str("概要：");
+        out.push_str(summary);
+        out.push('\n');
+    }
+    for (title, items) in [
+        ("用户的要求（之后的回答继续遵守）", &digest.constraints),
+        ("已确认", &digest.confirmed_facts),
+        ("还没做完", &digest.open_threads),
+    ] {
+        let items: Vec<&str> = items
+            .iter()
+            .map(|item| item.trim())
+            .filter(|item| !item.is_empty())
+            .collect();
+        if items.is_empty() {
+            continue;
+        }
+        out.push_str(title);
+        out.push_str("：\n");
+        for item in items {
+            out.push_str("- ");
+            out.push_str(item);
+            out.push('\n');
+        }
+    }
+    let out = out.trim_end().to_string();
+    (!out.is_empty()).then_some(out)
 }
 
 /// 把循环结果装配成交给界面的回复。
@@ -1249,6 +1300,47 @@ mod tests {
         assert_eq!(prepared[0].role, "user");
         assert_eq!(prepared[1].content, "用户问了问题，助手给了一大段回答");
         assert!(valid_history_group(&prepared));
+    }
+
+    #[tokio::test]
+    async fn a_structured_digest_keeps_the_users_standing_requirements_apart() {
+        let prepared = prepare_history(
+            vec![
+                ChatMessage::user("问题"),
+                ChatMessage::assistant("答".repeat(MAX_HISTORY_CHARS + 1)),
+            ],
+            &mock_provider(
+                r#"{"summary":"用户问了梯度下降","constraints":["用英文回答"],"confirmed_facts":["在第 3 讲 12:30 讲过"],"open_threads":[]}"#,
+            ),
+            "m",
+        )
+        .await;
+        let digest = &prepared[1].content;
+        assert!(digest.starts_with("概要：用户问了梯度下降"));
+        assert!(digest.contains("用户的要求（之后的回答继续遵守）：\n- 用英文回答"));
+        assert!(digest.contains("已确认：\n- 在第 3 讲 12:30 讲过"));
+        assert!(!digest.contains("还没做完"), "空的一项不写标题");
+    }
+
+    #[tokio::test]
+    async fn a_structured_digest_with_nothing_in_it_counts_as_a_failure() {
+        let mut history = Vec::new();
+        for index in 0..MAX_HISTORY_USER_TURNS + 1 {
+            history.push(ChatMessage::user(format!("问题 {index}")));
+            history.push(ChatMessage::assistant(format!("回答 {index}")));
+        }
+        let prepared = prepare_history(
+            history,
+            &mock_provider(
+                r#"{"summary":"","constraints":[],"confirmed_facts":[],"open_threads":[]}"#,
+            ),
+            "m",
+        )
+        .await;
+        assert!(
+            !prepared[0].content.contains("摘要"),
+            "没内容就不留空摘要组"
+        );
     }
 
     #[tokio::test]

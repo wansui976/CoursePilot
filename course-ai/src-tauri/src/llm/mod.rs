@@ -863,6 +863,33 @@ impl Provider {
 
     /// 文本嵌入。OpenAI 兼容端点用 `/embeddings`；
     /// Mock 返回确定性向量（相似文本→相似向量），便于离线单测 RAG。
+    /// 给 `documents` 按与 `query` 的相关程度打分（交叉编码器重排）。分数只用来排序。
+    pub async fn rerank(
+        &self,
+        model: &str,
+        query: &str,
+        documents: &[String],
+    ) -> AppResult<Vec<f32>> {
+        match self {
+            Provider::OpenAi {
+                base_url,
+                api_key,
+                client,
+                ..
+            } => openai::rerank(base_url, api_key, client, model, query, documents).await,
+            Provider::Mock { .. } | Provider::Scripted { .. } | Provider::Flaky { .. } => {
+                Ok(documents
+                    .iter()
+                    .map(|doc| mock_rerank(query, doc))
+                    .collect())
+            }
+            Provider::Failing { .. } => Err(self.canned_failure()),
+            _ => Err(crate::error::AppError::Other(
+                "这个协议没有重排接口；请选一个 OpenAI 兼容的配置（如硅基流动、Jina）".into(),
+            )),
+        }
+    }
+
     pub async fn embed(&self, model: &str, inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
         match self {
             Provider::OpenAi {
@@ -918,6 +945,14 @@ pub(crate) fn azure_chat_url(endpoint: &str, deployment: &str, api_version: &str
 }
 
 /// 确定性伪嵌入：把文本散列进固定维向量并归一化。仅用于离线测试。
+/// 测试用重排分数：文档里出现了多少个提问里的字。
+pub fn mock_rerank(query: &str, document: &str) -> f32 {
+    query
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && document.contains(*ch))
+        .count() as f32
+}
+
 pub fn mock_embed(text: &str) -> Vec<f32> {
     const DIM: usize = 16;
     let mut v = [0f32; DIM];

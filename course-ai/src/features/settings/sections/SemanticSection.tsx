@@ -12,6 +12,7 @@ import {
   type SemanticIndexProgress,
   type SemanticStatus,
   type SemanticTest,
+  type RerankTest,
 } from "@/lib/ipc";
 import type { LlmProfile } from "@/lib/types";
 import { FIELD, Group, Row, SavedBadge, Select, StackRow } from "@/features/settings/primitives";
@@ -25,6 +26,13 @@ const CLOUD_MODEL_SUGGESTIONS = [
   { value: "text-embedding-3-small", provider: "OpenAI" },
   { value: "BAAI/bge-m3", provider: "硅基流动" },
   { value: "embedding-3", provider: "智谱" },
+];
+
+/** 重排模型名的常见取值。 */
+const RERANK_MODEL_SUGGESTIONS = [
+  { value: "BAAI/bge-reranker-v2-m3", provider: "硅基流动" },
+  { value: "Qwen/Qwen3-Reranker-0.6B", provider: "硅基流动" },
+  { value: "jina-reranker-v2-base-multilingual", provider: "Jina" },
 ];
 
 /** 只有这两种协议有 `/embeddings` 接口。 */
@@ -415,6 +423,8 @@ export function SemanticSection() {
         {saveError != null && <ErrorNote className="mx-4 mb-3" error={saveError} />}
       </Group>
 
+      <RerankGroup status={status} profiles={profiles} onSaved={refresh} />
+
       {backend !== "off" && (
         <Group header={t("settings.semantic.indexGroup")} hint={t("settings.semantic.indexHint")}>
           <Row
@@ -476,5 +486,150 @@ export function SemanticSection() {
         </Group>
       )}
     </>
+  );
+}
+
+/**
+ * 重排：选一个 OpenAI 兼容的配置和重排模型名。和上面的向量来源无关——只用关键词时也能重排。
+ */
+function RerankGroup({
+  status,
+  profiles,
+  onSaved,
+}: {
+  status: SemanticStatus;
+  profiles: LlmProfile[];
+  onSaved: () => Promise<unknown>;
+}) {
+  const { t } = useTranslation();
+  const rerankProfiles = useMemo(() => profiles.filter((profile) => profile.kind === "openai"), [profiles]);
+  const [profile, setProfile] = useState(status.rerankProfile ?? "");
+  const [model, setModel] = useState(status.rerankModel ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<RerankTest | null>(null);
+
+  // 配置列表是异步来的：第一次拿到时，没选过就默认第一个。
+  useEffect(() => {
+    if (!profile && rerankProfiles[0]) setProfile(rerankProfiles[0].id);
+  }, [profile, rerankProfiles]);
+
+  const dirty = profile !== (status.rerankProfile ?? "") || model.trim() !== (status.rerankModel ?? "");
+  const active = Boolean(status.rerankProfile && status.rerankModel);
+
+  async function save() {
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    setTestResult(null);
+    try {
+      const trimmed = model.trim();
+      await ipc.semantic.saveRerank({ profile: trimmed ? profile : null, model: trimmed || null });
+      setSaved(true);
+      await onSaved();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runTest() {
+    setTesting(true);
+    setTestResult(null);
+    setError(null);
+    try {
+      setTestResult(await ipc.semantic.testRerank());
+    } catch (err) {
+      setError(err);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <Group header={t("settings.semantic.rerankGroup")} hint={t("settings.semantic.rerankHint")}>
+      {rerankProfiles.length === 0 ? (
+        <StackRow>
+          <p className="ca-t-xs leading-relaxed text-[var(--text-muted)]">{t("settings.semantic.rerankNoProfiles")}</p>
+        </StackRow>
+      ) : (
+        <>
+          <Row
+            label={t("settings.semantic.rerankProfile")}
+            hint={t("settings.semantic.rerankProfileHint")}
+            htmlFor="semantic-rerank-profile"
+          >
+            <div className="w-full sm:w-56">
+              <Select id="semantic-rerank-profile" value={profile} onChange={(event) => setProfile(event.target.value)}>
+                {rerankProfiles.map((one) => (
+                  <option key={one.id} value={one.id}>
+                    {one.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Row>
+          <StackRow
+            label={t("settings.semantic.rerankModel")}
+            hint={t("settings.semantic.rerankModelHint")}
+            htmlFor="semantic-rerank-model"
+          >
+            <input
+              id="semantic-rerank-model"
+              className={FIELD}
+              list="semantic-rerank-model-suggestions"
+              value={model}
+              placeholder={t("settings.semantic.rerankOff")}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              onChange={(event) => setModel(event.target.value)}
+            />
+            <datalist id="semantic-rerank-model-suggestions">
+              {RERANK_MODEL_SUGGESTIONS.map((one) => (
+                <option key={one.value} value={one.value}>
+                  {one.provider}
+                </option>
+              ))}
+            </datalist>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="primary"
+                aria-label={t("settings.semantic.rerankSave")}
+                disabled={saving || !dirty}
+                onClick={() => void save()}
+              >
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t("settings.semantic.save")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={t("settings.semantic.rerankTest")}
+                disabled={testing || dirty || !active}
+                onClick={() => void runTest()}
+              >
+                {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                {t("settings.semantic.test")}
+              </Button>
+              {saved && !dirty && <SavedBadge text={t("settings.semantic.saved")} />}
+              {testResult?.rankedCorrectly && (
+                <SavedBadge text={t("settings.semantic.rerankTestOk", { millis: testResult.millis })} />
+              )}
+            </div>
+            {testResult && !testResult.rankedCorrectly && (
+              <p className="ca-t-xs mt-3 leading-relaxed text-[var(--status-warn)]">
+                {t("settings.semantic.rerankTestOdd", { millis: testResult.millis })}
+              </p>
+            )}
+            {error != null && <ErrorNote className="mt-3" error={error} />}
+          </StackRow>
+        </>
+      )}
+    </Group>
   );
 }

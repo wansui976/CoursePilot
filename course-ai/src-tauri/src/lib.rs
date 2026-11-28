@@ -78,7 +78,8 @@ use crate::commands::review_book::{
 use crate::commands::search::cmd_search_course;
 use crate::commands::semantic::{
     cmd_semantic_delete_model, cmd_semantic_download_model, cmd_semantic_rebuild,
-    cmd_semantic_resume, cmd_semantic_save, cmd_semantic_status, cmd_semantic_test,
+    cmd_semantic_resume, cmd_semantic_save, cmd_semantic_save_rerank, cmd_semantic_status,
+    cmd_semantic_test, cmd_semantic_test_rerank,
 };
 use crate::commands::settings::{cmd_get_setting, cmd_has_secret, cmd_set_secret, cmd_set_setting};
 use crate::commands::silence::cmd_video_skips;
@@ -142,9 +143,8 @@ use crate::downloads::{
 };
 use crate::jobs::cmd_list_jobs;
 use crate::pipeline::{
-    cmd_asr_ready, cmd_cancel_processing, cmd_dismiss_processing_video,
-    cmd_list_processing_videos, cmd_list_recent_processed_videos, cmd_process_video,
-    cmd_recorrect_transcript, ProcessingTasks,
+    cmd_asr_ready, cmd_cancel_processing, cmd_dismiss_processing_video, cmd_list_processing_videos,
+    cmd_list_recent_processed_videos, cmd_process_video, cmd_recorrect_transcript, ProcessingTasks,
 };
 use crate::usage_log::{
     cmd_ai_usage_summary, cmd_clear_llm_usage, cmd_deepseek_balance, cmd_llm_usage,
@@ -492,6 +492,8 @@ pub fn run() {
             cmd_semantic_test,
             cmd_semantic_rebuild,
             cmd_semantic_resume,
+            cmd_semantic_save_rerank,
+            cmd_semantic_test_rerank,
             cmd_remote_sync_status,
             cmd_remote_sync_test,
             cmd_remote_sync_save,

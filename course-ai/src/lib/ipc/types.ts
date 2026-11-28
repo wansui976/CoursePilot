@@ -508,9 +508,14 @@ export type SemanticStatus = {
   indexed: number;
   total: number;
   progress: SemanticIndexProgress;
+  /** 重排用的配置和模型名；没设置为 null。 */
+  rerankProfile: string | null;
+  rerankModel: string | null;
 };
 
 export type SemanticTest = { dimensions: number; millis: number };
+
+export type RerankTest = { millis: number; rankedCorrectly: boolean };
 
 /** 设置 → 多设备同步：网盘上看到的另一台设备。 */
 export type RemoteSyncDevice = {
