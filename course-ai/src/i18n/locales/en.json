@@ -1826,7 +1826,8 @@
     "progressAriaValue": "{{percent}}% downloaded: {{message}}",
     "retry": "Retry",
     "cookieExpired": "Your Bilibili sign-in may have expired (e.g. HTTP 412). Import a fresh cookies.txt and try again.",
-    "reimportCookies": "Import cookies and retry"
+    "reimportCookies": "Import cookies and retry",
+    "cancelTask": "Cancel download “{{title}}”"
   },
   "playlistImport": {
     "title": "Import Playlist / Collection",
@@ -2135,7 +2136,10 @@
     "readingFocus": "Focus reading",
     "exitReadingFocus": "Exit focus reading (Esc)",
     "queueSubtitleMissing": "No subtitles; making the transcript with speech recognition",
-    "queueAsrNotReady": "Speech recognition isn't set up yet, so imported videos won't start processing on their own (except ones with built-in subtitles). Once it's set up, click “Start processing” in the course."
+    "queueAsrNotReady": "Speech recognition isn't set up yet, so imported videos won't start processing on their own (except ones with built-in subtitles). Once it's set up, click “Start processing” in the course.",
+    "queueProcessing": "Processing",
+    "queueStep": "step {{index}} of {{total}}",
+    "cancelTask": "Cancel processing “{{title}}”"
   },
   "time": {
     "justNow": "Just now",

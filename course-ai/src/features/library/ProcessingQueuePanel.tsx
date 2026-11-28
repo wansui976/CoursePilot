@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, ChevronRight, Download, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
+import { CheckCircle2, ChevronRight, KeyRound, Loader2, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { ErrorNote } from "@/ui/ErrorNote";
@@ -17,6 +17,8 @@ export type QueueItem = {
   message: string | null;
   /** 下载时没拿到字幕：说明这一条在用语音识别生成文稿。 */
   note?: string | null;
+  /** 走到第几步（「第 3 步，共 10 步」）；失败或还没有阶段时为空。 */
+  step?: string | null;
   failed: boolean;
   canCancel: boolean;
   jobLoadError: unknown;
@@ -110,30 +112,28 @@ export function ProcessingQueuePanel({
     >
       <ViewHeader
         title={t("home.queueLabel")}
+        // 任务数放在标题下面：和按钮挤在一行时，手机上只能藏起来。
+        description={totalCount > 0 ? t("home.queueCount", { count: totalCount }) : undefined}
         level="root"
         className="ca-view-header--column"
         onBack={onBack}
         backLabel={t("home.queueBack")}
         actions={
           <>
-            {/* 批量操作：有运行/排队中的任务时「全部取消」，有失败任务时「全部重试」。 */}
-            {hasCancellable && (
-              <Button variant="outline" size="sm" onClick={onCancelAll} className="ca-touch-44">
-                <X className="h-3.5 w-3.5" />
-                {t("home.cancelAll")}
-              </Button>
-            )}
+            {/* 批量操作：有运行/排队中的任务时「全部取消」，有失败任务时「全部重试」。
+                不是这一页的主操作，用不带框的轻按钮，手机上不压过标题。 */}
             {hasFailed && (
-              <Button variant="outline" size="sm" onClick={onRetryAll} className="ca-touch-44">
+              <Button variant="ghost" size="sm" onClick={onRetryAll} className="ca-touch-44">
                 <RotateCcw className="h-3.5 w-3.5" />
                 {t("home.retryAll")}
               </Button>
             )}
-            {/* 手机宽度下标题、全部取消已经占满一行；任务数在底部 Tab 徽标和列表里都能看到，
-                这里只留给读屏，不再把按钮挤窄。 */}
-            <span className="max-sm:sr-only text-xs tabular-nums text-[var(--text-muted)]">
-              {t("home.queueCount", { count: totalCount })}
-            </span>
+            {hasCancellable && (
+              <Button variant="ghost" size="sm" onClick={onCancelAll} className="ca-touch-44">
+                <X className="h-3.5 w-3.5" />
+                {t("home.cancelAll")}
+              </Button>
+            )}
           </>
         }
       />
@@ -162,227 +162,135 @@ export function ProcessingQueuePanel({
           <p className="py-2 text-sm text-[var(--text-muted)]">{t("home.queueIdle")}</p>
         ) : totalCount > 0 ? (
           // 平铺的列表：上下发丝线分隔，不再每个任务一张带框带影的卡片。
-          <div className="flex w-full flex-col">
-            {downloads.length > 0 && (
-              <section className="mb-6 flex flex-col">
-                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
-                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                  {t("downloads.sectionTitle")}
-                </h2>
-                {downloads.map((item) => {
-                  const { job, percent, message, failed, cookieExpired, canCancel } = item;
-                  return (
-                    <div
-                      key={job.id}
-                      className="relative border-t border-[var(--border-faint)] last:border-b"
-                    >
-                      <div className={`px-4 py-3 ${failed ? "" : "pr-20"}`}>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
-                            {job.title}
-                          </div>
-                          <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
-                            {percent}%
-                          </span>
-                        </div>
-                        <div
-                          role="progressbar"
-                          aria-label={t("downloads.progressAria", { title: job.title })}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-valuenow={percent}
-                          aria-valuetext={t("downloads.progressAriaValue", {
-                            percent,
-                            message,
-                          })}
-                          className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]"
-                        >
-                          <div
-                            className={
-                              failed
-                                ? "h-full bg-[var(--status-err)]"
-                                : "ca-fill-grad h-full"
-                            }
-                            style={{ width: `${percent}%` }}
-                          />
-                        </div>
-                        <div
-                          role={failed ? "alert" : "status"}
-                          aria-live={failed ? "assertive" : "polite"}
-                          aria-atomic="true"
-                          className={
-                            failed
-                              ? "mt-1.5 whitespace-pre-wrap break-words pr-2 text-xs leading-relaxed text-[var(--status-err)]"
-                              : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
+          <div className="flex w-full flex-col gap-9">
+            {items.length > 0 && (
+              <section aria-labelledby="queue-processing" className="flex flex-col">
+                <SectionHead id="queue-processing" title={t("home.queueProcessing")} count={items.length} />
+                <ul className="flex w-full flex-col">
+                  {items.map((item) => {
+                    const { video, percent, message, failed, canCancel } = item;
+                    const title = displayTitle(video.title);
+                    return (
+                      <li key={video.id} className="border-b border-[var(--border-faint)]">
+                        <QueueRow
+                          title={title}
+                          percent={percent}
+                          failed={failed}
+                          message={message}
+                          detail={item.step}
+                          note={!failed ? item.note : null}
+                          progressLabel={t("home.queueTaskProgress", { title })}
+                          progressValue={t("home.queueTaskProgressValue", { percent, message })}
+                          onOpen={() => onOpenVideo(video)}
+                          action={
+                            canCancel ? (
+                              <RowAction
+                                label={t("home.cancel")}
+                                ariaLabel={t("home.cancelTask", { title })}
+                                onClick={() => onCancelVideo(video.id)}
+                              />
+                            ) : null
                           }
-                        >
-                          {message}
-                        </div>
-                        {failed && (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            {cookieExpired ? (
-                              <button
-                                type="button"
-                                onClick={() => onReimportCookies(job.id)}
-                                className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
-                              >
-                                <KeyRound className="h-3.5 w-3.5" />
-                                {t("downloads.reimportCookies")}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => onRetryDownload(job.id)}
-                                className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-strong)] transition hover:bg-[var(--surface-card-hover)]"
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                {t("downloads.retry")}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => onRemoveDownload(job.id)}
-                              className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              {t("downloads.remove")}
-                            </button>
+                          footer={
+                            failed ? (
+                              <>
+                                <FooterButton onClick={() => onRetryProcessing(video)}>
+                                  <RotateCcw className="h-3.5 w-3.5" />
+                                  {t("home.retry")}
+                                </FooterButton>
+                                <FooterButton
+                                  danger
+                                  onClick={() => onRemoveVideo(video.id)}
+                                  disabled={dismiss.isPending && dismiss.variables === video.id}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  {t("home.remove")}
+                                </FooterButton>
+                              </>
+                            ) : null
+                          }
+                        />
+                        {item.jobLoadError != null && (
+                          <div className="border-t border-[var(--border-faint)] px-4 py-2">
+                            <ErrorNote error={item.jobLoadError} onRetry={() => onRetryJobs(video.id)} />
                           </div>
                         )}
-                      </div>
-                      {canCancel && (
-                        // 触屏上 ca-touch-44 把按钮撑到 44px 高，若仍距顶 12px，文字会掉到标题下面一行；
-                        // 窄屏和触屏贴顶放，44px 的中心正好落在标题/百分比的基线上。
-                        <button
-                          onClick={() => onCancelDownload(job.id)}
-                          className="ca-touch-44 absolute right-3 top-3 flex items-center justify-center rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition max-md:top-0 pointer-coarse:top-0 hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
-                        >
-                          {t("downloads.cancel")}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                        {dismiss.isError && dismiss.variables === video.id && (
+                          <div className="border-t border-[var(--border-faint)] px-4 py-2">
+                            <ErrorNote
+                              error={dismiss.error}
+                              onRetry={() => dismiss.mutate(video.id)}
+                            />
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               </section>
             )}
-            {items.map((item) => {
-              const { video, percent, message, failed, canCancel } = item;
-              return (
-                <div
-                  key={video.id}
-                  className="relative border-t border-[var(--border-faint)] last:border-b"
-                >
-                  <button
-                    onClick={() => onOpenVideo(video)}
-                    className={`block w-full px-4 py-3 text-left transition hover:bg-[var(--surface-card-hover)] ${
-                      canCancel ? "pr-20" : failed ? "pr-40" : ""
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">
-                        {displayTitle(video.title)}
-                      </div>
-                      <span className="shrink-0 tabular-nums text-xs text-[var(--text-muted)]">
-                        {percent}%
-                      </span>
-                    </div>
-                    <div
-                      role="progressbar"
-                      aria-label={t("home.queueTaskProgress", {
-                        title: displayTitle(video.title),
-                      })}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={percent}
-                      aria-valuetext={t("home.queueTaskProgressValue", {
-                        percent,
-                        message,
-                      })}
-                      className="mt-2 h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]"
-                    >
-                      <div
-                        className={
-                          failed ? "h-full bg-[var(--status-err)]" : "ca-fill-grad h-full"
-                        }
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                    <div
-                      role={failed ? "alert" : "status"}
-                      aria-live={failed ? "assertive" : "polite"}
-                      aria-atomic="true"
-                      className={
-                        failed
-                          ? "mt-1.5 whitespace-pre-wrap break-words pr-2 text-xs leading-relaxed text-[var(--status-err)]"
-                          : "mt-1.5 truncate text-xs text-[var(--text-muted)]"
-                      }
-                    >
-                      {message}
-                    </div>
-                    {item.note && !failed && (
-                      <div className="mt-0.5 text-xs leading-relaxed text-[var(--text-faint)]">
-                        {item.note}
-                      </div>
-                    )}
-                  </button>
-                  {item.jobLoadError != null && (
-                    <div className="border-t border-[var(--border-faint)] px-4 py-2">
-                      <ErrorNote error={item.jobLoadError} onRetry={() => onRetryJobs(video.id)} />
-                    </div>
-                  )}
-                  {dismiss.isError && dismiss.variables === video.id && (
-                    <div className="border-t border-[var(--border-faint)] px-4 py-2">
-                      <ErrorNote
-                        error={dismiss.error}
-                        onRetry={() => dismiss.mutate(video.id)}
-                      />
-                    </div>
-                  )}
-                  {canCancel && (
-                    <button
-                      onClick={() => onCancelVideo(video.id)}
-                      className="ca-touch-44 absolute right-3 top-3 flex items-center justify-center rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition max-md:top-0 pointer-coarse:top-0 hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
-                    >
-                      {t("home.cancel")}
-                    </button>
-                  )}
-                  {failed && (
-                    <div className="absolute right-3 top-3 flex items-center gap-1 max-md:top-0 pointer-coarse:top-0">
-                      <button
-                        type="button"
-                        onClick={() => onRetryProcessing(video)}
-                        className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-normal)] transition hover:bg-[var(--surface-card-hover)]"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        {t("home.retry")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onRemoveVideo(video.id)}
-                        disabled={dismiss.isPending && dismiss.variables === video.id}
-                        className="ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--status-err)] transition hover:bg-[var(--surface-card-hover)]"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {t("home.remove")}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {downloads.length > 0 && (
+              <section aria-labelledby="queue-downloads" className="flex flex-col">
+                <SectionHead id="queue-downloads" title={t("downloads.sectionTitle")} count={downloads.length} />
+                <ul className="flex w-full flex-col">
+                  {downloads.map((item) => {
+                    const { job, percent, message, failed, cookieExpired, canCancel } = item;
+                    // 下载任务的标题常带着文件扩展名（「第 10 讲.mp4」），和课程里的写法对齐。
+                    const title = displayTitle(job.title);
+                    return (
+                      <li key={job.id} className="border-b border-[var(--border-faint)]">
+                        <QueueRow
+                          title={title}
+                          percent={percent}
+                          failed={failed}
+                          message={message}
+                          progressLabel={t("downloads.progressAria", { title })}
+                          progressValue={t("downloads.progressAriaValue", { percent, message })}
+                          action={
+                            canCancel ? (
+                              <RowAction
+                                label={t("home.cancel")}
+                                ariaLabel={t("downloads.cancelTask", { title })}
+                                onClick={() => onCancelDownload(job.id)}
+                              />
+                            ) : null
+                          }
+                          footer={
+                            failed ? (
+                              <>
+                                {cookieExpired ? (
+                                  <FooterButton onClick={() => onReimportCookies(job.id)}>
+                                    <KeyRound className="h-3.5 w-3.5" />
+                                    {t("downloads.reimportCookies")}
+                                  </FooterButton>
+                                ) : (
+                                  <FooterButton onClick={() => onRetryDownload(job.id)}>
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                    {t("downloads.retry")}
+                                  </FooterButton>
+                                )}
+                                <FooterButton danger onClick={() => onRemoveDownload(job.id)}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  {t("downloads.remove")}
+                                </FooterButton>
+                              </>
+                            ) : null
+                          }
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
           </div>
         ) : null}
         {recent.length > 0 && !(loading && items.length === 0) && (
           <section aria-labelledby="queue-recent" className="mt-9">
-            <h2
-              id="queue-recent"
-              className="mb-2 text-xs font-medium text-[var(--text-muted)]"
-            >
-              {t("home.queueRecent")}
-            </h2>
-            <ul className="flex flex-col">
+            <SectionHead id="queue-recent" title={t("home.queueRecent")} />
+            <ul className="flex w-full flex-col">
               {recent.map(({ video, courseName, finishedAt }) => (
-                <li key={video.id} className="border-t border-[var(--border-faint)] last:border-b">
+                <li key={video.id} className="border-b border-[var(--border-faint)]">
                   <button
                     type="button"
                     onClick={() => onOpenVideo(video)}
@@ -414,5 +322,151 @@ export function ProcessingQueuePanel({
         </div>
       </div>
     </div>
+  );
+}
+
+/** 小节标题：衬线标题 + 延伸到边的发丝线（设计规范的 section head），数量写在线后面。 */
+function SectionHead({ id, title, count }: { id: string; title: string; count?: number }) {
+  return (
+    <div className="ca-section-head">
+      <h2 id={id}>{title}</h2>
+      {count != null && (
+        <span className="ca-section-more font-[family-name:var(--font-mono)] tabular-nums">{count}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 队列里的一行：左边标题、进度条、状态；右边百分比和这一行的操作，排成固定的两列，
+ * 下载和处理两个区上下对得齐。失败时进度条和状态换成错误色，操作挪到状态下面一排。
+ */
+function QueueRow({
+  title,
+  percent,
+  failed,
+  message,
+  detail,
+  note,
+  progressLabel,
+  progressValue,
+  onOpen,
+  action,
+  footer,
+}: {
+  title: string;
+  percent: number;
+  failed: boolean;
+  message: string | null;
+  /** 跟在状态后面的补充（「第 3 步，共 10 步」）。 */
+  detail?: string | null;
+  note?: string | null;
+  progressLabel: string;
+  progressValue: string;
+  /** 整行可点（打开视频）。 */
+  onOpen?: () => void;
+  action: ReactNode;
+  footer: ReactNode;
+}) {
+  const body = (
+    <>
+      <span className="block truncate text-sm font-medium text-[var(--text-strong)]">{title}</span>
+      <span
+        role="progressbar"
+        aria-label={progressLabel}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        aria-valuetext={progressValue}
+        className="mt-2 block h-1.5 overflow-hidden rounded bg-[var(--surface-card-hover)]"
+      >
+        <span
+          className={`block h-full ${failed ? "bg-[var(--status-err)]" : "ca-fill-ink"}`}
+          style={{ width: `${percent}%` }}
+        />
+      </span>
+      <span
+        role={failed ? "alert" : "status"}
+        aria-live={failed ? "assertive" : "polite"}
+        aria-atomic="true"
+        className={
+          failed
+            ? "mt-1.5 block whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--status-err)]"
+            : "mt-1.5 block truncate text-xs text-[var(--text-muted)]"
+        }
+      >
+        {message}
+        {detail ? <span className="text-[var(--text-faint)]">{` · ${detail}`}</span> : null}
+      </span>
+      {note && <span className="mt-0.5 block text-xs leading-relaxed text-[var(--text-faint)]">{note}</span>}
+    </>
+  );
+  return (
+    <div className="flex items-start gap-3 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="-mx-2 -my-1 block w-[calc(100%+1rem)] rounded-md px-2 py-1 text-left transition hover:bg-[var(--surface-card-hover)]"
+          >
+            {body}
+          </button>
+        ) : (
+          body
+        )}
+        {footer && <div className="mt-2 flex flex-wrap items-center gap-2">{footer}</div>}
+      </div>
+      <span className="w-10 flex-none pt-px text-right font-[family-name:var(--font-mono)] text-xs tabular-nums text-[var(--text-muted)]">
+        {percent}%
+      </span>
+      <span className="flex w-12 flex-none justify-end">{action}</span>
+    </div>
+  );
+}
+
+function RowAction({
+  label,
+  ariaLabel,
+  onClick,
+}: {
+  label: string;
+  ariaLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className="ca-hit-expand relative -my-1 rounded-md px-2 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
+    >
+      {label}
+    </button>
+  );
+}
+
+function FooterButton({
+  danger = false,
+  disabled,
+  onClick,
+  children,
+}: {
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`ca-touch-44 inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium transition hover:bg-[var(--surface-card-hover)] disabled:opacity-50 ${
+        danger ? "text-[var(--status-err)]" : "text-[var(--text-strong)]"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

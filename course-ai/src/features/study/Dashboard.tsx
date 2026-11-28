@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useReviewReturn } from "@/stores/reviewReturn";
 import { queries } from "@/lib/queries";
 import { qk } from "@/lib/queryKeys";
@@ -67,8 +67,17 @@ const HEAT_LEVEL_BG = [
 ];
 
 // 平铺的列表与分区标题：不再每块装进一张带边框的白卡片，靠标题、留白和发丝线分组。
-const SECTION_TITLE = "mb-2 text-xs font-medium tracking-wide text-[var(--text-muted)]";
-const FLAT_LIST = "divide-y divide-[var(--border-faint)] border-y border-[var(--border-faint)]";
+/** 小节标题：衬线标题 + 延伸到边的发丝线（设计规范的 section head，和知识点页、收集册同一种）。 */
+function SectionHead({ id, children, more }: { id?: string; children: ReactNode; more?: ReactNode }) {
+  return (
+    <div className="ca-section-head">
+      <h2 id={id}>{children}</h2>
+      {more != null && <span className="ca-section-more">{more}</span>}
+    </div>
+  );
+}
+// 小节标题自带一道发丝线，列表就只在底下收口，不再在标题线下面紧跟一道顶线。
+const FLAT_LIST = "divide-y divide-[var(--border-faint)] border-b border-[var(--border-faint)]";
 const FLAT_ROW =
   "group -mx-3 flex w-[calc(100%+1.5rem)] items-center gap-3 rounded-md px-3 py-3 text-left transition hover:bg-[var(--surface-card-hover)]";
 const ROW_ACTION =
@@ -195,7 +204,7 @@ function HeatSquare({
       }}
       // 达标与否写在格子的说明里（悬停 / 选中时下方显示），格子本身不再点小白点——
       // 大多数日子都达标时，满屏的小点比描边网格还吵。今天与选中格保留描边。
-      className={`relative h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-app)] ${
+      className={`ca-hit-expand relative h-3 w-3 flex-none cursor-pointer rounded-[2px] ${HEAT_LEVEL_BG[cell.level]} transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-app)] ${
         isToday
           ? "outline outline-2 outline-offset-1 outline-[var(--text-strong)]"
           : active
@@ -204,6 +213,30 @@ function HeatSquare({
       }`}
     />
   );
+}
+
+/**
+ * 热力图的点按：交给离落点最近的那一格。
+ *
+ * 触屏上每个格子的点按区往外扩到 36px（.ca-hit-expand），相邻格子只隔 4px，
+ * 扩出去的区域彼此重叠，后画的格子会抢走点在前一格正中的手指。按几何距离挑最近的一格，
+ * 点到哪格就是哪格。键盘回车触发的 click 没有坐标（detail 为 0），照常交给格子自己。
+ */
+function selectNearestHeatDay(event: MouseEvent<HTMLElement>, onSelect: (day: string) => void) {
+  if (event.detail === 0) return;
+  let best: { day: string; distance: number } | null = null;
+  for (const cell of event.currentTarget.querySelectorAll<HTMLElement>("[data-heat-day]")) {
+    const rect = cell.getBoundingClientRect();
+    const dx = event.clientX - (rect.left + rect.width / 2);
+    const dy = event.clientY - (rect.top + rect.height / 2);
+    const distance = dx * dx + dy * dy;
+    const day = cell.dataset.heatDay;
+    if (day && (!best || distance < best.distance)) best = { day, distance };
+  }
+  if (!best) return;
+  event.stopPropagation();
+  onSelect(best.day);
+  event.currentTarget.querySelector<HTMLElement>(`[data-heat-day="${best.day}"]`)?.focus();
 }
 
 /** 学习仪表盘：本周时长 + 连续天数 + 热力图 + 各课程已学时长/上次学习（点击进入课程）。 */
@@ -498,12 +531,7 @@ export function Dashboard({
         <div className="mx-auto max-w-3xl space-y-9">
           {continueQuery.isError ? (
             <section aria-labelledby="dashboard-continue-title">
-              <div
-                id="dashboard-continue-title"
-                className={SECTION_TITLE}
-              >
-                {t("dashboard.continueLearning")}
-              </div>
+              <SectionHead id="dashboard-continue-title">{t("dashboard.continueLearning")}</SectionHead>
               <ErrorNote
                 error={continueQuery.error}
                 onRetry={() => void continueQuery.refetch()}
@@ -511,12 +539,7 @@ export function Dashboard({
             </section>
           ) : continueRows.length > 0 ? (
             <section aria-labelledby="dashboard-continue-title">
-              <div
-                id="dashboard-continue-title"
-                className={SECTION_TITLE}
-              >
-                {t("dashboard.continueLearning")}
-              </div>
+              <SectionHead id="dashboard-continue-title">{t("dashboard.continueLearning")}</SectionHead>
               <ul className={FLAT_LIST}>
                 {continueRows.map((row) => {
                   const { positionSec, ratio } = readPlaybackProgress(row.video_id);
@@ -538,7 +561,7 @@ export function Dashboard({
                           {ratio > 0 && (
                             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]">
                               <div
-                                className="ca-fill-grad h-full rounded-full"
+                                className="ca-fill-ink h-full rounded-full"
                                 style={{ width: `${Math.round(ratio * 100)}%` }}
                               />
                             </div>
@@ -570,7 +593,7 @@ export function Dashboard({
               className="group flex w-full items-center gap-4 border-y border-[var(--border-faint)] py-4 text-left"
             >
               <span className="min-w-0 flex-1">
-                <span className="block text-base font-semibold text-[var(--text-strong)]">
+                <span className="block font-[family-name:var(--font-display)] text-[20px] font-medium leading-7 text-[var(--text-strong)]">
                   {t("dashboard.reviewDue", { count: dueCount })}
                 </span>
                 {reviewOutputLine && (
@@ -632,7 +655,7 @@ export function Dashboard({
                 <span className="text-xs text-[var(--text-muted)]">{t("dashboard.todayStudy")}</span>
                 <DailyGoalDialog value={goalMin} onSave={saveGoal} />
               </div>
-              <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
+              <div className="ca-dashboard-stat-value mt-1">
                 {formatDuration(todayWatched)}
               </div>
               {goalReached ? (
@@ -648,7 +671,7 @@ export function Dashboard({
                 className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
               >
                 <div
-                  className="ca-fill-grad h-full rounded-full"
+                  className="ca-fill-ink h-full rounded-full"
                   style={{ width: `${goalPercent}%` }}
                 />
               </div>
@@ -659,7 +682,7 @@ export function Dashboard({
               className="ca-dashboard-stat-week min-w-0 border-l border-[var(--border-faint)] px-4 py-1 max-[399px]:mt-3 max-[399px]:border-l-0 max-[399px]:border-t max-[399px]:px-0 max-[399px]:pt-3"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.weekStudy")}</div>
-              <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
+              <div className="ca-dashboard-stat-value mt-1">
                 {formatDuration(week)}
               </div>
               <div className="mt-1 text-xs text-[var(--text-muted)]">
@@ -671,7 +694,7 @@ export function Dashboard({
                 className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--surface-card-active)]"
               >
                 <div
-                  className="ca-fill-grad h-full rounded-full"
+                  className="ca-fill-ink h-full rounded-full"
                   style={{ width: `${Math.min(100, weekGoalPercent)}%` }}
                 />
               </div>
@@ -682,7 +705,7 @@ export function Dashboard({
               className="ca-dashboard-stat-streak min-w-0 border-l border-[var(--border-faint)] px-4 py-1 max-[399px]:mt-3 max-[399px]:border-t max-[399px]:pt-3"
             >
               <div className="min-h-7 text-xs leading-7 text-[var(--text-muted)]">{t("dashboard.streak")}</div>
-              <div className="mt-1 flex items-center gap-1.5 text-2xl font-semibold tabular-nums tracking-tight text-[var(--text-strong)]">
+              <div className="ca-dashboard-stat-value mt-1 flex items-center gap-1.5">
                 {t("dashboard.streakDays", { days: streak })}
               </div>
               <div className="mt-1 text-xs text-[var(--text-muted)]">
@@ -699,7 +722,7 @@ export function Dashboard({
                   <span
                     key={index}
                     className={`h-full flex-1 rounded-full ${
-                      studied ? "ca-fill-grad" : "bg-[var(--surface-card-active)]"
+                      studied ? "ca-fill-ink" : "bg-[var(--surface-card-active)]"
                     }`}
                   />
                 ))}
@@ -723,16 +746,11 @@ export function Dashboard({
             </section>
           )}
 
-          <MistakeDeck onReview={() => setReviewingMistakes(true)} />
+          <MistakeDeck onReview={() => setReviewingMistakes(true)} className="ca-mistakes--section" />
 
           {weakQuery.isError ? (
             <section aria-labelledby="dashboard-weak-title">
-              <div
-                id="dashboard-weak-title"
-                className={SECTION_TITLE}
-              >
-                {t("dashboard.weakTopics")}
-              </div>
+              <SectionHead id="dashboard-weak-title">{t("dashboard.weakTopics")}</SectionHead>
               <ErrorNote
                 error={weakQuery.error}
                 onRetry={() => void weakQuery.refetch()}
@@ -740,12 +758,7 @@ export function Dashboard({
             </section>
           ) : weak.length > 0 ? (
             <section aria-labelledby="dashboard-weak-title">
-              <div
-                id="dashboard-weak-title"
-                className={SECTION_TITLE}
-              >
-                {t("dashboard.weakTopics")}
-              </div>
+              <SectionHead id="dashboard-weak-title">{t("dashboard.weakTopics")}</SectionHead>
               <ul className={FLAT_LIST}>
                 {weak.map((w) => (
                   <li key={`${w.course_id}-${w.concept_id}`}>
@@ -785,16 +798,19 @@ export function Dashboard({
           {!dailyQuery.isPending && !dailyQuery.isError && (
             // 热力图是数据图形，色阶本身就是信息：审计的「强调色用量」检查放行。
             <section aria-label={t("dashboard.heatmap")} data-allow-accent="">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-xs font-medium tracking-wide text-[var(--text-muted)]">{t("dashboard.heatmap")}</div>
-              <div className="flex items-center gap-1 ca-t-2xs text-[var(--text-faint)]">
+            <SectionHead
+              more={
+              <span className="flex items-center gap-1 ca-t-2xs text-[var(--text-faint)]">
                 <span>{t("dashboard.less")}</span>
                 {HEAT_LEVEL_BG.map((bg, i) => (
                   <span key={i} className={`h-3 w-3 rounded-[2px] ${bg}`} />
                 ))}
                 <span>{t("dashboard.more")}</span>
-              </div>
-            </div>
+              </span>
+              }
+            >
+              {t("dashboard.heatmap")}
+            </SectionHead>
             <div ref={setHeatmapBox} className="overflow-x-auto pb-1">
               <div className="grid min-w-max grid-cols-[auto] grid-rows-[1rem_auto] gap-y-1">
                 <div aria-hidden="true" className="flex h-4 gap-1">
@@ -827,6 +843,7 @@ export function Dashboard({
                 <div
                   ref={heatmapRef}
                   role="group"
+                  onClickCapture={(event) => selectNearestHeatDay(event, setActiveHeatDay)}
                   aria-label={t("dashboard.heatmapAria", { weeks: heatmapWeeks })}
                   className="flex gap-1"
                 >
@@ -873,15 +890,13 @@ export function Dashboard({
           )}
 
           <div>
-            <div className={SECTION_TITLE}>
-              {t("dashboard.courses")}
-            </div>
+            <SectionHead>{t("dashboard.courses")}</SectionHead>
             {courseStatsFailed ? (
               <ErrorNote error={courseStatsError} onRetry={retryCourseStats} />
             ) : courseStatsPending ? (
               <Skeleton aria-label={t("common.loading")} className="h-16 w-full rounded-xl" />
             ) : courseTotals.length === 0 ? (
-              <p className="border-y border-[var(--border-faint)] py-6 text-center text-sm text-[var(--text-muted)]">
+              <p className="border-b border-[var(--border-faint)] py-6 text-center text-sm text-[var(--text-muted)]">
                 {t("dashboard.noStudyRecords")}
               </p>
             ) : (
@@ -895,12 +910,15 @@ export function Dashboard({
                         onClick={() => onOpenCourse(c.course_id)}
                         className={FLAT_ROW}
                       >
-                        {total > 0 && (
+                        {total > 0 ? (
                           <ProgressRing value={watched / total}>
                             <span className="ca-t-2xs font-semibold tabular-nums text-[var(--text-strong)]">
                               {watched}/{total}
                             </span>
                           </ProgressRing>
+                        ) : (
+                          // 还数不出讲数的课也留出圆环的位置，课程名和上下几行对齐。
+                          <span aria-hidden="true" className="h-10 w-10 flex-none" />
                         )}
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium text-[var(--text-strong)]">

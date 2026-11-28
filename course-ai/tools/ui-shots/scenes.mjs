@@ -59,6 +59,27 @@ async function dumpShareImages(page, out, prefix) {
 
 const ALL = ["desktop", "phone", "tablet"];
 
+/** 找到页面上内容最长的那个滚动区，往下逐屏截（最多 5 屏）：整页截图截不到内层滚动区。 */
+async function scrollShots(page, shot) {
+  for (let i = 1; i <= 5; i++) {
+    const moved = await page.evaluate(() => {
+      let best = null;
+      for (const el of document.querySelectorAll("*")) {
+        const overflow = getComputedStyle(el).overflowY;
+        if (overflow !== "auto" && overflow !== "scroll") continue;
+        const extra = el.scrollHeight - el.clientHeight;
+        if (extra > 4 && (!best || extra > best.scrollHeight - best.clientHeight)) best = el;
+      }
+      if (!best) return false;
+      const before = best.scrollTop;
+      best.scrollTop = before + best.clientHeight * 0.85;
+      return best.scrollTop > before;
+    });
+    if (!moved) break;
+    await shot(`p${i + 1}`);
+  }
+}
+
 export const scenes = [
   { name: "home", devices: ALL, run: async ({ shot }) => shot() },
   {
@@ -958,6 +979,8 @@ export const scenes = [
     run: async ({ page, shot }) => {
       await nav(page, "学习面板", "学习");
       await shot();
+      // 学习面板一屏放不下：往下逐屏截，看完整页。
+      await scrollShots(page, shot);
     },
   },
   {

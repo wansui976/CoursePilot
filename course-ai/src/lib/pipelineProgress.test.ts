@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import i18n from "@/i18n";
 import {
+  stagePosition,
   currentStage,
   overallProgress,
   stageMessage,
@@ -238,5 +239,22 @@ describe("旧任务的失败原因", () => {
     expect(
       stageMessage({ stage: "asr", status: "failed", progress: 0.4, message: "pipeline error: volcengine submit 失败" }),
     ).toBe("volcengine submit 失败");
+  });
+});
+
+describe("走到第几步", () => {
+  it("按流水线顺序数，当前阶段取正在跑的那一个", () => {
+    expect(
+      stagePosition({
+        asr: { stage: "asr", status: "running", progress: 0.4 },
+        audio: { stage: "audio", status: "done", progress: 1 },
+        crop: { stage: "crop", status: "done", progress: 1 },
+        chapters: { stage: "chapters", status: "pending", progress: 0 },
+      }),
+    ).toEqual({ index: 3, total: 4 });
+  });
+
+  it("还没有任何阶段时不给步数", () => {
+    expect(stagePosition({})).toBeNull();
   });
 });

@@ -263,6 +263,26 @@ describe("Dashboard", () => {
     });
   });
 
+  it("gives a tap to the nearest square even when a neighbour's enlarged hit area caught it", async () => {
+    const yesterdayDate = new Date(`${today}T00:00:00`);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = localDay(yesterdayDate);
+    renderDashboard();
+    const grid = await screen.findByRole("group", { name: "最近 26 周学习热力图" });
+    // 只给两格摆位置：昨天在上、今天在下（同一列相邻两格，中心相距 16px），其余都远远放开。
+    const place = (day: string) =>
+      day === yesterday ? 84 : day === today ? 100 : 10_000;
+    for (const cell of grid.querySelectorAll<HTMLElement>("[data-heat-day]")) {
+      const top = place(cell.dataset.heatDay ?? "");
+      cell.getBoundingClientRect = () =>
+        ({ left: 94, top, width: 12, height: 12, right: 106, bottom: top + 12, x: 94, y: top }) as DOMRect;
+    }
+    // 手指落在今天那格正中，但触点被昨天那格往外扩的点按区接住了。
+    const yesterdayCell = within(grid).getByRole("button", { name: `${yesterday} · 未学习` });
+    fireEvent.click(yesterdayCell, { detail: 1, clientX: 100, clientY: 106 });
+    expect(screen.getByRole("status")).toHaveTextContent(`${today} · 学习 30 分钟`);
+  });
+
   it("shows a three-column summary with daily and weekly goals, and edits the goal", async () => {
     renderDashboard();
     const stats = await screen.findByRole("group", { name: "学习统计" });

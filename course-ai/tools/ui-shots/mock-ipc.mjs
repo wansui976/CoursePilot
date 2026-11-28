@@ -712,7 +712,24 @@ export function installMockIpc({ theme, safeArea }) {
     },
     cmd_list_jobs: ({ videoId }) =>
       videoId === "v7"
-        ? [{ id: "j1", video_id: "v7", stage: "asr", status: "running", progress: 0.46, message: localStorage.getItem("__shot-local-asr") === "1" ? "本地识别中（sensevoice，zh）" : "语音识别中", created_at: now, updated_at: now }]
+        ? // 和后端一样，开始处理时十个阶段都登记好：前两步做完，识别跑到一半，后面排着。
+          ["crop", "audio", "asr", "slides", "slides_ocr", "chapters", "summary", "notes", "quiz", "mindmap"].map(
+            (stage, i) => ({
+              id: `j${i}`,
+              video_id: "v7",
+              stage,
+              status: i < 2 ? "done" : i === 2 ? "running" : "pending",
+              progress: i < 2 ? 1 : i === 2 ? 0.46 : 0,
+              message:
+                i === 2
+                  ? localStorage.getItem("__shot-local-asr") === "1"
+                    ? "本地识别中（sensevoice，zh）"
+                    : "语音识别中"
+                  : null,
+              created_at: now,
+              updated_at: now,
+            }),
+          )
         : [],
     cmd_list_transcripts: () => transcript,
     cmd_get_chapters: () => chapters,

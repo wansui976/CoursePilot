@@ -931,7 +931,7 @@ export function CourseLibraryView({
           onClick={() => {
             void ipc.downloads.cancel(job.id).catch(() => {});
           }}
-          className="ca-touch-44 absolute bottom-2 right-2 z-10 grid h-7 w-7 place-items-center rounded-full text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
+          className="ca-touch-44 absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full text-[var(--text-faint)] transition hover:bg-[var(--surface-card-hover)] hover:text-[var(--status-err)]"
         >
           <X className="h-3.5 w-3.5" />
         </button>

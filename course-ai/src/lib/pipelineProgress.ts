@@ -196,6 +196,19 @@ export function currentStage(byStage: Record<string, StageJob>): StageJob | unde
 }
 
 /**
+ * 现在走到第几步：「第 3 步，共 10 步」。只看已经登记的阶段（没配大模型时后面几步不会出现），
+ * 当前阶段按 [`currentStage`] 的口径。一个阶段都没有时返回 null。
+ */
+export function stagePosition(
+  byStage: Record<string, StageJob>,
+): { index: number; total: number } | null {
+  const list = orderedStages(byStage);
+  const current = currentStage(byStage);
+  if (!current || list.length === 0) return null;
+  return { index: list.indexOf(current) + 1, total: list.length };
+}
+
+/**
  * 整条流水线的完成度（0..1）。
  *
  * 每个阶段等权。跳过（canceled）按已完成算——没配大模型时那几步会整体跳过，
