@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AudioLines, Pause, Play, X } from "lucide-react";
 import { writePlaybackPosition } from "@/lib/playback";
+import { useWatchLogger } from "@/lib/useWatchLogger";
 import { useMiniPlayer, type MiniPlayerSession } from "@/stores/miniPlayer";
 import { canBoost } from "./volume";
 
@@ -61,6 +62,8 @@ function MiniPlayerView({
   const [audioOnly, setAudioOnly] = useState(false);
   const lastSavedRef = useRef(session.ms / 1000);
   const update = useMiniPlayer((s) => s.update);
+  // 在小窗里听的也是在学：和视频页一样记进学习时长（热力图、周报）。
+  useWatchLogger(session.videoId, playing);
   const close = useMiniPlayer((s) => s.close);
 
   useEffect(() => {
