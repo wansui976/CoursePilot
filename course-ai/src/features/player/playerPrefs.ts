@@ -9,8 +9,18 @@ const PLAYBACK_RATE_KEY = "course-ai-playback-rate";
 const DANMAKU_ENABLED_KEY = "course-ai-danmaku-enabled";
 const SUPPORTED_PLAYBACK_RATES = new Set([0.5, 0.75, 1, 1.25, 1.5, 2]);
 
-export function loadPlaybackRate() {
+const COURSE_RATE_PREFIX = "course-ai-course-rate:";
+
+/**
+ * 倍速：每门课记住自己的（不同老师语速差很多），没调过的课用全局那一份——
+ * 也就是最近一次在任何课里选的倍速。
+ */
+export function loadPlaybackRate(courseId?: string | null) {
   try {
+    if (courseId) {
+      const course = Number(localStorage.getItem(COURSE_RATE_PREFIX + courseId));
+      if (SUPPORTED_PLAYBACK_RATES.has(course)) return course;
+    }
     const stored = Number(localStorage.getItem(PLAYBACK_RATE_KEY));
     return SUPPORTED_PLAYBACK_RATES.has(stored) ? stored : 1;
   } catch {
@@ -18,9 +28,10 @@ export function loadPlaybackRate() {
   }
 }
 
-export function persistPlaybackRate(rate: number) {
+export function persistPlaybackRate(rate: number, courseId?: string | null) {
   try {
     localStorage.setItem(PLAYBACK_RATE_KEY, String(rate));
+    if (courseId) localStorage.setItem(COURSE_RATE_PREFIX + courseId, String(rate));
   } catch {
     // 隐私模式无法持久化时，本次播放器会话内仍然生效。
   }

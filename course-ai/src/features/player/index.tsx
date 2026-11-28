@@ -239,7 +239,14 @@ export function VideoPlayer({
     };
   }, [decodeFailure, videoId, reopenSource]);
 
-  const [rate, setRate] = useState(loadPlaybackRate);
+  const [rate, setRate] = useState(() => loadPlaybackRate(courseId));
+  // 换课时换成那门课上次的倍速（和音量一样）；同一门课里换视频倍速不变。
+  const rateCourseRef = useRef(courseId);
+  useEffect(() => {
+    if (rateCourseRef.current === courseId) return;
+    rateCourseRef.current = courseId;
+    setRate(loadPlaybackRate(courseId));
+  }, [courseId]);
   const silenceSkip = useSilenceSkip(videoId);
   const [volume, setVolume] = useState(() => readCourseVolume(courseId) ?? 1);
   // 换课时换成那门课上次的音量；同一门课里换视频音量不变。
@@ -1045,7 +1052,7 @@ export function VideoPlayer({
               }}
               onRate={(nextRate) => {
                 setRate(nextRate);
-                persistPlaybackRate(nextRate);
+                persistPlaybackRate(nextRate, courseId);
               }}
               onVolume={(value) => {
                 setVolume(value);
