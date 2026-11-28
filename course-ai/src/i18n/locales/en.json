@@ -1594,7 +1594,9 @@
     "importFailed": "Import failed: {{error}}",
     "selectLocalVideo": "Select local video or audio",
     "noVideosInFolder": "No importable video or audio in this folder",
-    "uploadHintMobile": "Pick mp4 / mov / mp3 / m4a… from Files"
+    "uploadHintMobile": "Pick mp4 / mov / mp3 / m4a… from Files",
+    "fromChaoxing": "Import from Chaoxing / Xuexitong",
+    "fromChaoxingHint": "Sign in, pick a course and download its videos in one go"
   },
   "webdavImport": {
     "title": "Import from a cloud drive",
@@ -1852,6 +1854,27 @@
     "queuing": "Adding to queue…",
     "subscribeFailed": "Couldn't subscribe: {{error}}",
     "subscribeFailedQueued": "Couldn't subscribe: {{error}}. The selected episodes are already in the download queue; trying again only retries the subscription."
+  },
+  "chaoxingImport": {
+    "title": "Import from Chaoxing / Xuexitong",
+    "checking": "Checking sign-in…",
+    "loginMode": "Sign-in method",
+    "byPassword": "Account & password",
+    "byCookie": "Paste cookie",
+    "username": "Phone number / student ID",
+    "password": "Password",
+    "passwordHint": "Only the session credential is kept (in the system keychain), never your password. If your school signs you in through its own portal, use \"Paste cookie\" instead.",
+    "cookie": "Cookie",
+    "cookieStep1": "Sign in at i.chaoxing.com in your browser and open any course.",
+    "cookieStep2": "Press F12 → Network, reload the page and click the first request.",
+    "cookieStep3": "Under Request Headers, copy the whole value of Cookie and paste it above.",
+    "login": "Sign in",
+    "logout": "Sign out",
+    "courseCount": "My courses · {{count}}",
+    "noCourses": "No courses you can watch under this account (only courses you take as a student are listed).",
+    "listing": "Reading the chapters of \"{{title}}\"…",
+    "listingProgress": "Checking section {{done}} / {{total}}…",
+    "noVideos": "No videos found in this course."
   },
   "dashboard": {
     "back": "Back",

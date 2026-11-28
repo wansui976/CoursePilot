@@ -9,6 +9,7 @@ pub mod assistant;
 pub mod audio;
 pub mod bilibili_cache;
 pub mod bilibili_extra;
+pub mod chaoxing;
 pub mod concepts;
 pub mod crop_detect;
 pub mod deepseek_ocr;

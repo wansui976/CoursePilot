@@ -16,6 +16,7 @@ tauri-utils = { version = "2", features = ["build-2"] }
 [dependencies]
 anyhow = "1"
 libc = "0.2"
+aes = "0.8"
 base64 = "0.22"
 # 助手里把用户贴的截图和课件页按画面比对（找出是哪一页、何时出现）。只开常见位图格式的解码。
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }

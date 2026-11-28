@@ -635,7 +635,29 @@ export function installMockIpc({ theme, safeArea }) {
       indexed: 63,
       total: 78,
       progress: { running: true, pending: 15, done: 4, currentTitle: "04 逻辑回归与分类.mp4", lastError: null },
+      rerankProfile: null,
+      rerankModel: null,
     }),
+    // __shot-chaoxing-login：还没登录超星（导入对话框停在登录那一步）。
+    cmd_chaoxing_status: () => ({ loggedIn: localStorage.getItem("__shot-chaoxing-login") !== "1" }),
+    cmd_chaoxing_courses: () => [
+      { courseId: "1", clazzId: "11", cpi: "9", title: "机器学习（2026 春）", teacher: "张华 · 计算机学院" },
+      { courseId: "2", clazzId: "22", cpi: "9", title: "高等数学 A（下）", teacher: "李明" },
+      { courseId: "3", clazzId: "33", cpi: "9", title: "大学物理实验——力学与热学部分的数据处理方法", teacher: "物理实验中心" },
+    ],
+    cmd_chaoxing_course_videos: () => {
+      const v = (id, title, chapter) => ({ url: `https://mooc1.chaoxing.com/ananas/status/${id}`, objectId: id, title, chapter });
+      return [
+        v("a1", "1.1 课程介绍", "第一章 绪论"),
+        v("a2", "1.2 什么是机器学习", "第一章 绪论"),
+        v("a3", "1.3 基本术语与假设空间", "第一章 绪论"),
+        v("b1", "2.1 经验误差与过拟合", "第二章 模型评估与选择"),
+        v("b2", "2.2 评估方法（1）", "第二章 模型评估与选择"),
+        v("b3", "2.2 评估方法（2）", "第二章 模型评估与选择"),
+        v("c1", "3.1 线性回归", "第三章 线性模型"),
+        v("c2", "3.2 对数几率回归", "第三章 线性模型"),
+      ];
+    },
     cmd_lan_share_status: () => ({ supported: true, enabled: true, running: true, port: 47321, addresses: ["192.168.1.5"], error: null }),
     cmd_lan_stream_url: () => null,
     cmd_remote_stream_problem: () => null,

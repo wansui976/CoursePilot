@@ -21,6 +21,7 @@ import {
   weather,
 } from "./system";
 import { downloads } from "./downloads";
+import { chaoxing } from "./chaoxing";
 import { courses, folders, videos, trash, subscriptions } from "./library";
 import { srs, stats, concepts, feynman, reviewBook } from "./study";
 export { feynmanTopicKey } from "./study";
@@ -66,4 +67,5 @@ export const ipc = {
   tools,
   danmaku,
   downloads,
+  chaoxing,
 };

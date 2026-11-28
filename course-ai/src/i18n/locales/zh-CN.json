@@ -1591,7 +1591,9 @@
     "importFailed": "导入失败：{{error}}",
     "selectLocalVideo": "选择本地视频或音频",
     "noVideosInFolder": "该文件夹里没有可导入的视频或音频",
-    "uploadHintMobile": "从「文件」中选择 mp4 / mov / mp3 / m4a…"
+    "uploadHintMobile": "从「文件」中选择 mp4 / mov / mp3 / m4a…",
+    "fromChaoxing": "从超星 / 学习通导入",
+    "fromChaoxingHint": "登录后选一门课，批量下载里面的视频"
   },
   "webdavImport": {
     "title": "从网盘导入",
@@ -1847,6 +1849,27 @@
     "queuing": "入队中…",
     "subscribeFailed": "订阅没有建成：{{error}}",
     "subscribeFailedQueued": "订阅没有建成：{{error}}。勾选的各集已经加入下载队列，再点一次只会重试订阅。"
+  },
+  "chaoxingImport": {
+    "title": "从超星 / 学习通导入",
+    "checking": "正在看登录状态…",
+    "loginMode": "登录方式",
+    "byPassword": "账号密码",
+    "byCookie": "粘贴 Cookie",
+    "username": "手机号 / 学号",
+    "password": "密码",
+    "passwordHint": "只保存登录后的凭证（存在系统钥匙串里），不保存密码。学校统一认证登录的账号请改用「粘贴 Cookie」。",
+    "cookie": "Cookie",
+    "cookieStep1": "在浏览器里登录 i.chaoxing.com，打开任意一门课。",
+    "cookieStep2": "按 F12 打开开发者工具 → 网络（Network），刷新页面，点第一条请求。",
+    "cookieStep3": "在请求头（Request Headers）里找到 Cookie，复制整行的值粘贴到上面。",
+    "login": "登录",
+    "logout": "退出登录",
+    "courseCount": "我的课程 · {{count}} 门",
+    "noCourses": "这个账号下没有能看的课程（只列学生身份的课）。",
+    "listing": "正在读「{{title}}」的章节…",
+    "listingProgress": "正在看第 {{done}} / {{total}} 个小节…",
+    "noVideos": "这门课里没找到视频。"
   },
   "dashboard": {
     "back": "返回",

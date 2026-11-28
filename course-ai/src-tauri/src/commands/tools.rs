@@ -313,6 +313,49 @@ async fn import_webdav_file(
     Ok(video)
 }
 
+async fn import_chaoxing_video(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    course_id: &str,
+    url: String,
+    staging: Option<PathBuf>,
+    on_event: &(dyn Fn(download::DownloadEvent) + Send + Sync),
+    begin_import: &(dyn Fn() -> bool + Send + Sync),
+) -> AppResult<Video> {
+    let cookies =
+        crate::llm::keychain::get_secret(&state.db, crate::pipeline::chaoxing::SECRET_COOKIES)
+            .await?
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| AppError::Config(crate::pipeline::chaoxing::LOGIN_EXPIRED.into()))?;
+    let root_path: String =
+        sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")
+            .bind(course_id)
+            .fetch_optional(&state.db.pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("course {course_id}")))?;
+    let out_dir = course_download_dir(app, course_id, &root_path)?;
+    let staging = download_staging(staging, &out_dir);
+    let file = crate::pipeline::chaoxing::download(
+        &cookies,
+        &url,
+        &out_dir,
+        &staging,
+        on_event,
+        begin_import,
+    )
+    .await?;
+    let mut video = add_local_video(&state.db, course_id, file, None).await?;
+    sqlx::query("UPDATE videos SET source_type='url', source_uri=?, app_owned_file=1 WHERE id=?")
+        .bind(&url)
+        .bind(&video.id)
+        .execute(&state.db.pool)
+        .await?;
+    video.source_type = "url".into();
+    video.source_uri = Some(url);
+    crate::pipeline::spawn_crop_detection(app.clone(), video.id.clone());
+    Ok(video)
+}
+
 /// 下载的视频放哪：课程有自己的目录就放进去；没有目录（新建时没选文件夹，root_path
 /// 为空）就放进应用数据目录下 `downloads/<课程 id>`（网络视频、网盘文件都放这里）。
 /// 不能直接用空路径：那是相对路径，文件会落进进程的当前目录（开发时是源码目录），
@@ -379,6 +422,19 @@ pub async fn import_url_with(
         return Err(crate::error::AppError::Config(
             "移动端暂不支持 B 站 / 网络视频下载，请先在桌面端导入后同步到移动端".into(),
         ));
+    }
+    // 超星 / 学习通的视频：不走 yt-dlp，现取 mp4 地址按 HTTP 下。
+    if crate::pipeline::chaoxing::is_video_url(&url) {
+        return import_chaoxing_video(
+            &app,
+            state,
+            &course_id,
+            url,
+            staging,
+            on_event,
+            begin_import,
+        )
+        .await;
     }
     let root_path: String =
         sqlx::query_scalar("SELECT root_path FROM courses WHERE id=? AND deleted_at IS NULL")

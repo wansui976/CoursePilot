@@ -667,3 +667,21 @@ export interface ConceptMastery {
   reviewed: number;
   retention: number | null;
 }
+
+/** 超星 / 学习通里的一门课。 */
+export type ChaoxingCourse = {
+  courseId: string;
+  clazzId: string;
+  cpi: string;
+  title: string;
+  teacher: string;
+};
+
+/** 超星课程里的一个视频；`url` 直接交给下载队列。 */
+export type ChaoxingVideo = {
+  url: string;
+  objectId: string;
+  title: string;
+  /** 所在章的名字；拿不到时为空。 */
+  chapter: string;
+};

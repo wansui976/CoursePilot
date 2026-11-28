@@ -848,6 +848,30 @@ export const scenes = [
     },
   },
   {
+    // 从超星 / 学习通导入：登录（账号密码 / 粘贴 Cookie）→ 课程列表 → 按章勾选视频。
+    name: "chaoxing-import",
+    // 手机 / 平板上没有网络视频下载（同 B 站），菜单里没有这一项。
+    devices: ["desktop"],
+    run: async ({ page, shot }) => {
+      await page.evaluate(() => localStorage.setItem("__shot-chaoxing-login", "1"));
+      await openCourse(page);
+      await page.getByRole("button", { name: "导入" }).first().click();
+      await page.getByRole("menuitem", { name: /从超星/ }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("手机号 / 学号").waitFor();
+      await shot("login");
+      await dialog.getByRole("tab", { name: "粘贴 Cookie" }).click();
+      await shot("cookie");
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => localStorage.removeItem("__shot-chaoxing-login"));
+      await page.getByRole("button", { name: "导入" }).first().click();
+      await page.getByRole("menuitem", { name: /从超星/ }).click();
+      await dialog.getByRole("button", { name: /机器学习/ }).click();
+      await dialog.getByRole("checkbox", { name: "第一章 绪论" }).waitFor();
+      await shot("videos");
+    },
+  },
+  {
     // 从网盘导入：根目录 → 课程文件夹（全选）→ 添加网盘（OpenList 教程展开）→ 夸克（贴 Cookie）。
     name: "webdav-import",
     devices: ALL,

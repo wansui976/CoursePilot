@@ -31,6 +31,10 @@ use crate::commands::app::{
 };
 use crate::commands::assistant::{cmd_assistant_ask, cmd_cancel_assistant};
 use crate::commands::backup::{cmd_backup_database, cmd_restore_database};
+use crate::commands::chaoxing::{
+    cmd_chaoxing_course_videos, cmd_chaoxing_courses, cmd_chaoxing_login, cmd_chaoxing_logout,
+    cmd_chaoxing_set_cookies, cmd_chaoxing_status,
+};
 use crate::commands::client_store::{cmd_client_store_load, cmd_client_store_put};
 use crate::commands::clips::{cmd_add_clip, cmd_delete_clip, cmd_list_clips, cmd_update_clip};
 use crate::commands::concepts::{
@@ -493,6 +497,12 @@ pub fn run() {
             cmd_semantic_rebuild,
             cmd_semantic_resume,
             cmd_semantic_save_rerank,
+            cmd_chaoxing_status,
+            cmd_chaoxing_login,
+            cmd_chaoxing_set_cookies,
+            cmd_chaoxing_logout,
+            cmd_chaoxing_courses,
+            cmd_chaoxing_course_videos,
             cmd_semantic_test_rerank,
             cmd_remote_sync_status,
             cmd_remote_sync_test,

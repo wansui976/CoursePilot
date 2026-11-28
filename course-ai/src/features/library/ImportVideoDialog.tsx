@@ -7,6 +7,7 @@ import {
   FolderInput,
   FolderPlus,
   HardDriveDownload,
+  GraduationCap,
   ListVideo,
   Plus,
 } from "lucide-react";
@@ -44,6 +45,9 @@ const FolderImportDialog = lazy(() =>
 const WebDavImportDialog = lazy(() =>
   import("./WebDavImportDialog").then((m) => ({ default: m.WebDavImportDialog })),
 );
+const ChaoxingImportDialog = lazy(() =>
+  import("./ChaoxingImportDialog").then((m) => ({ default: m.ChaoxingImportDialog })),
+);
 const PlaylistImportDialog = lazy(() =>
   import("./PlaylistImportDialog").then((m) => ({ default: m.PlaylistImportDialog })),
 );
@@ -70,6 +74,7 @@ export function ImportVideoButton({
   const [alignLeft, setAlignLeft] = useState(false);
   const [showBili, setShowBili] = useState(false);
   const [showPlaylist, setShowPlaylist] = useState(false);
+  const [showChaoxing, setShowChaoxing] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
   const [showCable, setShowCable] = useState(false);
   const [folderVideos, setFolderVideos] = useState<FolderVideo[] | null>(null);
@@ -333,6 +338,25 @@ export function ImportVideoButton({
                     </span>
                   </span>
                 </button>
+                <button
+                  role="menuitem"
+                  tabIndex={-1}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowChaoxing(true);
+                  }}
+                  className="ca-touch-44 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-[var(--surface-card-hover)]"
+                >
+                  <GraduationCap className="mt-0.5 h-4 w-4 flex-none text-primary" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-[var(--text-strong)]">
+                      {t("import.fromChaoxing")}
+                    </span>
+                    <span className="block text-xs text-[var(--text-muted)]">
+                      {t("import.fromChaoxingHint")}
+                    </span>
+                  </span>
+                </button>
               </>
             )}
             {onCreateFolder && (
@@ -396,6 +420,15 @@ export function ImportVideoButton({
           <WebDavImportDialog
             courseId={courseId}
             onClose={() => setShowDrive(false)}
+            returnFocusRef={triggerRef}
+          />
+        </Suspense>
+      )}
+      {showChaoxing && (
+        <Suspense fallback={null}>
+          <ChaoxingImportDialog
+            courseId={courseId}
+            onClose={() => setShowChaoxing(false)}
             returnFocusRef={triggerRef}
           />
         </Suspense>
