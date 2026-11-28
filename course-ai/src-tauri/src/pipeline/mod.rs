@@ -39,6 +39,7 @@ pub mod slide_match;
 pub mod slides;
 pub mod subscriptions;
 pub mod subtitle;
+pub mod transcript_cache;
 pub mod transcript_correction;
 pub mod translate;
 pub mod volcengine_asr;

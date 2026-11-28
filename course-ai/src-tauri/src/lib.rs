@@ -11,6 +11,8 @@ pub mod lan_share;
 pub mod llm;
 pub mod media_server;
 pub mod mobile_files;
+#[cfg(test)]
+mod perf_bench;
 pub mod pipeline;
 pub mod quark;
 pub mod sidecar;

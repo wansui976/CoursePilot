@@ -947,7 +947,11 @@ pub async fn cmd_add_local_batch(
         start_transcode_if_needed(&app, video);
     }
     if crate::downloads::auto_process_imports(&state.db).await {
-        let ids = imported.videos.iter().map(|video| video.id.clone()).collect();
+        let ids = imported
+            .videos
+            .iter()
+            .map(|video| video.id.clone())
+            .collect();
         crate::downloads::spawn_batch_processing(app.clone(), ids);
     }
     Ok(imported)
@@ -1091,7 +1095,14 @@ pub async fn cmd_list_videos(
     state: State<'_, AppState>,
     course_id: String,
 ) -> AppResult<Vec<VideoListItem>> {
-    list_videos_for_ui(&state.db, &course_id).await
+    let videos = list_videos_for_ui(&state.db, &course_id).await?;
+    // 打开课程页时顺手把这门课的讲稿读进缓存：接下来在这门课里搜索、问助手，
+    // 第一次就不用等整门课的讲稿加载（几百讲要零点几秒）。
+    crate::pipeline::transcript_cache::warm(
+        state.db.clone(),
+        videos.iter().map(|item| item.video.id.clone()).collect(),
+    );
+    Ok(videos)
 }
 
 #[tauri::command]

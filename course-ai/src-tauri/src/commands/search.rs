@@ -209,24 +209,24 @@ pub async fn search_course(
 
     let mut transcripts: HashMap<String, (Vec<TranscriptHit>, usize)> = HashMap::new();
     if include_transcripts {
-        let rows: Vec<(String, i64, String)> = sqlx::query_as(
-            "SELECT t.video_id, t.start_ms, t.text FROM transcripts t JOIN videos v ON v.id=t.video_id
-             WHERE v.course_id=? AND v.deleted_at IS NULL AND t.text LIKE ? ESCAPE '\\'
-             ORDER BY t.video_id, t.start_ms",
-        )
-        .bind(course_id)
-        .bind(&pattern)
-        .fetch_all(&db.pool)
-        .await?;
-        for (video_id, start_ms, text) in rows {
-            if !in_scope.contains(video_id.as_str()) {
-                continue;
-            }
-            let entry = transcripts.entry(video_id).or_default();
-            entry.1 += 1;
-            if entry.0.len() < TRANSCRIPT_HITS_PER_VIDEO {
-                if let Some(snippet) = snippet(&text, query) {
-                    entry.0.push(TranscriptHit { start_ms, snippet });
+        // 讲稿走内存缓存（见 transcript_cache）：边打字边搜，每次都在 SQLite 里扫几十万句太慢。
+        let ids: Vec<String> = videos.iter().map(|(id, _, _)| id.clone()).collect();
+        let texts = crate::pipeline::transcript_cache::load(db, &ids).await?;
+        let needle = query.to_lowercase();
+        for (video_id, text) in texts {
+            for line in &text.lines {
+                if !line.lowercase().contains(&needle) {
+                    continue;
+                }
+                let entry = transcripts.entry(video_id.clone()).or_default();
+                entry.1 += 1;
+                if entry.0.len() < TRANSCRIPT_HITS_PER_VIDEO {
+                    if let Some(snippet) = snippet(&line.text, query) {
+                        entry.0.push(TranscriptHit {
+                            start_ms: line.start_ms,
+                            snippet,
+                        });
+                    }
                 }
             }
         }

@@ -1,5 +1,7 @@
 import { lectureNumberOf } from "@/lib/lectureOrder";
 import type { Course } from "@/lib/types";
+import { useRef } from "react";
+import { useSeenOnce } from "@/lib/useSeenOnce";
 import { useVideoCoverUrl } from "@/lib/useVideoCoverUrl";
 import { cn } from "@/lib/utils";
 import { CourseBoardCover } from "./CourseBoardCover";
@@ -31,7 +33,13 @@ export function LectureCover({
   className?: string;
   children?: React.ReactNode;
 }) {
-  const thumb = useVideoCoverUrl(videoId ?? "", Boolean(videoId));
+  // 卡片滚到附近才去要首帧：几百讲的课一打开不至于一下子排几百个截帧。
+  const sentinelRef = useRef<HTMLSpanElement>(null);
+  const seen = useSeenOnce(sentinelRef);
+  const thumb = useVideoCoverUrl(videoId ?? "", Boolean(videoId) && seen);
+  const sentinel = (
+    <span ref={sentinelRef} aria-hidden="true" className="pointer-events-none absolute h-0 w-0" />
+  );
   if (thumb) {
     return (
       <span className={cn("ca-video-cover", className)}>
@@ -50,6 +58,7 @@ export function LectureCover({
       caption={showCaption ? (course?.name ?? title) : undefined}
       className={className}
     >
+      {videoId && !seen && sentinel}
       {children}
     </CourseBoardCover>
   );

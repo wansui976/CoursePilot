@@ -1130,15 +1130,6 @@ async fn literal_hits(
             .join(" AND ")
     };
     const SCOPE: &str = "video_id IN (SELECT value FROM json_each(?1))";
-    let segment_sql = format!(
-        "SELECT video_id, start_ms, end_ms, text FROM transcripts WHERE {SCOPE} AND {}",
-        all("text")
-    );
-    let mut segment_query =
-        sqlx::query_as::<_, (String, i64, i64, String)>(&segment_sql).bind(&scope);
-    for word in words {
-        segment_query = segment_query.bind(word);
-    }
     let flat = "replace(replace(ocr_text, char(10), ''), char(13), '')";
     let page_sql = format!(
         "SELECT video_id, page_no, start_ms, end_ms, image_path, ocr_text FROM slides
@@ -1153,23 +1144,32 @@ async fn literal_hits(
     }
     // (视频位置, 时间, 字幕在课件前)
     let mut keyed: Vec<((usize, i64, u8), Citation)> = Vec::new();
-    for (vid, start_ms, end_ms, text) in segment_query.fetch_all(&db.pool).await? {
+    // 讲稿走内存缓存：整门课几十万句，在 SQLite 里每个词 instr 一遍太慢（见 transcript_cache）。
+    let ids: Vec<String> = order.keys().map(|id| id.to_string()).collect();
+    let texts = crate::pipeline::transcript_cache::load(db, &ids).await?;
+    for (vid, text) in &texts {
         let Some(&(index, title)) = order.get(vid.as_str()) else {
             continue;
         };
-        keyed.push((
-            (index, start_ms, 0),
-            Citation {
-                index: 0,
-                text,
-                start_ms,
-                end_ms,
-                video_title: Some(title.to_string()),
-                video_id: Some(vid),
-                slide_image: None,
-                slide_page: None,
-            },
-        ));
+        for line in &text.lines {
+            let lowered = line.lowercase();
+            if !words.iter().all(|word| lowered.contains(word.as_str())) {
+                continue;
+            }
+            keyed.push((
+                (index, line.start_ms, 0),
+                Citation {
+                    index: 0,
+                    text: line.text.clone(),
+                    start_ms: line.start_ms,
+                    end_ms: line.end_ms,
+                    video_title: Some(title.to_string()),
+                    video_id: Some(vid.clone()),
+                    slide_image: None,
+                    slide_page: None,
+                },
+            ));
+        }
     }
     for (vid, page_no, start_ms, end_ms, image_path, ocr_text) in
         page_query.fetch_all(&db.pool).await?
@@ -1923,9 +1923,10 @@ pub async fn keyword_search_scope(
 /// 同 [`keyword_search_scope`]，但每条带上得分（按词的 IDF 加权）。
 /// 「拍题找讲解」要按相对得分区分「最相关 / 可能相关」并丢掉太弱的命中。
 ///
-/// 匹配交给 SQLite 做，只把命中的段落和课件页取回来打分。此前是把范围内每个视频的
-/// 全部字幕和课件逐行搬进内存再匹配：100 个一小时的视频（约 9 万段）一次提问要 2–3 秒、
-/// 300 个要 12 秒，时间几乎全花在逐行搬数据上；SQLite 原地扫同样的文本只要零点几秒。
+/// 讲稿从内存缓存（[`crate::pipeline::transcript_cache`]）里匹配，课件页在 SQLite 里过滤。
+/// 最早是把每个视频的字幕逐行搬进内存（300 个视频 12 秒，全花在 sqlx 逐行取数上）；
+/// 后来改成 SQLite 里按词元 `instr`，可一个问题七八个二字组就是七八遍全表扫描，
+/// 400 讲的课 800 多毫秒。现在按视频整段取进缓存，再搜同一门课只要几十毫秒。
 ///
 /// 结果与逐篇搬出来算完全一致（有对拍测试）：
 /// - 总篇数只数行数；df（出现在几篇里）在取回的命中篇里数——含某词元的一篇必然在其中；
@@ -1933,8 +1934,8 @@ pub async fn keyword_search_scope(
 /// - 返回顺序按「范围里视频的先后 → 字幕段在前、课件页在后 → 各自原有顺序」，
 ///   与旧实现一样，得分相同时的先后也不变。
 ///
-/// 已知差别：SQL 这一步只对 ASCII 字母不分大小写，所以非 ASCII 的大写字母（如希腊字母 Σ）
-/// 写成大写的那一篇会被漏掉。中文没有大小写，英文是 ASCII，不受影响。
+/// 课件页那一步仍在 SQL 里过滤，只对 ASCII 字母不分大小写：非 ASCII 的大写字母（如希腊字母 Σ）
+/// 写成大写的那一页会被漏掉。中文没有大小写，英文是 ASCII，不受影响。
 pub async fn keyword_search_scope_scored(
     db: &Db,
     videos: &[(String, String)],
@@ -1978,29 +1979,39 @@ pub async fn keyword_search_scope_scored(
     // 课件页与 list_slide_pages 取的是同一批：OCR 文字非空的页。
     const PAGES: &str = "ocr_text IS NOT NULL AND TRIM(ocr_text) <> ''";
 
-    // 总篇数只数行、不读正文，走 video_id 索引。
-    let segment_total: i64 =
-        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM transcripts WHERE {SCOPE}"))
-            .bind(&scope)
-            .fetch_one(&db.pool)
-            .await?;
+    // 讲稿走内存缓存（见 transcript_cache）：几十万句在 SQLite 里每个词元扫一遍太慢。
+    let mut ids: Vec<String> = Vec::with_capacity(videos.len());
+    {
+        let mut seen = std::collections::HashSet::new();
+        for (id, _) in videos {
+            if seen.insert(id.as_str()) {
+                ids.push(id.clone());
+            }
+        }
+    }
+    let texts = crate::pipeline::transcript_cache::load(db, &ids).await?;
+    let mut segment_total = 0usize;
+    let mut segment_rows: Vec<(&str, &crate::pipeline::transcript_cache::Line)> = Vec::new();
+    for id in &ids {
+        let Some(text) = texts.get(id) else {
+            continue;
+        };
+        segment_total += text.lines.len();
+        for line in &text.lines {
+            let lowered = line.lowercase();
+            if terms.iter().any(|term| lowered.contains(term.as_str())) {
+                segment_rows.push((id.as_str(), line));
+            }
+        }
+    }
+
+    // 课件页很少，照旧在 SQL 里过滤。总页数只数行、不读正文。
     let page_total: i64 = sqlx::query_scalar(&format!(
         "SELECT COUNT(*) FROM slides WHERE {SCOPE} AND {PAGES}"
     ))
     .bind(&scope)
     .fetch_one(&db.pool)
     .await?;
-
-    let segment_sql = format!(
-        "SELECT video_id, segment_idx, start_ms, end_ms, text FROM transcripts
-         WHERE {SCOPE} AND ({})",
-        any_hit("text")
-    );
-    let mut segment_query =
-        sqlx::query_as::<_, (String, i64, i64, i64, String)>(&segment_sql).bind(&scope);
-    for bind in &binds {
-        segment_query = segment_query.bind(bind);
-    }
     let page_sql = format!(
         "SELECT video_id, page_no, start_ms, end_ms, image_path, ocr_text FROM slides
          WHERE {SCOPE} AND {PAGES} AND ({})",
@@ -2012,37 +2023,36 @@ pub async fn keyword_search_scope_scored(
     for bind in &binds {
         page_query = page_query.bind(bind);
     }
-    let segment_rows = segment_query.fetch_all(&db.pool).await?;
     let page_rows = page_query.fetch_all(&db.pool).await?;
 
     // df 只需要数命中的那几篇：含某个词元的一篇必然命中了「任一词元」，已经在取回来的里面。
     // 用 builder 数，规则和逐篇搬出来时一字不差；没取回来的那些只计入总篇数。
     let mut builder = TermWeights::builder(terms.clone());
-    for (_, _, _, _, text) in &segment_rows {
-        builder.add_document([text.as_str()]);
+    for (_, line) in &segment_rows {
+        builder.add_document([line.text.as_str()]);
     }
     for (_, _, _, _, _, ocr_text) in &page_rows {
         builder.add_document([ocr_text.as_str()]);
     }
-    let weights = builder.finish_with_total((segment_total + page_total) as usize);
+    let weights = builder.finish_with_total(segment_total + page_total as usize);
 
     // (视频在范围里的位置, 0=字幕/1=课件, 原有顺序) → 与旧实现逐视频追加的先后一致。
     let mut keyed: Vec<((usize, u8, i64), Hit)> = Vec::new();
-    for (vid, segment_idx, start_ms, end_ms, text) in segment_rows {
-        let Some(&(index, title)) = order.get(vid.as_str()) else {
+    for (vid, line) in segment_rows {
+        let Some(&(index, title)) = order.get(vid) else {
             continue;
         };
-        let score = weights.score(&text);
+        let score = weights.score(&line.text);
         if score > 0.0 {
             keyed.push((
-                (index, 0, segment_idx),
+                (index, 0, line.segment_idx),
                 Hit {
                     score,
-                    start_ms,
-                    end_ms,
-                    text,
+                    start_ms: line.start_ms,
+                    end_ms: line.end_ms,
+                    text: line.text.clone(),
                     slide: None,
-                    video: Some((vid.clone(), title.to_string())),
+                    video: Some((vid.to_string(), title.to_string())),
                 },
             ));
         }

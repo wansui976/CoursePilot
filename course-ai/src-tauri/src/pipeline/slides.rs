@@ -773,13 +773,59 @@ pub async fn store_slides(db: &Db, video_id: &str, frames: &[SlideFrame]) -> App
 pub async fn ensure_cover(video: &Path, data_dir: &Path) -> AppResult<PathBuf> {
     std::fs::create_dir_all(data_dir)?;
     let cover = data_dir.join("cover.jpg");
-    if !cover.is_file() {
-        // 取第 1 秒，避开纯黑片头；极短视频则回退到首帧。
-        if capture_jpeg_at(video, &cover, 1000, None).await.is_err() {
-            capture_jpeg_at(video, &cover, 0, None).await?;
-        }
+    if cover.is_file() {
+        return Ok(cover);
     }
-    Ok(cover)
+    // 同一个视频的封面只截一次：课程页、课桌、工作台可能同时来要。
+    let lock = cover_lock(&cover);
+    let _same_video = lock.lock().await;
+    if cover.is_file() {
+        return Ok(cover);
+    }
+    // 截帧是一个 ffmpeg 进程。刚导入几百个视频的课程一打开，每张卡片都来要封面，
+    // 不限流就是几百个进程同时起，整台机器卡住；排队一个个来，看得见的几张很快就有。
+    let captured = async {
+        let _slot = cover_slots().acquire().await;
+        // 先截到临时文件再改名：另一个请求不会读到写了一半的图。
+        let partial = data_dir.join("cover.part.jpg");
+        // 取第 1 秒，避开纯黑片头；极短视频则回退到首帧。
+        if capture_jpeg_at(video, &partial, 1000, None).await.is_err() {
+            capture_jpeg_at(video, &partial, 0, None).await?;
+        }
+        std::fs::rename(&partial, &cover)?;
+        AppResult::Ok(())
+    }
+    .await;
+    forget_cover_lock(&cover);
+    captured.map(|()| cover)
+}
+
+/// 同时截几张封面。
+fn cover_slots() -> &'static tokio::sync::Semaphore {
+    static SLOTS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SLOTS.get_or_init(|| {
+        let cpus = std::thread::available_parallelism().map_or(2, |n| n.get());
+        tokio::sync::Semaphore::new((cpus / 2).clamp(1, 4))
+    })
+}
+
+type CoverLocks =
+    std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<tokio::sync::Mutex<()>>>>;
+
+fn cover_locks() -> &'static CoverLocks {
+    static LOCKS: std::sync::OnceLock<CoverLocks> = std::sync::OnceLock::new();
+    LOCKS.get_or_init(Default::default)
+}
+
+fn cover_lock(cover: &Path) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    let mut locks = cover_locks().lock().unwrap_or_else(|e| e.into_inner());
+    locks.entry(cover.to_path_buf()).or_default().clone()
+}
+
+/// 截好了就不用再排队：等着的那几个会看到文件已经在了。
+fn forget_cover_lock(cover: &Path) {
+    let mut locks = cover_locks().lock().unwrap_or_else(|e| e.into_inner());
+    locks.remove(cover);
 }
 
 /// 在 at_ms 处截一帧到 screenshots/，返回落地路径。
