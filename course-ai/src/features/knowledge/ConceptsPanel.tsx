@@ -725,7 +725,9 @@ export function ConceptsPanel({
             <Button
               ref={chatToggleRef}
               type="button"
-              variant={chatOpen ? "primary" : "outline"}
+              // 页头里的轻按钮（和学习面板「周报图」、队列「全部取消」一样无边框）；
+              // 打开时是「开着的开关」，按规范用主题色。
+              variant={chatOpen ? "primary" : "ghost"}
               size="sm"
               onClick={() => setChatOpen((open) => !open)}
               aria-label={t("concepts.courseChat")}
@@ -738,7 +740,7 @@ export function ConceptsPanel({
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={startAnalyze}
               disabled={busy}
@@ -1123,7 +1125,13 @@ export function ConceptsPanel({
                       </div>
 
                       <ul className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] divide-y divide-[var(--border-subtle)]">
-                        {group.concepts.map((concept) => {
+                        {(() => {
+                          // 同一组里有一行带「复习 N」，其余行在同一处留同宽的空位：
+                          // 展开箭头才在同一列，不会有的靠右、有的被挤到左边。
+                          const groupHasDue = group.concepts.some(
+                            (item) => (dueCountByConcept.get(item.id) ?? 0) > 0,
+                          );
+                          return group.concepts.map((concept) => {
                           const isExpanded = expanded.has(concept.id);
                           const due = dueCountByConcept.get(concept.id) ?? 0;
                           const detailId = `concept-detail-${concept.id}`;
@@ -1164,16 +1172,18 @@ export function ConceptsPanel({
                                     }`}
                                   />
                                 </button>
-                                {due > 0 && (
+                                {due > 0 ? (
                                   <button
                                     type="button"
                                     onClick={() => setReviewing({ conceptId: concept.id, name: concept.name })}
-                                    className="ca-touch-44 my-auto inline-flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--surface-card-hover)]"
+                                    className="ca-touch-44 my-auto inline-flex w-[5.5rem] flex-none items-center justify-end gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--surface-card-hover)]"
                                   >
                                     <Brain className="h-3.5 w-3.5" />
                                     {t("concepts.reviewDue", { count: due })}
                                   </button>
-                                )}
+                                ) : groupHasDue ? (
+                                  <span aria-hidden="true" className="w-[5.5rem] flex-none" />
+                                ) : null}
                               </div>
                               {isExpanded && (
                                 <div
@@ -1263,7 +1273,8 @@ export function ConceptsPanel({
                               )}
                             </li>
                           );
-                        })}
+                          });
+                        })()}
                       </ul>
                     </section>
                   ))}

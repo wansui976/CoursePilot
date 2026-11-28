@@ -271,10 +271,10 @@ export function RecycleBin({ onClose }: { onClose: () => void }) {
         onBack={onClose}
         actions={
           items.length > 0 ? (
-            // 与处理队列的「全部取消」同款：带边框的小按钮 + 右侧计数。
+            // 与处理队列的「全部取消」同款：页头里的无边框轻按钮 + 右侧计数。
             <div className="flex flex-none items-center gap-3">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => void confirmPurgeAll()}
                 disabled={busy}
