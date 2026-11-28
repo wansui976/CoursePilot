@@ -24,6 +24,7 @@ import { saveShareCard, shareCardHeader, useShareCardLabels } from "./useShareCa
 import { renderNotesCard } from "@/lib/shareCard/render";
 import { ipc } from "@/lib/ipc";
 import { markdownToTiptap } from "@/lib/markdownToTiptap";
+import { NOTE_TEMPLATES, templateMarkdown, type NoteTemplate } from "@/lib/noteTemplates";
 import { tiptapToMarkdown } from "@/lib/tiptapToMarkdown";
 import { readVideoResumeState, writeVideoResumeState } from "@/lib/resumeState";
 import { useKeyboardInset } from "@/lib/useKeyboardInset";
@@ -449,6 +450,22 @@ export function NotesPanel({ videoId }: { videoId: string }) {
     },
   });
 
+  // 空笔记里铺一份模板骨架：一次普通编辑（能 ⌘Z 撤回、照常自动保存），光标落在第一条。
+  function applyTemplate(template: NoteTemplate) {
+    const current = editorRef.current;
+    if (!current || current.isDestroyed) return;
+    const headings = t(`notes.templates.${template}.body`).split("|");
+    current.chain().focus().setContent(markdownToTiptap(templateMarkdown(headings))).run();
+    // 光标放到第一个小节的空条目里，直接开写。
+    let target: number | null = null;
+    current.state?.doc.descendants((node, pos) => {
+      if (target != null) return false;
+      if (node.type.name === "paragraph" && node.content.size === 0) target = pos + 1;
+      return true;
+    });
+    if (target != null) current.commands.setTextSelection(target);
+  }
+
   async function requestGenerate() {
     if (Boolean(notesContent?.trim()) || hasLocalEdits) {
       const confirmed = await confirmDialog(t("notes.regenerateConfirm"), {
@@ -690,6 +707,24 @@ export function NotesPanel({ videoId }: { videoId: string }) {
                   >
                     {generate.isPending ? t("notes.generating") : t("notes.generateNotes")}
                   </Button>
+                  <div
+                    role="group"
+                    aria-label={t("notes.templates.label")}
+                    className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1 text-xs text-[var(--text-muted)]"
+                  >
+                    <span className="mr-1">{t("notes.templates.label")}</span>
+                    {NOTE_TEMPLATES.map((template) => (
+                      <button
+                        key={template}
+                        type="button"
+                        title={t(`notes.templates.${template}.hint`)}
+                        onClick={() => applyTemplate(template)}
+                        className="ca-touch-44 rounded-[var(--r-xs)] border border-[var(--border-subtle)] px-2 py-0.5 text-[var(--text-normal)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-card-hover)]"
+                      >
+                        {t(`notes.templates.${template}.name`)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

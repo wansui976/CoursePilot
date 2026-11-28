@@ -723,7 +723,25 @@
       "erase": "Erase this note"
     },
     "tabs": "Section tabs",
-    "imageUnreadable": "This image can't be read (it may be HEIC or a similar format). Convert it to JPG or PNG and insert it again."
+    "imageUnreadable": "This image can't be read (it may be HEIC or a similar format). Convert it to JPG or PNG and insert it again.",
+    "templates": {
+      "label": "Or start from a template:",
+      "cornell": {
+        "name": "Cornell",
+        "hint": "Cues and questions, notes, then a summary",
+        "body": "Cues & questions|Notes|Summary"
+      },
+      "questions": {
+        "name": "Question-led",
+        "hint": "Write down what this lecture should answer, then find the answers",
+        "body": "Questions this lecture answers|My answers|Still unclear"
+      },
+      "recap": {
+        "name": "Recap",
+        "hint": "What was covered, what I learned, what to do next",
+        "body": "What was covered|What I learned|Next steps"
+      }
+    }
   },
   "quiz": {
     "correct": "Correct",

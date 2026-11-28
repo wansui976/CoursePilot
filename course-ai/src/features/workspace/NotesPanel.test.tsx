@@ -534,6 +534,20 @@ describe("NotesPanel", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 
+  it("lays out a note template from the empty state", async () => {
+    mockIpc.ai.getNotes.mockResolvedValue(null);
+    renderNotesPanel("video-1", "template");
+    fireEvent.click(await screen.findByRole("button", { name: "康奈尔" }));
+    expect(editorCapture.restore).toHaveBeenCalledTimes(1);
+    const doc = editorCapture.restore.mock.calls[0][0] as {
+      content: { type: string; content?: { text?: string }[] }[];
+    };
+    const headings = doc.content
+      .filter((node) => node.type === "heading")
+      .map((node) => node.content?.[0]?.text);
+    expect(headings).toEqual(["线索与问题", "笔记", "总结"]);
+  });
+
   it("clears the editor when switching to a video that has no notes yet", async () => {
     // 面板在标签之间是保活的（不重建）。切到一个还没有笔记的视频时若不清空，
     // 编辑器会继续显示上一讲的笔记；用户接着打字，那份内容就被存到新视频名下了。
