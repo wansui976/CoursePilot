@@ -1156,6 +1156,85 @@ button.ca-time:hover {
   transform: rotate(0.5deg);
 }
 
+/* 摊开的这一讲下面压着的一页目录：时间（等宽）+ 章节名（衬线），上次停的那章用中性选中底。 */
+.ca-desk-toc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 14px;
+  transform: rotate(-0.3deg);
+}
+
+.ca-desk-toc-count {
+  margin-left: 8px;
+  font-family: var(--font-app);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.ca-desk-toc-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ca-desk-toc-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-height: 34px;
+  padding: 6px 8px;
+  margin-inline: -8px;
+  width: calc(100% + 16px);
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: background-color 0.12s var(--ease);
+}
+
+.ca-desk-toc-row:hover {
+  background: var(--surface-card-hover);
+}
+
+.ca-desk-toc-row[aria-current] {
+  background: var(--surface-card-active);
+}
+
+.ca-desk-toc-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.ca-desk-toc-time {
+  flex: none;
+  min-width: 3.6em;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}
+
+.ca-desk-toc-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 15px;
+  color: var(--text-normal);
+}
+
+.ca-desk-toc-row[aria-current] .ca-desk-toc-title {
+  color: var(--text-strong);
+}
+
+.ca-desk-toc-here {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .ca-notebook-cover {
   aspect-ratio: 16 / 9;
   min-height: 0;
@@ -1272,7 +1351,8 @@ button.ca-time:hover {
     display: contents;
   }
 
-  .ca-desk-top > .ca-notebook {
+  .ca-desk-mid > .ca-notebook,
+  .ca-desk-mid > .ca-desk-toc {
     order: -1;
     flex: 1 0 100%;
   }

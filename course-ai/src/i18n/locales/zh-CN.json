@@ -2603,6 +2603,10 @@
     "lanRetry": "在局域网里再找一次"
   },
   "desk": {
+    "contents": "这一讲的目录",
+    "contentsCount": "{{count}} 节",
+    "contentsJump": "从 {{time}} 看起",
+    "contentsHere": "上次停在这里",
     "title": "你的课桌",
     "newCourse": "放一门新课上来",
     "noteTitle": "今天",

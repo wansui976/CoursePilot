@@ -2619,6 +2619,10 @@
     "lanRetry": "Search the local network again"
   },
   "desk": {
+    "contents": "In this lecture",
+    "contentsCount": "{{count}} sections",
+    "contentsJump": "Watch from {{time}}",
+    "contentsHere": "You stopped here",
     "title": "Your desk",
     "newCourse": "Add a course",
     "noteTitle": "Today",
