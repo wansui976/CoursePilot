@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import { WritingPencil } from "./WritingPencil";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -333,9 +334,9 @@ export function AssistantTurn({
       {turn.pending && !turn.answer && isPendingTurn && (
         <div
           aria-hidden="true"
-          className="ca-pulse-soft flex items-center gap-2 text-xs text-[var(--text-faint)]"
+          className="flex items-center gap-2 text-xs text-[var(--text-faint)]"
         >
-          <LoaderCircle className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+          <WritingPencil />
           <span>{streamingLabelFor(turn, t)}</span>
         </div>
       )}
@@ -495,6 +496,7 @@ export function AssistantTurn({
           role="alert"
           className="flex flex-wrap items-start gap-1.5 border-l-2 border-[var(--status-err)] pl-2 ca-t-2xs text-[var(--text-muted)]"
         >
+          <WritingPencil down />
           <span className="min-w-0 flex-1 break-words">
             <span className="font-medium text-[var(--status-err)]">{t("assistant.turnFailed")}</span>
             {" "}

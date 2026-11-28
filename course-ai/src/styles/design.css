@@ -3021,3 +3021,75 @@ button[data-tour="assistant"][data-tucked] {
     animation: none;
   }
 }
+
+/* ===================== 助手：铅笔在写 ===================== */
+
+.ca-pencil-writing {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.ca-pencil-writing svg {
+  overflow: visible;
+}
+
+.ca-pencil-trail {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  opacity: 0.45;
+  animation: ca-pencil-trail 1.6s linear infinite;
+}
+
+/* 笔尖（铅笔 g 的原点）从笔迹起点 (2,12) 写到终点 (32,12)，沿途跟着波浪上下。 */
+.ca-pencil-body {
+  transform: translate(2px, 12px);
+  animation: ca-pencil-write 1.6s linear infinite;
+}
+
+@keyframes ca-pencil-trail {
+  0% { stroke-dashoffset: 100; opacity: 0.45; }
+  80% { stroke-dashoffset: 0; opacity: 0.45; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes ca-pencil-write {
+  0% { transform: translate(2px, 12px); }
+  10% { transform: translate(5px, 9.5px); }
+  20% { transform: translate(8px, 12px); }
+  30% { transform: translate(11px, 9.5px); }
+  40% { transform: translate(14px, 12px); }
+  50% { transform: translate(17px, 9.5px); }
+  60% { transform: translate(20px, 12px); }
+  70% { transform: translate(23px, 9.5px); }
+  80% { transform: translate(26px, 12px); }
+  90% { transform: translate(29px, 10px) rotate(-8deg); }
+  100% { transform: translate(2px, 12px); }
+}
+
+/* 失败：铅笔放倒在线上，笔迹停住。 */
+.ca-pencil-writing[data-down] .ca-pencil-trail {
+  animation: none;
+  stroke-dashoffset: 55;
+  opacity: 0.35;
+}
+
+.ca-pencil-writing[data-down] .ca-pencil-body {
+  animation: none;
+  transform: translate(22px, 14px) rotate(48deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ca-pencil-trail,
+  .ca-pencil-body {
+    animation: none;
+  }
+
+  .ca-pencil-trail {
+    stroke-dashoffset: 40;
+  }
+
+  .ca-pencil-body {
+    transform: translate(20px, 12px);
+  }
+}
