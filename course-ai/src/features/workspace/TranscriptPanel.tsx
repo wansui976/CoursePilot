@@ -792,6 +792,8 @@ export function TranscriptPanel({
               items={[
                 { label: t("transcript.srtExport"), run: () => ipc.export.subtitles(videoId, "srt"), mime: "application/x-subrip", saveAs: "subtitles.srt" },
                 { label: t("transcript.vttExport"), run: () => ipc.export.subtitles(videoId, "vtt"), mime: "text/vtt", saveAs: "subtitles.vtt" },
+                { label: t("transcript.mdExport"), run: () => ipc.export.subtitles(videoId, "md"), mime: "text/markdown", saveAs: "transcript.md" },
+                { label: t("transcript.txtExport"), run: () => ipc.export.subtitles(videoId, "txt"), mime: "text/plain", saveAs: "transcript.txt" },
               ]}
             />
           </div>

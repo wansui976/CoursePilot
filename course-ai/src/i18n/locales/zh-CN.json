@@ -685,7 +685,9 @@
       "rateLimited": "下载字幕时一直被网站限流，文稿改用语音识别生成。",
       "failed": "下载时字幕没下成（登录失效、网络或超时），文稿改用语音识别生成。"
     },
-    "subtitleMissingDismiss": "知道了"
+    "subtitleMissingDismiss": "知道了",
+    "mdExport": "文稿 Markdown（分章节、带时间）",
+    "txtExport": "文稿纯文本"
   },
   "notes": {
     "unsaved": "未保存",

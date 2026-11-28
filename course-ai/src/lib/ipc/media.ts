@@ -306,7 +306,8 @@ export const clips = {
 };
 
 export const exporting = {
-  subtitles: (videoId: string, format: "srt" | "vtt"): Promise<string> =>
+  /** 字幕（srt / vtt）或文稿（md：按章节分节、每段带时间；txt：纯正文）。 */
+  subtitles: (videoId: string, format: "srt" | "vtt" | "md" | "txt"): Promise<string> =>
     invoke("cmd_export_subtitles", { videoId, format }),
   notes: (videoId: string, contentMarkdown?: string): Promise<string> =>
     invoke("cmd_export_notes", { videoId, contentMarkdown }),

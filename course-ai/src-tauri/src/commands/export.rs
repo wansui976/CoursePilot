@@ -2,7 +2,7 @@ use crate::commands::courses::AppState;
 use crate::commands::transcripts::list_segments;
 use crate::commands::videos::Video;
 use crate::error::{AppError, AppResult};
-use crate::export::{quiz_to_anki, to_srt, to_vtt};
+use crate::export::{quiz_to_anki, to_srt, to_transcript_markdown, to_transcript_text, to_vtt};
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::Manager as _;
@@ -41,7 +41,7 @@ fn export_dir(video: &Video, app: &tauri::AppHandle) -> AppResult<PathBuf> {
     }
 }
 
-/// 导出字幕到应用导出目录，返回落地文件路径。format = "srt" | "vtt"。
+/// 导出字幕 / 文稿到应用导出目录，返回落地文件路径。format = "srt" | "vtt" | "md" | "txt"。
 #[tauri::command]
 pub async fn cmd_export_subtitles(
     app: tauri::AppHandle,
@@ -53,14 +53,34 @@ pub async fn cmd_export_subtitles(
     if segments.is_empty() {
         return Err(AppError::NotFound("no transcript to export".into()));
     }
+    let video = load_video(&state, &video_id).await?;
     let content = match format.as_str() {
         "srt" => to_srt(&segments),
         "vtt" => to_vtt(&segments),
+        // 文稿：md 按章节分小节、每段带时间；txt 只有分好段的正文。
+        "md" => {
+            let chapters: Vec<(i64, String)> = sqlx::query_as(
+                "SELECT start_ms, title FROM chapters WHERE video_id=? ORDER BY order_index",
+            )
+            .bind(&video_id)
+            .fetch_all(&state.db.pool)
+            .await?;
+            to_transcript_markdown(
+                &crate::export::display_title(&video.title),
+                &segments,
+                &chapters,
+            )
+        }
+        "txt" => to_transcript_text(&segments),
         other => return Err(AppError::Other(format!("unknown subtitle format {other}"))),
     };
-    let video = load_video(&state, &video_id).await?;
     let dir = export_dir(&video, &app)?;
-    let path = dir.join(format!("subtitles.{format}"));
+    let file_name = match format.as_str() {
+        "md" => "transcript.md".to_string(),
+        "txt" => "transcript.txt".to_string(),
+        _ => format!("subtitles.{format}"),
+    };
+    let path = dir.join(file_name);
     std::fs::write(&path, content)?;
     Ok(path.to_string_lossy().to_string())
 }

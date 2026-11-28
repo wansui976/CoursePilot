@@ -51,6 +51,113 @@ pub fn to_vtt(segments: &[TranscriptSegment]) -> String {
     out
 }
 
+/// 文稿里的时间写法和播放器进度条一致：不到一小时 mm:ss，超过 hh:mm:ss。
+fn clock(ms: i64) -> String {
+    let total = ms.max(0) / 1000;
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h:02}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
+}
+
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32, 0x3000..=0x303F | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF)
+}
+
+/// 两句接成一段：中文之间不加空格，西文之间加一个。
+fn push_piece(paragraph: &mut String, piece: &str) {
+    let piece = piece.trim();
+    if piece.is_empty() {
+        return;
+    }
+    if let (Some(last), Some(first)) = (paragraph.chars().last(), piece.chars().next()) {
+        if !(is_cjk(last) || is_cjk(first)) && !last.is_whitespace() {
+            paragraph.push(' ');
+        }
+    }
+    paragraph.push_str(piece);
+}
+
+/// 一段最多这么长；停顿超过这么久也另起一段。读起来像讲稿，不像一行行字幕。
+const PARAGRAPH_MAX_MS: i64 = 60_000;
+const PARAGRAPH_GAP_MS: i64 = 2_500;
+
+struct Paragraph {
+    start_ms: i64,
+    text: String,
+    /// 这一段开头的章节标题（章节从这里开始）。
+    chapter: Option<(i64, String)>,
+}
+
+fn paragraphs(segments: &[TranscriptSegment], chapters: &[(i64, String)]) -> Vec<Paragraph> {
+    let mut out: Vec<Paragraph> = Vec::new();
+    let mut next_chapter = 0usize;
+    let mut last_end = i64::MIN;
+    for seg in segments {
+        let text = strip_math_delimiters(seg.text.trim());
+        if text.trim().is_empty() {
+            continue;
+        }
+        let mut chapter = None;
+        while next_chapter < chapters.len() && chapters[next_chapter].0 <= seg.start_ms {
+            chapter = Some(chapters[next_chapter].clone());
+            next_chapter += 1;
+        }
+        let start_new = match out.last() {
+            None => true,
+            Some(current) => {
+                chapter.is_some()
+                    || seg.start_ms - last_end > PARAGRAPH_GAP_MS
+                    || seg.start_ms - current.start_ms >= PARAGRAPH_MAX_MS
+            }
+        };
+        if start_new {
+            out.push(Paragraph {
+                start_ms: seg.start_ms,
+                text: String::new(),
+                chapter,
+            });
+        }
+        if let Some(current) = out.last_mut() {
+            push_piece(&mut current.text, &text);
+        }
+        last_end = seg.end_ms;
+    }
+    out
+}
+
+/// 文稿 Markdown：标题、按章节分小节，每段开头一个 `[mm:ss]`（在应用里粘回笔记还能点）。
+pub fn to_transcript_markdown(
+    title: &str,
+    segments: &[TranscriptSegment],
+    chapters: &[(i64, String)],
+) -> String {
+    let mut out = format!("# {}\n\n", title.trim());
+    for paragraph in paragraphs(segments, chapters) {
+        if let Some((start, name)) = &paragraph.chapter {
+            out.push_str(&format!("## {} [{}]\n\n", name.trim(), clock(*start)));
+        }
+        out.push_str(&format!(
+            "[{}] {}\n\n",
+            clock(paragraph.start_ms),
+            paragraph.text
+        ));
+    }
+    out
+}
+
+/// 纯文本文稿：只有分好段的正文，没有时间、没有标记。
+pub fn to_transcript_text(segments: &[TranscriptSegment]) -> String {
+    paragraphs(segments, &[])
+        .into_iter()
+        .map(|paragraph| paragraph.text)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        + "\n"
+}
+
 /// 字段内换行/制表会破坏 TSV，统一转成 <br> / 空格（Anki 导入勾选「允许 HTML」即可渲染）。
 fn anki_field(s: &str) -> String {
     s.replace(['\t'], " ").replace('\n', "<br>")
@@ -197,5 +304,43 @@ mod tests {
         assert_eq!(display_title("播客 12 期.m4a"), "播客 12 期");
         assert_eq!(display_title("v1.2 版本说明"), "v1.2 版本说明");
         assert_eq!(display_title(".mp4"), ".mp4");
+    }
+
+    #[test]
+    fn transcript_markdown_groups_paragraphs_under_chapters() {
+        let segments = vec![
+            seg(0, 1_000, "大家好。"),
+            seg(1_200, 2_000, "今天讲梯度下降。"),
+            // 停顿 5 秒：另起一段。
+            seg(7_000, 8_000, "先看一个例子"),
+            seg(65_000, 66_000, "Learning rate"),
+            seg(66_100, 67_000, "matters."),
+        ];
+        let chapters = vec![(0, "开场".to_string()), (65_000, "学习率".to_string())];
+        let md = to_transcript_markdown("01 梯度下降", &segments, &chapters);
+        assert_eq!(
+            md,
+            "# 01 梯度下降\n\n## 开场 [00:00]\n\n[00:00] 大家好。今天讲梯度下降。\n\n\
+             [00:07] 先看一个例子\n\n## 学习率 [01:05]\n\n[01:05] Learning rate matters.\n\n"
+        );
+    }
+
+    #[test]
+    fn transcript_text_has_no_timestamps_and_long_paragraphs_split() {
+        let mut segments = Vec::new();
+        for i in 0..10 {
+            segments.push(seg(i * 10_000, i * 10_000 + 9_000, "一句话"));
+        }
+        let text = to_transcript_text(&segments);
+        assert!(!text.contains('['));
+        // 60 秒一段：10 句话分成两段。
+        assert_eq!(text.matches("\n\n").count(), 1);
+        assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn clock_switches_to_hours() {
+        assert_eq!(clock(59_000), "00:59");
+        assert_eq!(clock(3_723_000), "01:02:03");
     }
 }
