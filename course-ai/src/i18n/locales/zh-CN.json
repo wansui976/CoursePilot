@@ -2734,5 +2734,65 @@
     "sleepChapterSet": "播到 {{time}}（本章结束）时停止",
     "sleepFired": "定时已到，已暂停",
     "sleepRemaining": "还剩 {{time}} 停止播放"
+  },
+  "palette": {
+    "title": "搜索课程、视频和功能",
+    "placeholder": "搜索课程、视频、页面和设置…",
+    "placeholderVideo": "搜索课程、视频和功能，或输入 12:30 跳到这一刻…",
+    "results": "搜索结果",
+    "empty": "没有找到",
+    "jumpTo": "跳到 {{time}}",
+    "videoCount": "{{count}} 个视频",
+    "hintMove": "选择",
+    "hintOpen": "打开",
+    "hintTime": "输入 12:30、5分 可跳转",
+    "group": {
+      "time": "当前视频",
+      "page": "页面与操作",
+      "course": "课程",
+      "video": "视频",
+      "setting": "设置"
+    },
+    "tab": {
+      "prefix": "学习面板",
+      "overview": "打开概览",
+      "transcript": "打开文稿",
+      "notes": "打开笔记",
+      "quiz": "打开练习题",
+      "slides": "打开课件",
+      "mindmap": "打开脑图"
+    },
+    "page": {
+      "library": "课程库",
+      "dashboard": "学习面板",
+      "queue": "处理队列",
+      "assistant": "AI 助手",
+      "themeLight": "换成浅色（纸）",
+      "themeDark": "换成深色（黑板）",
+      "focusStart": "开始专注计时",
+      "focusStop": "停止专注计时",
+      "recycle": "回收站",
+      "settings": "设置"
+    }
+  },
+  "focusTimer": {
+    "title": "专注计时",
+    "focusing": "专注中",
+    "breaking": "休息中",
+    "runningLabel": "{{phase}}，还剩 {{time}}",
+    "start": "开始专注 {{minutes}} 分钟",
+    "breakOnly": "休息 {{minutes}} 分钟",
+    "breakNow": "提前休息 {{minutes}} 分钟",
+    "stop": "停止计时",
+    "focusLength": "专注",
+    "breakLength": "休息",
+    "minutesShort": "{{count}}",
+    "today": "今天专注了 {{count}} 段 · {{minutes}} 分钟",
+    "todayNone": "今天还没有完成专注",
+    "focusDoneTitle": "专注结束",
+    "focusDoneBody": "休息 {{minutes}} 分钟吧。今天第 {{count}} 段。",
+    "focusDoneStopped": "今天第 {{count}} 段，歇一会儿再继续。",
+    "breakDoneTitle": "休息结束",
+    "breakDoneBody": "可以开始下一段专注了。"
   }
 }

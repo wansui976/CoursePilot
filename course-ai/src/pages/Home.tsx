@@ -53,6 +53,8 @@ import { useHomeRoute } from "@/app/homeRoute";
 import { ShellContext, type KnowledgeReturnState, type Shell } from "@/app/shell";
 import { MAIN_VIEW_COMPONENTS } from "@/app/mainViews";
 import { useAndroidBack, useTransientDismissal } from "@/features/shell/systemBack";
+import { CommandPalette } from "@/features/shell/CommandPalette";
+import { useFocusTicker } from "@/features/shell/useFocusTicker";
 
 const SIDEBAR_COLLAPSED_KEY = "course-ai-sidebar-collapsed";
 
@@ -99,6 +101,8 @@ export function Home() {
   const { t } = useTranslation();
   // 应用打开时的学习提醒（开启且今天有到期卡才发，每天至多一次）。
   useStudyReminder();
+  // 番茄钟：在任何视图下都接着倒数，到点发通知。
+  useFocusTicker();
   const theme = useTheme((s) => s.effective);
   const accent = useTheme((s) => s.accent);
   const customAccent = useTheme((s) => s.customAccent);
@@ -753,6 +757,7 @@ export function Home() {
           onGuide={(text) => useInlineAsk.getState().askAbout(text, null, "socratic")}
         />
       )}
+      {!isPhoneDevice && <CommandPalette nav={shellNav} />}
       <TaskCompletionNotices
         isWatching={isWatchingTask}
         onOpenTask={openTask}

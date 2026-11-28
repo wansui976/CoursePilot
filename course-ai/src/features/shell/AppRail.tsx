@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { useAssistantUi } from "@/stores/assistant";
 import { toggleThemeFrom, type ShellNav } from "./shellNav";
 import { BackgroundTasksButton } from "./BackgroundTasks";
+import { FocusTimerButton } from "./FocusTimer";
 
 /**
  * 侧栏收起时的细 rail：只有图标，入口与展开的侧栏一一对应（见 ShellNav）。
@@ -76,6 +77,7 @@ export function AppRail({ nav, onExpandSidebar }: { nav: ShellNav; onExpandSideb
           <span className="rail-dot" aria-hidden="true" />
         )}
       </button>
+      <FocusTimerButton variant="rail" />
       <BackgroundTasksButton variant="rail" onOpenTask={nav.onOpenTask} />
       <div className="rail-sp" />
       <div className="rail-divider" aria-hidden="true" />

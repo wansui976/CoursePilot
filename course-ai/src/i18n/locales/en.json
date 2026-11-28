@@ -2750,5 +2750,65 @@
     "sleepChapterSet": "Stopping at {{time}} (end of chapter)",
     "sleepFired": "Timer's up — paused",
     "sleepRemaining": "Stops in {{time}}"
+  },
+  "palette": {
+    "title": "Search courses, videos and actions",
+    "placeholder": "Search courses, videos, pages and settings…",
+    "placeholderVideo": "Search, or type 12:30 to jump there…",
+    "results": "Results",
+    "empty": "Nothing found",
+    "jumpTo": "Jump to {{time}}",
+    "videoCount": "{{count}} videos",
+    "hintMove": "select",
+    "hintOpen": "open",
+    "hintTime": "Type 12:30 or 5m to jump",
+    "group": {
+      "time": "Current video",
+      "page": "Pages & actions",
+      "course": "Courses",
+      "video": "Videos",
+      "setting": "Settings"
+    },
+    "tab": {
+      "prefix": "study panel",
+      "overview": "Open overview",
+      "transcript": "Open transcript",
+      "notes": "Open notes",
+      "quiz": "Open quiz",
+      "slides": "Open slides",
+      "mindmap": "Open mind map"
+    },
+    "page": {
+      "library": "Library",
+      "dashboard": "Study dashboard",
+      "queue": "Processing queue",
+      "assistant": "AI assistant",
+      "themeLight": "Switch to light (Paper)",
+      "themeDark": "Switch to dark (Chalkboard)",
+      "focusStart": "Start focus timer",
+      "focusStop": "Stop focus timer",
+      "recycle": "Trash",
+      "settings": "Settings"
+    }
+  },
+  "focusTimer": {
+    "title": "Focus timer",
+    "focusing": "Focusing",
+    "breaking": "On break",
+    "runningLabel": "{{phase}}, {{time}} left",
+    "start": "Focus for {{minutes}} min",
+    "breakOnly": "Break for {{minutes}} min",
+    "breakNow": "Break now ({{minutes}} min)",
+    "stop": "Stop timer",
+    "focusLength": "Focus",
+    "breakLength": "Break",
+    "minutesShort": "{{count}}",
+    "today": "Today: {{count}} sessions · {{minutes}} min",
+    "todayNone": "No focus sessions yet today",
+    "focusDoneTitle": "Focus session done",
+    "focusDoneBody": "Take {{minutes}} minutes off. Session {{count}} today.",
+    "focusDoneStopped": "Session {{count}} today — take a break.",
+    "breakDoneTitle": "Break's over",
+    "breakDoneBody": "Ready for the next focus session."
   }
 }
