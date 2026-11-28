@@ -72,8 +72,11 @@ export function buildNotes(ctx) {
     t.style.fontSize = (kind === 'h1' ? fs * 1.9 : kind === 'h2' ? fs * 1.2 : fs) + 'px';
     t.style.lineHeight = '1.2';
     if (kind === 'pw') { wavySpan = t.querySelector('.wv'); wavyRow = row; }
-    row += kind === 'h1' ? 2 : 1;
-    if (P && kind !== 'h1' && kind !== 'h2' && [...text.replace(/<[^>]+>/g, '')].length * fs > TW - 80) row += 1;
+    // 折行的段落占几行就往下推几行，保证每行字下面正好一条线
+    const need = Math.max(kind === 'h1' ? 2 : 1, Math.ceil((t.offsetHeight + 14) / LH));
+    n.style.height = need * LH + 'px';
+    t.style.lineHeight = need > 1 && kind !== 'h1' ? LH + 'px' : '1.2';
+    row += need;
   }
 
   // ---------- 索引标签 ----------
@@ -159,9 +162,9 @@ export function buildNotes(ctx) {
   // 镜头
   ctx.cam(53.3, N.cam(W / 2, H / 2, 1));
   ctx.cam(55.9, N.cam(W / 2, H / 2, P ? 1.02 : 1.03));
-  ctx.cam(57.0, P ? N.cam(600, 760, 1.12) : N.cam(1010, 520, 1.06));
-  ctx.cam(59.4, P ? N.cam(620, 800, 1.16) : N.cam(1080, 560, 1.13));
-  ctx.cam(63.9, P ? N.cam(640, 820, 1.2) : N.cam(1100, 570, 1.18));
+  ctx.cam(57.0, P ? N.cam(560, 820, 1.04) : N.cam(1010, 520, 1.06));
+  ctx.cam(59.4, P ? N.cam(580, 860, 1.07) : N.cam(1080, 560, 1.13));
+  ctx.cam(63.9, P ? N.cam(590, 880, 1.1) : N.cam(1100, 570, 1.18));
 
   // 竖屏：一开始只露出和封面一样的 16:9 那一块
   const clip0 = P ? (H - (W * 9) / 16) / 2 : 0;

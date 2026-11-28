@@ -13,7 +13,7 @@ export function buildFlow(ctx) {
   const hdH = P ? 96 : 84;
   const hd = box(dlg, { x: 0, y: 0, w: dR.w, h: hdH, cls: 'hd', text: '从网盘导入', style: { paddingLeft: '40px', fontSize: (P ? 38 : 34) + 'px' } });
   const drives = [['夸克网盘', 'Cookie 直连'], ['百度网盘', '经 OpenList'], ['阿里云盘', '经 OpenList'], ['群晖 NAS', 'WebDAV'], ['坚果云', 'WebDAV']];
-  const driveT = [82.5, 83.1, 83.6, 84.1, 84.45];
+  const driveT = [82.0, 82.6, 83.2, 83.7, 84.2];
   driveT.forEach((t) => cue(t, 'pop2'));
   const drvEls = drives.map(([n, sub], i) => {
     const r = P

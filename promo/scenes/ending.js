@@ -64,7 +64,7 @@ export function buildEnding(ctx) {
   const ER0 = 110.75, ER1 = 111.3;
   const zTop = by + (P ? 400 : 360), zBot = by + bh - 70;
   const zig = [];
-  const nRows = P ? 7 : 6;
+  const nRows = P ? 11 : 7;
   for (let i = 0; i < nRows; i++) zig.push({ x: i % 2 ? bx + 40 : bx + bw - 40, y: lerp(zTop, zBot, i / (nRows - 1)) });
   const zp = new Path2D();
   zig.forEach((p, i) => (i ? zp.lineTo(p.x, p.y) : zp.moveTo(p.x, p.y)));
@@ -146,7 +146,7 @@ export function buildEnding(ctx) {
         c.save();
         c.globalCompositeOperation = 'destination-out';
         c.strokeStyle = 'rgba(0,0,0,0.975)';
-        c.lineWidth = 200;
+        c.lineWidth = 240;
         c.lineCap = c.lineJoin = 'round';
         if (ek < 1) c.setLineDash([ek * zLen, zLen + 1000]);
         c.stroke(zp);

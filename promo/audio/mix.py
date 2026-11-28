@@ -143,6 +143,32 @@ def hit(vol=0.11):
     return (boom + click) * vol
 
 
+def noise_burst(d, lo, hi, vol, attack=0.003, release=None):
+    n = int(d * SR)
+    return bp(rng.standard_normal(n), lo, hi) * env(n, attack, release if release is not None else d * 0.8) * vol
+
+
+def bell(freqs, d=0.7, vol=0.05):
+    n = int(d * SR)
+    tt = np.arange(n) / SR
+    return sum(np.sin(2 * np.pi * f * tt) * np.exp(-tt * (5 + i * 2)) for i, f in enumerate(freqs)) * vol * env(n, 0.002, 0.05)
+
+
+def rub(d):
+    n = int(d * SR)
+    tt = np.arange(n) / SR
+    return bp(rng.standard_normal(n), 900, 3200) * (0.5 + 0.5 * np.abs(np.sin(2 * np.pi * 9 * tt))) * env(n, 0.02, 0.06) * 0.05
+
+
+def typing(d, cps=7.5):
+    out = np.zeros(int(d * SR) + 2000)
+    for k in range(int(d * cps)):
+        i = int((k / cps + rng.uniform(-0.01, 0.01)) * SR)
+        c = noise_burst(0.03, 1500, 6000, 0.07, 0.001, 0.02) + thump(180, 0.03, 0.03)
+        out[max(0, i):max(0, i) + len(c)] += c[:len(out) - max(0, i)]
+    return out
+
+
 for e in events:
     t, ty = e['t'], e['type']
     if ty == 'chalk':
@@ -154,16 +180,49 @@ for e in events:
     elif ty == 'chirp':
         place(square([1318, 1318, 1568, 1568], [0.07, 0.1], 0.05), t, pan=0.4)
     elif ty == 'jump':
-        place(square([220, 900], [0.2], 0.06), t, pan=0.3)
+        place(square([220, 900], [0.16], 0.03), t, pan=0.3)
     elif ty == 'land':
-        place(thump(110, 0.16, 0.18), t)
-        place(square([660, 520], [0.06], 0.04), t, pan=0.1)
+        place(thump(110, 0.14, 0.1), t)
+        place(square([660, 520], [0.05], 0.02), t, pan=0.1)
     elif ty == 'whoosh':
         place(whoosh(e['dur'] + 0.3), t - 0.1)
     elif ty == 'riser':
         place(riser(e['dur']), t)
     elif ty == 'hit':
         place(hit(), t)
+    elif ty == 'flip':
+        place(noise_burst(0.14, 1200, 6000, 0.06, 0.004, 0.1), t)
+    elif ty in ('swipe', 'swoosh'):
+        place(whoosh(0.45 if ty == 'swipe' else 0.6, 0.06), t - 0.05, pan=rng.uniform(-0.4, 0.4))
+    elif ty == 'click':
+        place(noise_burst(0.02, 2500, 8000, 0.08, 0.001, 0.015) + np.pad(thump(160, 0.06, 0.06), (0, 0))[:960], t)
+    elif ty == 'thud':
+        place(thump(120, 0.14, 0.16), t)
+        place(noise_burst(0.08, 800, 4000, 0.03), t)
+    elif ty == 'page':
+        place(noise_burst(0.32, 700, 6000, 0.035, 0.03, 0.2), t)
+    elif ty == 'chime':
+        place(bell([1318.5, 1975.5], 0.8, 0.035), t, pan=rng.uniform(-0.3, 0.3))
+    elif ty == 'sparkle':
+        for k, f in enumerate([1568, 2093, 2637]):
+            place(bell([f], 0.35, 0.018), t + k * 0.06, pan=0.2 * (k - 1))
+    elif ty == 'rain':
+        place(noise_burst(e['dur'], 1500, 9000, 0.02, 0.2, 0.3), t)
+    elif ty == 'tick':
+        place(noise_burst(0.015, 2500, 7000, 0.05, 0.001, 0.012), t)
+    elif ty == 'rub':
+        place(rub(e['dur']), t)
+    elif ty == 'blip':
+        place(square([880, 1320], [0.07], 0.03), t, pan=0.2)
+    elif ty == 'ping':
+        place(bell([1200, 1800], 1.2, 0.03), t)
+    elif ty == 'pop2':
+        place(square([420, 840], [0.07], 0.035), t, pan=rng.uniform(-0.3, 0.3))
+    elif ty == 'type':
+        place(typing(e['dur']), t)
+    elif ty == 'zip':
+        place(square([300, 2000], [0.25], 0.04), t)
+        place(whoosh(0.4, 0.07), t)
 
 # 一点房间混响，让声音落在同一个空间里。
 ir_n = int(0.7 * SR)
@@ -185,6 +244,18 @@ else:
     music[:len(seg)] = seg
 
 t = a.start + np.arange(N) / SR
+# 成片结尾：甩回黑板那一下（小节线上）接到原曲最后几个小节，让音乐在 2 分钟里自然收住。
+SPLICE, TAIL = 104.84, 260.22
+if a.start + a.dur > SPLICE and len(m) > TAIL * SR:
+    xf = int(0.25 * SR)
+    i0 = int((SPLICE - a.start) * SR)
+    if 0 <= i0 < N:
+        tail = m[int(TAIL * SR):int(TAIL * SR) + (N - i0) + xf]
+        seg = np.zeros((N - i0, 2))
+        seg[:min(len(seg), len(tail))] = tail[:len(seg)]
+        fade_in = np.sqrt(np.clip(np.arange(N - i0) / xf, 0, 1))[:, None]
+        fade_out = np.sqrt(1 - np.clip(np.arange(N - i0) / xf, 0, 1))[:, None]
+        music[i0:] = music[i0:] * fade_out + seg * fade_in
 # 开场：闷在低通里，CoursePilot 落笔那一下打开。
 OPEN0, OPEN1 = 11.8, 12.1
 closed = np.stack([lp(music[:, c], 520, 2) for c in range(2)], 1)
@@ -197,7 +268,7 @@ for l in narr:
     duck = np.minimum(duck, np.interp(t, [l['start'] - 0.25, l['start'], l['end'], l['end'] + 0.4], [1, 0.4, 0.4, 1], left=1, right=1))
 music *= (gain * duck)[:, None] * 0.55
 # 结尾淡出
-fade = np.clip((a.start + a.dur - t) / 1.2, 0, 1)
+fade = np.clip((a.start + a.dur - t) / 0.8, 0, 1)
 music *= fade[:, None]
 sfx *= fade[:, None] ** 0.3
 
